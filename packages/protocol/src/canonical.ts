@@ -1,50 +1,119 @@
 const encoder = new TextEncoder();
 
-export class CanonicalDataError extends Error {}
+export type CanonicalDataErrorCode = "byte-limit" | "cycle-or-repeat" | "depth-limit" | "invalid-data" | "item-limit";
+
+export class CanonicalDataError extends Error {
+  constructor(readonly code: CanonicalDataErrorCode, message: string) {
+    super(message);
+  }
+}
+
+function jsonStringByteLength(value: string): number {
+  let length = 2;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x22 || code === 0x5c || code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) {
+      length += 2;
+    } else if (code < 0x20) {
+      length += 6;
+    } else if (code < 0x80) {
+      length += 1;
+    } else if (code < 0x800) {
+      length += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) { length += 4; index += 1; } else length += 6;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      length += 6;
+    } else {
+      length += 3;
+    }
+  }
+  return length;
+}
 
 export function canonicalizePlainData(
   value: unknown,
-  options: Readonly<{ label: string; maxDepth?: number; maxItems?: number }>,
+  options: Readonly<{ label: string; maxDepth?: number; maxItems?: number; maxBytes?: number }>,
 ): unknown {
   const counter = { value: 0 };
+  const bytes = { value: 0 };
+  const seen = new WeakSet<object>();
   const maxDepth = options.maxDepth ?? 64;
   const maxItems = options.maxItems ?? 100_000;
+  const maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
+
+  if (!Number.isSafeInteger(maxDepth) || maxDepth < 0 || !Number.isSafeInteger(maxItems) || maxItems <= 0 ||
+      !(maxBytes === Number.POSITIVE_INFINITY || (Number.isSafeInteger(maxBytes) && maxBytes > 0))) {
+    throw new CanonicalDataError("invalid-data", `${options.label} has invalid canonicalization limits`);
+  }
+
+  const charge = (amount: number): void => {
+    if (amount > maxBytes - bytes.value) throw new CanonicalDataError("byte-limit", `${options.label} exceeds the byte limit`);
+    bytes.value += amount;
+  };
 
   const visit = (item: unknown, label: string, depth: number): unknown => {
-    if (++counter.value > maxItems) throw new CanonicalDataError(`${options.label} exceeds the item limit`);
-    if (depth > maxDepth) throw new CanonicalDataError(`${options.label} exceeds the depth limit`);
-    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (++counter.value > maxItems) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
+    if (depth > maxDepth) throw new CanonicalDataError("depth-limit", `${options.label} exceeds the depth limit`);
+    if (item === null) { charge(4); return item; }
+    if (typeof item === "string") { charge(jsonStringByteLength(item)); return item; }
+    if (typeof item === "boolean") { charge(item ? 4 : 5); return item; }
     if (typeof item === "number") {
-      if (!Number.isFinite(item)) throw new CanonicalDataError(`${label} contains a non-finite number`);
-      return Object.is(item, -0) ? 0 : item;
+      if (!Number.isFinite(item)) throw new CanonicalDataError("invalid-data", `${label} contains a non-finite number`);
+      const normalized = Object.is(item, -0) ? 0 : item;
+      charge(String(normalized).length);
+      return normalized;
     }
-    if (typeof item !== "object") throw new CanonicalDataError(`${label} contains executable or unsupported data`);
+    if (typeof item !== "object") throw new CanonicalDataError("invalid-data", `${label} contains executable or unsupported data`);
+    if (seen.has(item)) throw new CanonicalDataError("cycle-or-repeat", `${label} contains a cycle or repeated reference`);
+    seen.add(item);
     if (Array.isArray(item)) {
-      if (Object.getPrototypeOf(item) !== Array.prototype) throw new CanonicalDataError(`${label} must be an ordinary array`);
-      const expected = ["length", ...Array.from({ length: item.length }, (_, index) => String(index))].sort();
+      if (Object.getPrototypeOf(item) !== Array.prototype) throw new CanonicalDataError("invalid-data", `${label} must be an ordinary array`);
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(item, "length");
+      const length = lengthDescriptor?.value;
+      if (!lengthDescriptor || "get" in lengthDescriptor || !Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff) {
+        throw new CanonicalDataError("invalid-data", `${label} has an invalid length`);
+      }
+      if (length > maxItems - counter.value) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
       const keys = Reflect.ownKeys(item);
-      if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError(`${label} contains symbols`);
-      const actual = (keys as string[]).sort();
-      if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-        throw new CanonicalDataError(`${label} must be dense and unaugmented`);
+      if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
+      if (keys.length !== length + 1 || !(keys as string[]).includes("length")) {
+        throw new CanonicalDataError("invalid-data", `${label} must be dense and unaugmented`);
+      }
+      for (const key of keys as string[]) {
+        if (key === "length") continue;
+        const index = Number(key);
+        if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== key) {
+          throw new CanonicalDataError("invalid-data", `${label} must be dense and unaugmented`);
+        }
+      }
+      charge(2 + Math.max(0, length - 1));
+      const descriptors: PropertyDescriptor[] = [];
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(item, String(index));
+        if (!descriptor?.enumerable || !("value" in descriptor)) throw new CanonicalDataError("invalid-data", `${label}[${index}] contains an accessor`);
+        descriptors.push(descriptor);
       }
       const output: unknown[] = [];
-      for (let index = 0; index < item.length; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(item, String(index))!;
-        if (!descriptor.enumerable || !("value" in descriptor)) throw new CanonicalDataError(`${label}[${index}] contains an accessor`);
-        output.push(visit(descriptor.value, `${label}[${index}]`, depth + 1));
+      for (let index = 0; index < descriptors.length; index += 1) {
+        output.push(visit(descriptors[index]!.value, `${label}[${index}]`, depth + 1));
       }
       return Object.freeze(output);
     }
     const prototype = Object.getPrototypeOf(item);
-    if (prototype !== Object.prototype && prototype !== null) throw new CanonicalDataError(`${label} must contain plain data`);
+    if (prototype !== Object.prototype && prototype !== null) throw new CanonicalDataError("invalid-data", `${label} must contain plain data`);
     const keys = Reflect.ownKeys(item);
-    if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError(`${label} contains symbols`);
+    if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
+    if (keys.length > maxItems - counter.value) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
+    charge(2 + Math.max(0, keys.length - 1));
     const output: Record<string, unknown> = {};
     for (const key of (keys as string[]).sort()) {
-      if (key === "__proto__") throw new CanonicalDataError(`${label} contains a __proto__ field`);
+      if (key === "__proto__") throw new CanonicalDataError("invalid-data", `${label} contains a __proto__ field`);
       const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
-      if (!descriptor.enumerable || !("value" in descriptor)) throw new CanonicalDataError(`${label}.${key} contains hidden or accessor data`);
+      if (!descriptor.enumerable || !("value" in descriptor)) throw new CanonicalDataError("invalid-data", `${label}.${key} contains hidden or accessor data`);
+      charge(jsonStringByteLength(key));
+      charge(1);
       Object.defineProperty(output, key, {
         value: visit(descriptor.value, `${label}.${key}`, depth + 1),
         enumerable: true,

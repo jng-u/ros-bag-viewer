@@ -180,6 +180,17 @@ describe("protocol/schema v1 conformance freeze", () => {
     const oversized = validSchemaAdmission(); oversized.providers = [{ providerId: "x", providerVersion: "1", schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }];
     expect(() => validateV1SchemaAdmission(oversized))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
+    const sparse = validSchemaAdmission(); sparse.providers = [{ providerId: "x", providerVersion: "1", schema: new Array(100_001) }];
+    expect(() => validateV1SchemaAdmission(sparse))
+      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
+    const cycle: Record<string, unknown> = {}; cycle.self = cycle;
+    const cyclic = validSchemaAdmission(); cyclic.providers = [{ providerId: "x", providerVersion: "1", schema: cycle }];
+    expect(() => validateV1SchemaAdmission(cyclic))
+      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
+    const shared = { field: "x" };
+    const repeated = validSchemaAdmission(); repeated.providers = [{ providerId: "x", providerVersion: "1", schema: { first: shared, second: shared } }];
+    expect(() => validateV1SchemaAdmission(repeated))
+      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
     let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
     const tooDeep = validSchemaAdmission(); tooDeep.providers = [{ providerId: "x", providerVersion: "1", schema: deep }];
     expect(() => validateV1SchemaAdmission(tooDeep))

@@ -148,6 +148,7 @@ interface ConformancePass {
   readonly id: string;
   readonly result: "pass";
   readonly evidence: string;
+  readonly testName: string;
   readonly evidenceDigest: string;
   readonly resultDigest: string;
 }
@@ -156,6 +157,7 @@ interface ConformanceRejection {
   readonly id: string;
   readonly result: "rejected";
   readonly evidence: string;
+  readonly testName: string;
   readonly evidenceDigest: string;
   readonly resultDigest: string;
 }
@@ -244,7 +246,7 @@ function assertConformanceCases(
     throw new V1ConformanceViolation("incomplete-conformance", `${label} does not cover every frozen v1 case`);
   }
   value.forEach((candidate, index) => {
-    assertExactKeys(candidate, ["evidence", "evidenceDigest", "id", "result", "resultDigest"], `${label}[${index}]`);
+    assertExactKeys(candidate, ["evidence", "evidenceDigest", "id", "result", "resultDigest", "testName"], `${label}[${index}]`);
     if (candidate.id !== expectedIds[index] || candidate.result !== result) {
       throw new V1ConformanceViolation("incomplete-conformance", `${label}[${index}] did not produce the required result`);
     }
@@ -254,10 +256,14 @@ function assertConformanceCases(
     if (typeof candidate.evidenceDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(candidate.evidenceDigest)) {
       throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence digest is invalid`);
     }
+    if (typeof candidate.testName !== "string" || candidate.testName.length === 0) {
+      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence test name is invalid`);
+    }
     const expectedDigest = sha256(canonicalJson([
       candidate.id,
       candidate.result,
       candidate.evidence,
+      candidate.testName,
       candidate.evidenceDigest,
     ]));
     if (candidate.resultDigest !== expectedDigest) {
@@ -266,12 +272,12 @@ function assertConformanceCases(
   });
 }
 
-function canonicalPlainData(value: unknown, label: string): unknown {
+function canonicalPlainData(value: unknown, label: string, maxBytes?: number): unknown {
   try {
-    return canonicalizePlainData(value, { label, maxDepth: V1_SCHEMA_LIMITS.maxDepth });
+    return canonicalizePlainData(value, { label, maxDepth: V1_SCHEMA_LIMITS.maxDepth, maxBytes });
   } catch (error) {
     if (!(error instanceof CanonicalDataError)) throw error;
-    const code = /depth limit/u.test(error.message) ? "schema-depth" : "invalid-fixture";
+    const code = error.code === "depth-limit" ? "schema-depth" : error.code === "byte-limit" ? "schema-oversize" : "invalid-fixture";
     throw new V1ConformanceViolation(code, error.message);
   }
 }
@@ -341,7 +347,11 @@ export function freezeV1Conformance(value: unknown): FrozenV1Conformance {
 }
 
 export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
-  const canonical = canonicalPlainData(value, "schema admission") as Record<string, unknown>;
+  const canonical = canonicalPlainData(
+    value,
+    "schema admission",
+    V1_SCHEMA_LIMITS.maxBytes + 16 * 1024,
+  ) as Record<string, unknown>;
   assertExactKeys(canonical, ["version", "typeName", "providers"], "schema admission");
   const admission = canonical;
   if (admission.version !== 1) throw new V1ConformanceViolation("unsupported-version", "only schema admission version 1 is supported");

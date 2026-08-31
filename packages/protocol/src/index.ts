@@ -227,13 +227,15 @@ function assertExactKeys(record: Record<string, unknown>, allowed: readonly stri
   }
 }
 
-function canonicalRecord(value: unknown, label: string): Record<string, unknown> {
+function canonicalRecord(value: unknown, label: string, maxBytes?: number): Record<string, unknown> {
   try {
-    const canonical = canonicalizePlainData(value, { label });
+    const canonical = canonicalizePlainData(value, { label, maxBytes });
     if (!isRecord(canonical)) throw new ProtocolViolation("invalid-frame", `${label} must be an object`);
     return canonical;
   } catch (error) {
-    if (error instanceof CanonicalDataError) throw new ProtocolViolation("invalid-frame", error.message);
+    if (error instanceof CanonicalDataError) {
+      throw new ProtocolViolation(error.code === "byte-limit" ? "frame-too-large" : "invalid-frame", error.message);
+    }
     throw error;
   }
 }
@@ -354,7 +356,7 @@ export function parseBrowserFrame(
   limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): BrowserFrame {
   const canonicalProtocolLimits = canonicalLimits(limits);
-  const frame = canonicalRecord(value, "frame");
+  const frame = canonicalRecord(value, "frame", canonicalProtocolLimits.maxFrameBytes);
   assertFrameBytes(frame, canonicalProtocolLimits);
   if (frame.version !== LIVE_PROTOCOL_VERSION) {
     throw new ProtocolViolation("unsupported-version", "protocol version is not supported");
@@ -401,7 +403,7 @@ export function validateTopicDescriptor(
   limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): TopicDescriptor {
   const canonicalProtocolLimits = canonicalLimits(limits);
-  const descriptor = canonicalRecord(value, "topic descriptor");
+  const descriptor = canonicalRecord(value, "topic descriptor", canonicalProtocolLimits.maxFrameBytes);
   const allowed = descriptor.schemaHash === undefined
     ? ["topic", "type", "maxRateHz", "maxMessageBytes"]
     : ["topic", "type", "maxRateHz", "maxMessageBytes", "schemaHash"];
@@ -425,7 +427,7 @@ export function validateEdgePlan(
   assertSafeNonNegative(canonicalOptions.nowMs, "nowMs");
   assertSafePositive(canonicalOptions.maxTtlMs, "maxTtlMs", Number.MAX_SAFE_INTEGER);
   const limits = canonicalLimits(canonicalOptions.limits ?? DEFAULT_PROTOCOL_LIMITS);
-  const plan = canonicalRecord(value, "edge plan");
+  const plan = canonicalRecord(value, "edge plan", limits.maxFrameBytes);
   assertFrameBytes(plan, limits);
   if (plan.version !== LIVE_PROTOCOL_VERSION) throw new ProtocolViolation("unsupported-version", "protocol version is not supported");
   if (typeof plan.operation !== "string" || !(EDGE_OPERATIONS as readonly string[]).includes(plan.operation)) {

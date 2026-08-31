@@ -5,6 +5,11 @@ import { join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import { repositoryStopReason } from "./repository-stop-policy.mjs";
+import {
+  generateConformanceExecutionManifest,
+  verifyConformanceExecutionManifest,
+  writeConformanceExecutionManifest,
+} from "./conformance-execution-manifest.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const evidencePath = join(root, "docs/evidence/m5-release-readiness.json");
@@ -15,7 +20,7 @@ function fail(message) {
 
 function listFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if ([".git", "node_modules", "dist", "coverage", "artifacts"].includes(entry.name)) return [];
+    if ([".git", "node_modules", "coverage"].includes(entry.name)) return [];
     const path = join(directory, entry.name);
     return entry.isDirectory() ? listFiles(path) : [path];
   });
@@ -35,6 +40,10 @@ function validateEvidence(evidence) {
     fail("protocol/schema v1 must reference the passing exact local conformance fixture before freeze");
   }
   if (evidence.protocolSchemaV1?.productionCertification !== false) fail("protocol/schema v1 fixture must not claim production certification");
+  if (evidence.protocolSchemaV1?.executionManifest !== "artifacts/v1-conformance-execution.json" ||
+      evidence.protocolSchemaV1?.generatedAndVerifiedBy !== "corepack pnpm release:readiness:full") {
+    fail("protocol/schema v1 must bind its generated execution manifest verifier");
+  }
 
   const expectedIds = Array.from({ length: 17 }, (_, index) => `AC-${String(index + 1).padStart(2, "0")}`);
   const criteria = evidence.acceptanceCriteria;
@@ -117,6 +126,7 @@ function validateRepositoryStops() {
   if (!existsSync(join(root, "pnpm-lock.yaml"))) fail("frozen lockfile is missing");
   const rootPackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   if (!/^pnpm@\d+\.\d+\.\d+$/.test(rootPackage.packageManager ?? "")) fail("packageManager must pin an exact pnpm version");
+  run(process.execPath, ["scripts/toolchain/audit-extension-examples.mjs"]);
 }
 
 function validateGeneratedSupplyChainArtifacts() {
@@ -160,18 +170,23 @@ function validateProtocolSchemaV1() {
   const fixture = JSON.parse(readFileSync(join(root, "packages/protocol/fixtures/v1-conformance.json"), "utf8"));
   const rows = ["sources", "schemas", "timeTf", "displayExtensionLifecycle", "rejections"]
     .flatMap((key) => fixture[key]);
-  const evidenceFiles = new Set();
   for (const row of rows) {
     const evidenceBytes = readFileSync(join(root, row.evidence));
     const evidenceDigest = `sha256:${createHash("sha256").update(evidenceBytes).digest("hex")}`;
     if (row.evidenceDigest !== evidenceDigest) fail(`stale conformance evidence digest for ${row.id}`);
     const resultDigest = `sha256:${createHash("sha256")
-      .update(JSON.stringify([row.id, row.result, row.evidence, evidenceDigest]))
+      .update(JSON.stringify([row.id, row.result, row.evidence, row.testName, evidenceDigest]))
       .digest("hex")}`;
     if (row.resultDigest !== resultDigest) fail(`invalid conformance result digest for ${row.id}`);
-    evidenceFiles.add(row.evidence);
   }
-  run("corepack", ["pnpm", "vitest", "run", ...evidenceFiles]);
+  const generated = generateConformanceExecutionManifest(root);
+  const path = writeConformanceExecutionManifest(root, generated);
+  const consumed = JSON.parse(readFileSync(path, "utf8"));
+  verifyConformanceExecutionManifest(root, consumed);
+  if (process.argv.includes("--check-reproducibility")) {
+    const repeated = generateConformanceExecutionManifest(root);
+    if (JSON.stringify(repeated) !== JSON.stringify(generated)) fail("conformance execution manifest is not deterministic");
+  }
 }
 
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));

@@ -15,7 +15,14 @@ const root = process.cwd();
 const evidence = JSON.parse(readFileSync(join(root, "docs/evidence/m5-release-readiness.json"), "utf8")) as {
   releaseDecision: string;
   evidenceBoundary: { browserOsRosNetworkProductionCertified: boolean };
-  protocolSchemaV1: { status: string; frozen: boolean; productionCertification: boolean; command: string };
+  protocolSchemaV1: {
+    status: string;
+    frozen: boolean;
+    productionCertification: boolean;
+    command: string;
+    executionManifest: string;
+    generatedAndVerifiedBy: string;
+  };
   acceptanceCriteria: Array<{
     id: string;
     status: string;
@@ -114,7 +121,11 @@ describe("M5 release hardening", () => {
   it("passes the executable repository and evidence stop gate", () => {
     const stopProbe = spawnSync(process.execPath, ["--input-type=module", "--eval", `
       import { repositoryStopReason } from './scripts/toolchain/repository-stop-policy.mjs';
-      const denied = ['LICENSE', 'LICENSE-MIT', 'LICENCE_APACHE', '.env', '.env.production', '.env.production.local'];
+      const denied = [
+        'LICENSE', 'LICENSE-MIT', 'LICENCE_APACHE', 'COPYING', 'COPYING.txt', 'NOTICE', 'NOTICE.md',
+        '.env', '.env.production', '.env.production.local', '.npmrc', '.netrc', 'credentials.json',
+        'nested/id_rsa', 'private.pem', 'deploy.key',
+      ];
       const allowed = ['LICENSES.md', 'environment.md', '.env-example'];
       if (denied.some((name) => repositoryStopReason(name) === undefined)) process.exit(1);
       if (allowed.some((name) => repositoryStopReason(name) !== undefined)) process.exit(2);
@@ -132,5 +143,19 @@ describe("M5 release hardening", () => {
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/release readiness gate: ok \(blocked; production certification=false\)/);
+    const manifest = JSON.parse(readFileSync(join(root, evidence.protocolSchemaV1.executionManifest), "utf8")) as {
+      manifest: { source: { commit: string; tree: string }; cases: Array<{ reporterOutputDigest: string }> };
+    };
+    expect(manifest.manifest.source.commit).toMatch(/^[a-f0-9]{40,64}$/u);
+    expect(manifest.manifest.source.tree).toMatch(/^[a-f0-9]{40,64}$/u);
+    expect(manifest.manifest.cases.every(({ reporterOutputDigest }) => /^sha256:[a-f0-9]{64}$/u.test(reporterOutputDigest))).toBe(true);
+    const tamper = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      import { readFileSync } from 'node:fs';
+      import { verifyConformanceExecutionManifest } from './scripts/toolchain/conformance-execution-manifest.mjs';
+      const value = JSON.parse(readFileSync('./artifacts/v1-conformance-execution.json', 'utf8'));
+      value.manifest.cases[0].reporterOutputDigest = 'sha256:' + '0'.repeat(64);
+      verifyConformanceExecutionManifest(process.cwd(), value);
+    `], { cwd: root, encoding: "utf8" });
+    expect(tamper.status).not.toBe(0);
   });
 });

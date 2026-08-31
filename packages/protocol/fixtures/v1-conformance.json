@@ -34,43 +34,49 @@
       "id": "local-mcap",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:8ee62496d6121e24d8f8ac9922bc0933a245ebc97a10bee77e64a75bbc16df23",
-      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5"
+      "resultDigest": "sha256:93b72bddd2a7229ad4b63ea712f298ba6e4aabaf7acaa345e7994b4b3a014754",
+      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5",
+      "testName": "MCAP adapter uses bounded official-reader range seeks for indexed MCAP"
     },
     {
       "id": "local-ros1-bag",
       "result": "pass",
       "evidence": "packages/source-ros1bag/test/index.test.ts",
-      "resultDigest": "sha256:c3d3846b817ce0a15956c15b93ac417dc63a6102735b3475489de77d443c134c",
-      "evidenceDigest": "sha256:b6f38cf62f43b9be44dcff3719e015f06c48908be5faa36f47ab9cb184a862d4"
+      "resultDigest": "sha256:ba559957492a7c37dbabfbf56ea69612c88b11b493dcf98174e5623e1689bece",
+      "evidenceDigest": "sha256:b6f38cf62f43b9be44dcff3719e015f06c48908be5faa36f47ab9cb184a862d4",
+      "testName": "ROS1 bag SourceBundle adapter uses bounded v2 header/index/chunk/message traversal with schema provenance"
     },
     {
       "id": "local-ros2-sqlite",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:9df816810e2ce69e87865369e412c7ec2cc8e3889bdbbc5ef93e02b997a1ecd9",
-      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86"
+      "resultDigest": "sha256:2d03389202d731a7a9ad34bb4cc6a6efc3fc6833db077b7e03d769a4a6bb07e9",
+      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86",
+      "testName": "ROS2 SQLite SourceBundle adapter opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries"
     },
     {
       "id": "hosted-source-bundle",
       "result": "pass",
       "evidence": "packages/source-hosted/test/index.test.ts",
-      "resultDigest": "sha256:be4eaa1c1da0c1a797e132fb5126fb9691e87610a43ece961dc0f50b60f96d2d",
-      "evidenceDigest": "sha256:65108dec5d272197d299c1dc963586e1cf40157982f9095ef98e97ebb319dcd2"
+      "resultDigest": "sha256:cce9804945433c62a79e74431a527abd04d75e046880ae4ce39785c44e0785e4",
+      "evidenceDigest": "sha256:65108dec5d272197d299c1dc963586e1cf40157982f9095ef98e97ebb319dcd2",
+      "testName": "hosted SourceBundle adapter verifies the signed manifest and preserves local MCAP schema, order, timeline, payload hashes, and diagnostics"
     },
     {
       "id": "ros1-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:fa5697f89ad06039c72b2ca97db12ada2ddd9081c29575970f7adbd9259fe66b",
-      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70"
+      "resultDigest": "sha256:3c334b4cc3d1e40c4e04cc3ca603c20af77ec65d8aa6262460ce7a8a14972c8c",
+      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70",
+      "testName": "M3 deterministic synthetic load evidence keeps ros1 point-cloud/image-like load bounded and reconnects by epoch"
     },
     {
       "id": "ros2-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:83698ff1d30a8f61759e956d6bcd30770f0d6db46a85f2836e6ca70bd7730215",
-      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70"
+      "resultDigest": "sha256:ce96660373f1994980be8bd2f7c1f1b55b70c2170abce5c42f22be0687b8932b",
+      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70",
+      "testName": "M3 deterministic synthetic load evidence keeps ros2 point-cloud/image-like load bounded and reconnects by epoch"
     }
   ],
   "schemas": [
@@ -78,22 +84,25 @@
       "id": "schema-present",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:3e4eb6a138984ce2d69a498cd0d7119f303388fc7fc4572425257db1b85db027",
-      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5"
+      "resultDigest": "sha256:473d7785f89d37665c2d779a4bd3bfd97fd2618b59007344b6cd090894989ead",
+      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5",
+      "testName": "MCAP adapter uses bounded official-reader range seeks for indexed MCAP"
     },
     {
       "id": "schema-resolvable",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:1eafa4de6c996c26b9892c4ce2af01d973a2c7aa7f878ab98ccfdca91811ac76",
-      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86"
+      "resultDigest": "sha256:866615056401fb3d9f3d5096e69be735057e0f7907b324dee1b7b2165f64ba39",
+      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86",
+      "testName": "ROS2 SQLite SourceBundle adapter parses versioned metadata and rejects unsupported capabilities explicitly"
     },
     {
       "id": "opaque",
       "result": "pass",
       "evidence": "packages/displays-core/test/index.test.ts",
-      "resultDigest": "sha256:5a53888fb19ab0a8d2f6fa4a98f42820d9c69773d4803728ebd520744e37daa9",
-      "evidenceDigest": "sha256:58e0f0f6f9585cb4da19659a579f2776d299987dfece87c024e502df29a16121"
+      "resultDigest": "sha256:6cbf083904e236eace7728c67b6f989ff38f70e13cda6ca99d8e4ebeca26630a",
+      "evidenceDigest": "sha256:58e0f0f6f9585cb4da19659a579f2776d299987dfece87c024e502df29a16121",
+      "testName": "M2 raster and generic fallback displays keeps schema-backed trees bounded and opaque payloads byte-only"
     }
   ],
   "timeTf": [
@@ -101,57 +110,65 @@
       "id": "record-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:62518224f7496f6f0496db61e95c8e45c573179c8f489e505ae149e58f1298ca",
-      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+      "resultDigest": "sha256:7991bff8d814ed5714907af57ee865a81d8268e69928a1293ef1b8d64f7bf759",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02",
+      "testName": "timeline normalization uses diagnosed fallback rather than silently substituting timestamps"
     },
     {
       "id": "header-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:bfc8251ed4688747cd8672b1d136593975690fa0e299ebce22f760e49b6dd663",
-      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+      "resultDigest": "sha256:8015aa9e65119df72a84c7de21223da21bca6fbe5c87ae7112fe58e879d3a677",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02",
+      "testName": "timeline normalization uses diagnosed fallback rather than silently substituting timestamps"
     },
     {
       "id": "receipt-time",
       "result": "pass",
       "evidence": "packages/source-live/test/index.test.ts",
-      "resultDigest": "sha256:6c1c313e97203631917fcbc0e4c628775794fe826d718be9b3b7ee4c6b16bdfd",
-      "evidenceDigest": "sha256:532c216f2b291ddf2833ab55e184131a4d17260110aa119174025313100de5da"
+      "resultDigest": "sha256:8fd9c033d17131fbe511f8fc85e3131c27500082f1ba33554ec2ae0461a6363e",
+      "evidenceDigest": "sha256:532c216f2b291ddf2833ab55e184131a4d17260110aa119174025313100de5da",
+      "testName": "bounded live source normalizes schema/time envelopes and drains them in deterministic order"
     },
     {
       "id": "clock-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:64fb0ed0983ac28ae5880864ddac432d96c0eb6dd9ebb0b95b1c19d2414b6e16",
-      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+      "resultDigest": "sha256:72a5428ddf3a577d520e5e781695b5e5b165cf63036bd5ea336fe6e1ff37ffb9",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02",
+      "testName": "timeline normalization sorts equal timestamps independently of arrival/chunk order"
     },
     {
       "id": "source-epoch-invalidation",
       "result": "pass",
       "evidence": "packages/core-model/test/index.test.ts",
-      "resultDigest": "sha256:6cf34c3d759af17d4308a37d2ea90674177315a5f7f30267005e171b4b3a2a07",
-      "evidenceDigest": "sha256:dfc368ee020b523cdc9928bc3aab8aa4470ef124dab081a67c235788aca88c64"
+      "resultDigest": "sha256:c673273b448e8fc694ec7aa492cff251b64bcf5197835934231b4a3ca861473c",
+      "evidenceDigest": "sha256:dfc368ee020b523cdc9928bc3aab8aa4470ef124dab081a67c235788aca88c64",
+      "testName": "payload lease contract rejects stale epochs and invalidation"
     },
     {
       "id": "tf-interpolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:7f0af3811274ae31bf4cea766f155e7de6ee15e889a2025167e86305a7bb2a64",
-      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+      "resultDigest": "sha256:9e9bf5c69b0a4791852a6a0fea97948c51db252c3e1bc0d5b4ffd1f85e6f9267",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d",
+      "testName": "TF buffer interpolates bracketing transforms without latest fallback"
     },
     {
       "id": "tf-missing",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:9b7f2b249286ee01961dfb0cd9c16d75df2211a299e3cd302c202f10bb37360b",
-      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+      "resultDigest": "sha256:0fc3454dd2b5fce0d2ae4dbf6464f16a4dfc910b8568f9c96f8ee9101fe2288c",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d",
+      "testName": "TF buffer composes static chains and reports missing paths"
     },
     {
       "id": "tf-extrapolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:bfa475ce95534861800b10cb440fc6038df3d497b3feb787e8c02d4c6e5e0508",
-      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+      "resultDigest": "sha256:74f8863efe9f346c40d9f0bd3846fc46175963aca12485ed2fd092e5459829d2",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d",
+      "testName": "TF buffer interpolates bracketing transforms without latest fallback"
     }
   ],
   "displayExtensionLifecycle": [
@@ -159,64 +176,73 @@
       "id": "register",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:b263aa3e2b4f348a6b4f88660f5fe97c3cdbcf8380a60bacb83b2387e9a949e3",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:50c1bb4ed6570a2f9e507ea3c416c7eb7a8d8214687539f271654fbfde906483",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration"
     },
     {
       "id": "instantiate",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:7ce75e429a1e8e919e26b611aa5e6e54348a05eebcd2df937f1f58c16211c7e8",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:05de751e183f660ed1e6edca6ddefd36b3e0cb5cb110e5a8cb9ae79bea7b2d61",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly"
     },
     {
       "id": "configure",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:181d8221f0429ec488b9ef44ae02cf23ba9fd9debf18f56569d4d21cf62a83cd",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:916298a8e982c43b745e54123afb5b3cc86476a3be03baa01ba51aeeaea91eb2",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration"
     },
     {
       "id": "attach",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:f11a32dfae8569e02ebec927effe32699b7a7923722012f24772b7b4f1cc9a33",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:a8d35d22107e13bff90a9bf08122185e831e0fbef892fdfb32454259014de8a9",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance"
     },
     {
       "id": "update",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:d7ae330b6b87a43e59662221f37fd77fbcce9473805ac93043f081734541921c",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:ea177a28ecde68a953d94b494ecbac3f84079639820c580034b860ff7520f7d4",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once"
     },
     {
       "id": "render",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:9683372a4279ce0b21920e60d1767a9c6e87f4a76a9ac7e5e75bd2f31c36ffa8",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:74c401a016b4b814cef79b86e923b3a44b01ca85ef0aa8f1ab501fb4bd725b51",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "out-of-core range summary example runs through the v1 host and releases its bounded handle"
     },
     {
       "id": "suspend",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:8b82d735baa40f3a2d718cfe7f73ee2e4f342f362d5a81e8c19327b0687d2478",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:7e4fd701db5e49d2be11cfe525629a53fb19ca82c64d6e33f96ffc01b65019ea",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance bounds resource handles and diagnostics and cleans up after callback failures"
     },
     {
       "id": "error",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:880a50e368f3f615a4127f65bc10457b155499ce10affc855b7d83e01bb93af5",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:5fa1ae0bdcbcf728c6c3740b9bed7e5112a4eef9b1c4f153692166cb6bdda5d4",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback"
     },
     {
       "id": "dispose",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:11fc263bf15bfb70b004c78cf0bd7eb910be80a4a031f81323e857b270227d1b",
-      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+      "resultDigest": "sha256:3ce55198d97c1d0d2e9d6028fe987e65695826d77ec44ea2070ecb5d62f9ebaf",
+      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "testName": "out-of-core range summary example runs through the v1 host and releases its bounded handle"
     }
   ],
   "rejections": [
@@ -224,71 +250,81 @@
       "id": "unknown-version",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:2bdb503f0c8c87ab9e6f817d1b2de7d1ed077c65356bca700457c886a7775989",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:82cf8e39af850bdf7ecc6b804d4e581d6ce070406a5193122e9e4e4c5f12c20e",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "extra-key",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:cf6f38b168d02ff52656301e2b416c077ad6573ca7c84e9b898ad36e7f037a48",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:750d4ac67a38a3bee610a0127b249e13eeb1aeeab9070e20d78059252e8c2a73",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "operation-widening",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:4e39ca7009587f9ff08e448ba0603c7139b329192fe5fcaab9a1211f60a35070",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:32514f27d04e719d254066dbaf54f721ba7809ae7bf5443be57d4e7b31604e1f",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "capability-escalation",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:27acec58891c414fa3977d616ba0d71c89941df1b27bfefbeae9d525618fdbf2",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:b5b11af500f13328a6b1074e2dde8b88c370c65f375c66b56349b9956fbea818",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "schema-conflict",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:9901ab829c9820ec2a12aacbc566cfa972e6b27497cf1c20eb085b0707d9858c",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:72e8535ec0f3d6e1b09e0fb959746de20f1c961ee8aa7b028cc37a98ae76779b",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "schema-oversize",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:853e7c2f129bfb142a5102dfa2aa45099902d592589af92288724c4b8c4ce18e",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:3d4189d2f6f9d6351908401c6b480c73676b6bc7c9193ce1fdc2efe21e0a1503",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "schema-depth",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:8426ecd002aba971d00803118cdcce39ec56f6dae190e290b9ec9513183db628",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:193f6deda3f4ef909645067193e010da197ccf91a0704e7f35a11d22a38b507b",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "lifetime-use-after-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:4cbd51eb0fbbb6eb7c07ec136a35c0131bd370f8afe31d1662792adc38b3373c",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:b896d99cee5a660201409601d87d17d45ed0c9d5afec6edc712c88b984491f9e",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     },
     {
       "id": "lifetime-double-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:e1fd3d432bce0e000cf7aed04442bbff0681325d62d667f884f48fcd1cd738ba",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:4f871981e7f9d2f1b2a59de4300e2675d8fa059f3fb20e4b76889011ad4e81d4",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     },
     {
       "id": "lifetime-stale-epoch",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:532d52b48308db3246547c45818b870df4b447a3e4edf6bcad23a9e815eb87d6",
-      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+      "resultDigest": "sha256:cfd5a5b1850e2016b3577b09da58573ef8ed27683c2be2f62fa4754241d521e1",
+      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     }
   ]
 }

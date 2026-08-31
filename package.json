@@ -23,11 +23,12 @@
     "check:m3": "vitest run tests/m3-live",
     "check:m4": "vitest run packages/hosted-core/test/index.test.ts packages/source-hosted/test/index.test.ts tests/m4-hosted/lifecycle.test.ts apps/web/test/hosted-adapter.test.ts",
     "check:m4:hosted-core": "vitest run packages/hosted-core/test/index.test.ts",
-    "check:m5": "vitest run packages/extension-api/test/index.test.ts packages/protocol/test/conformance-v1.test.ts tests/toolchain/release-readiness.test.ts",
+    "check:m5": "vitest run packages/extension-api/test/index.test.ts packages/protocol/test/canonical.test.ts packages/protocol/test/conformance-v1.test.ts tests/toolchain/release-readiness.test.ts",
     "release:readiness": "node scripts/toolchain/release-readiness-gate.mjs",
     "release:readiness:full": "node scripts/toolchain/release-readiness-gate.mjs --check-reproducibility --check-clean-tree",
     "evidence:semantic": "corepack pnpm --filter @ros-web-viewer/web evidence:semantic",
     "evidence:m3": "UPDATE_M3_EVIDENCE=1 vitest run --config tests/m3-live/vitest.config.ts tests/m3-live/generate-evidence.test.ts",
+    "evidence:v1": "node scripts/toolchain/conformance-execution-manifest.mjs",
     "audit:dependencies": "corepack pnpm audit --audit-level high",
     "report:licenses": "node scripts/toolchain/licenses-report.mjs",
     "sbom": "node scripts/toolchain/sbom-report.mjs"

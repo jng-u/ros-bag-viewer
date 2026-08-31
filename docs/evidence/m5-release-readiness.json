@@ -21,6 +21,8 @@
     "command": "corepack pnpm vitest run packages/protocol/test/index.test.ts packages/protocol/test/conformance-v1.test.ts",
     "fixture": "packages/protocol/fixtures/v1-conformance.json",
     "implementation": "packages/protocol/src/conformance-v1.ts",
+    "executionManifest": "artifacts/v1-conformance-execution.json",
+    "generatedAndVerifiedBy": "corepack pnpm release:readiness:full",
     "productionCertification": false,
     "limitation": "The exact fixture covers local, hosted, ROS1-live, and ROS2-live contract rows in process. It does not prove a browser, operating system, ROS distribution, network, or production environment."
   },

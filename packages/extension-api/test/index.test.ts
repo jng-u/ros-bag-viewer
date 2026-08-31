@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 import { rangeSummaryExtension } from "../../../examples/range-summary-extension/src/index.js";
 import {
@@ -458,51 +459,29 @@ describe("out-of-core range summary example", () => {
     ) as { readonly private?: boolean; readonly dependencies?: Record<string, string> };
     expect(packageJson.private).toBe(true);
     expect(packageJson.dependencies).toEqual({ "@ros-web-viewer/extension-api": "workspace:*" });
-    const examples = new URL("../../../examples/", import.meta.url);
-    for (const directory of readdirSync(examples, { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
-      const manifest = JSON.parse(readFileSync(new URL(`${directory.name}/package.json`, examples), "utf8")) as {
-        private?: boolean;
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-        optionalDependencies?: Record<string, string>;
-        peerDependencies?: Record<string, string>;
-        bundledDependencies?: string[];
-        bundleDependencies?: string[] | boolean;
-      };
-      expect(manifest.private, directory.name).toBe(true);
-      expect(Object.keys(manifest.dependencies ?? {}), directory.name).toEqual(["@ros-web-viewer/extension-api"]);
-      expect(Object.keys(manifest.devDependencies ?? {}), directory.name).toEqual([]);
-      expect(Object.keys(manifest.optionalDependencies ?? {}), directory.name).toEqual([]);
-      expect(Object.keys(manifest.peerDependencies ?? {}), directory.name).toEqual([]);
-      expect(manifest.bundledDependencies ?? [], directory.name).toEqual([]);
-      expect(manifest.bundleDependencies ?? [], directory.name).toEqual([]);
-      const pending = [new URL(`${directory.name}/`, examples)];
-      while (pending.length > 0) {
-        const current = pending.pop()!;
-        for (const entry of readdirSync(current, { withFileTypes: true })) {
-          const path = new URL(entry.name, current);
-          if (entry.isDirectory()) { pending.push(new URL(`${entry.name}/`, current)); continue; }
-          expect(entry.name, `${directory.name}/${entry.name}`).not.toMatch(/\.(?:node|wasm)$/u);
-          if (/\.(?:jsonc?|ya?ml|toml)$/u.test(entry.name) && entry.name !== "package.json") {
-            const config = readFileSync(path, "utf8");
-            expect(config, `${directory.name}/${entry.name}`).not.toMatch(
-              /@ros-web-viewer\/(?!extension-api(?:["'/]|$))|\b(?:eval|Function|Worker|WebSocket|SharedArrayBuffer)\b/u,
-            );
-            continue;
-          }
-          if (entry.name.endsWith(".d.ts")) continue;
-          if (!/\.(?:[cm]?[jt]sx?)$/u.test(entry.name)) continue;
-          const source = readFileSync(path, "utf8");
-          const imports = [...source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^"']*?\sfrom\s*)?["']([^"']+)["']/gu)]
-            .map((match) => match[1]);
-          expect(imports, `${directory.name}/${entry.name}`).toEqual(
-            imports.map(() => "@ros-web-viewer/extension-api"),
-          );
-          expect(source, `${directory.name}/${entry.name}`).not.toMatch(
-            /\b(?:eval|Function)\s*\(|\bimport\s*\(|\brequire(?:\.resolve)?\s*\(|\b(?:Worker|WebSocket|localStorage|sessionStorage|indexedDB|fetch|document|window|navigator|WebGL2RenderingContext|OffscreenCanvas|SharedArrayBuffer|process|Deno|Bun)\b|\b(?:publish|callService|sendAction|setParameter|rawCommand)\b/u,
-          );
-        }
-      }
+    const audit = spawnSync(process.execPath, ["scripts/toolchain/audit-extension-examples.mjs"], {
+      cwd: new URL("../../../", import.meta.url),
+      encoding: "utf8",
+    });
+    expect(audit.stderr).toBe("");
+    expect(audit.status).toBe(0);
+    expect(audit.stdout).toMatch(/extension example audit: ok/);
+
+    for (const source of [
+      'import/*comment*/"node:fs";',
+      'export/*comment*/{readFile}from"node:fs";',
+      'import fs = require("node:fs");',
+      'import/*comment*/("node:fs");',
+      'require/*comment*/("node:fs");',
+      'eval/*comment*/("1");',
+      'new Function/*comment*/("return 1");',
+    ]) {
+      const probe = spawnSync(process.execPath, [
+        "scripts/toolchain/audit-extension-examples.mjs",
+        "--source-base64",
+        Buffer.from(source).toString("base64"),
+      ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
+      expect(probe.status, source).not.toBe(0);
     }
   });
 });
