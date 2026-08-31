@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import {
   BoundedLiveSource,
   type LiveRelayConnection,
@@ -119,6 +120,10 @@ describe("bounded live source", () => {
       schema: { typeName: "sensor_msgs/msg/PointCloud2", encoding: "cdr" },
     });
     expect(source.telemetry).toMatchObject({ acceptedMessages: 3, deliveredMessages: 3, queuedMessages: 0 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "receipt-time", facts: {
+      deliveredMessages: drained.length, receiptTimeNanos: drained[1]?.time.receiptTimeNanos.toString() ?? "missing",
+      sourceTimeNanos: drained[1]?.time.sourceTimeNanos.toString() ?? "missing",
+    } });
   });
 
   it("bounds message size, rate, and queue pressure with truthful degrade telemetry", async () => {

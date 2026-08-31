@@ -141,6 +141,14 @@ describe("provider-neutral hosted sharing core", () => {
       (copy.payload as { sessionId: string }).sessionId = "D".repeat(43);
     });
     expect(() => verifyHostedManifest(changedSession, descriptor.manifestVerificationKey)).toThrow(/signature/);
+    const oversizedKey = tamper(manifest, (copy) => {
+      (copy as { publicKeySpki: string }).publicKeySpki = "A".repeat(1_000_000);
+    });
+    expect(() => verifyHostedManifest(oversizedKey, descriptor.manifestVerificationKey)).toThrow(/public key encoding/);
+    const oversizedSignature = tamper(manifest, (copy) => {
+      (copy as { signature: string }).signature = "A".repeat(1_000_000);
+    });
+    expect(() => verifyHostedManifest(oversizedSignature, descriptor.manifestVerificationKey)).toThrow(/signature encoding/);
     expect(() => verifyHostedManifest(manifest, "AA")).toThrow(/trusted/);
   });
 

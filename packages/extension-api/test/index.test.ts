@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { rangeSummaryExtension } from "../../../examples/range-summary-extension/src/index.js";
 import {
-  TRUSTED_EXTENSION_API_VERSION,
   TrustedExtensionHost,
+  defineTrustedExtension,
+  defineTrustedLifecycle,
   type TrustedExtensionCapability,
   type TrustedExtensionContext,
   type TrustedExtensionDefinition,
@@ -22,23 +24,22 @@ interface Harness {
 function harness(capabilities: readonly TrustedExtensionCapability[] = ["source-messages"]): Harness {
   const result: Harness = {
     calls: [],
-    definition: {
-      apiVersion: TRUSTED_EXTENSION_API_VERSION,
-      id: "harness",
-      requiredCapabilities: capabilities,
-      create(context) {
+    definition: defineTrustedExtension(
+      "harness",
+      (context) => {
         result.context = context;
-        return {
-          configure: () => result.calls.push("configure"),
-          attachSource: (epoch) => result.calls.push(`attach:${epoch}`),
-          update: (message) => result.calls.push(`update:${message.value.value}`),
-          render: () => result.calls.push("render"),
-          suspend: () => result.calls.push("suspend"),
-          handleError: (error) => result.calls.push(`error:${error.message}`),
-          dispose: () => result.calls.push("dispose"),
-        };
+        return defineTrustedLifecycle(
+          () => result.calls.push("configure"),
+          (epoch) => result.calls.push(`attach:${epoch}`),
+          (message) => result.calls.push(`update:${message.value.value}`),
+          () => result.calls.push("render"),
+          () => result.calls.push("suspend"),
+          (error) => result.calls.push(`error:${error.message}`),
+          () => result.calls.push("dispose"),
+        );
       },
-    },
+      ...capabilities,
+    ),
   };
   return result;
 }
@@ -60,6 +61,9 @@ describe("TrustedExtensionHost conformance", () => {
     expect(Object.isFrozen(negotiation.grantedCapabilities)).toBe(true);
     expect(host.instantiate("harness", "first")).toBeDefined();
     expect(value.context?.capabilities).toEqual(["diagnostics", "source-messages"]);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-register", facts: {
+      extensionId: negotiation.extensionId, grantedCapabilities: negotiation.grantedCapabilities.length,
+    } });
   });
 
   it.each([0, 2, "1", null, undefined, Number.NaN])("rejects unsupported API version %p atomically", (apiVersion) => {
@@ -71,7 +75,7 @@ describe("TrustedExtensionHost conformance", () => {
       requiredCapabilities: [],
       create,
     } as unknown as TrustedExtensionDefinition;
-    expect(() => host.register(definition)).toThrow(/unsupported extension API version/);
+    expect(() => host.register(definition)).toThrow(/trusted host realm/);
     expect(create).not.toHaveBeenCalled();
     expect(host.registeredExtensionIds()).toEqual([]);
   });
@@ -79,17 +83,18 @@ describe("TrustedExtensionHost conformance", () => {
   it("rejects operation widening, duplicate capabilities, and denied privileged capability names", () => {
     const host = new TrustedExtensionHost({ allowedCapabilities: ["source-messages"] });
     const extra = { ...harness().definition, loadModule: () => undefined };
-    expect(() => host.register(extra)).toThrow(/unsupported operations/);
+    expect(() => host.register(extra)).toThrow(/trusted host realm/);
     expect(() => host.register(harness(["source-messages", "source-messages"]).definition)).toThrow(/unique/);
     expect(() => host.register(harness(["diagnostics"]).definition)).toThrow(/capability denied/);
     expect(() => host.register(harness(["ros-write" as TrustedExtensionCapability]).definition)).toThrow(
       /unsupported extension capability/,
     );
     expect(host.registeredExtensionIds()).toEqual([]);
-    const hidden = harness().definition as TrustedExtensionDefinition & Record<string, unknown>;
-    Object.defineProperty(hidden, "publish", { value: () => undefined });
-    expect(() => host.register(hidden)).toThrow(/unsupported operations/);
-    expect(() => host.register(Object.assign(Object.create({ publish() {} }), harness().definition))).toThrow(/plain object/);
+    const hiddenOwnKeys = vi.fn(Reflect.ownKeys);
+    const hidden = new Proxy(harness().definition, { ownKeys: hiddenOwnKeys });
+    expect(() => host.register(hidden as TrustedExtensionDefinition)).toThrow(/trusted host realm/);
+    expect(hiddenOwnKeys).not.toHaveBeenCalled();
+    expect(() => host.register(Object.assign(Object.create({ publish() {} }), harness().definition))).toThrow(/trusted host realm/);
   });
 
   it("exposes only the frozen bounded host surface and validates lifecycle operations exactly", () => {
@@ -146,6 +151,9 @@ describe("TrustedExtensionHost conformance", () => {
       "disposed",
     ]);
     expect(() => instance.configure({ enabled: false })).toThrow(/disposed/);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-instantiate", facts: {
+      finalState: instance.state, lifecycleStates: instance.telemetry().lifecycle.length,
+    } });
   });
 
   it("suspends an attached source and records the lifecycle transition", () => {
@@ -159,17 +167,18 @@ describe("TrustedExtensionHost conformance", () => {
     expect(value.calls).toEqual(["configure", "attach:1", "suspend"]);
     expect(instance.telemetry()).toMatchObject({ state: "suspended", sourceEpoch: 1 });
     expect(instance.telemetry().lifecycle).toEqual(["registered", "instantiated", "configured", "attached", "suspended"]);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-suspend", facts: {
+      sourceEpoch: instance.telemetry().sourceEpoch ?? -1, state: instance.state,
+    } });
   });
 
   it("rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance", () => {
     const handles: TrustedResourceHandle[] = [];
     let updates = 0;
     const host = new TrustedExtensionHost();
-    host.register({
-      apiVersion: 1,
-      id: "epoch-probe",
-      requiredCapabilities: ["bounded-resources", "source-messages"],
-      create(context) {
+    host.register(defineTrustedExtension(
+      "epoch-probe",
+      (context) => {
         return lifecycle({
           attachSource: () => handles.push(context.allocateResource("geometry-buffer", 8)),
           update: () => {
@@ -177,7 +186,8 @@ describe("TrustedExtensionHost conformance", () => {
           },
         });
       },
-    });
+      "bounded-resources", "source-messages",
+    ));
     const instance = host.instantiate("epoch-probe", "epoch-instance");
     instance.configure({});
     instance.attachSource(2);
@@ -192,19 +202,21 @@ describe("TrustedExtensionHost conformance", () => {
     instance.dispose();
     expect(handles[1]?.disposed).toBe(true);
     expect(instance.telemetry()).toMatchObject({ activeHandles: 0, resourceBytes: 0 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-attach", facts: {
+      disposedHandles: handles.filter(({ disposed }) => disposed).length, sourceEpoch: 3,
+    } });
   });
 
   it("delivers bounded source-detached snapshots rather than retaining caller-owned message values", () => {
     let received: { readonly nested: { value: number } } | undefined;
     const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 256 } });
-    host.register({
-      apiVersion: 1,
-      id: "snapshot-probe",
-      requiredCapabilities: ["source-messages"],
-      create() {
+    host.register(defineTrustedExtension(
+      "snapshot-probe",
+      () => {
         return lifecycle({ update: (message) => (received = message.value as { readonly nested: { value: number } }) });
       },
-    });
+      "source-messages",
+    ));
     const instance = host.instantiate("snapshot-probe", "snapshot-instance");
     const callerOwned = { nested: { value: 1 } };
     instance.configure({});
@@ -238,11 +250,9 @@ describe("TrustedExtensionHost conformance", () => {
         maxDiagnosticLength: 16,
       },
     });
-    host.register({
-      apiVersion: 1,
-      id: "bounded-probe",
-      requiredCapabilities: ["bounded-resources", "diagnostics", "source-messages"],
-      create(context) {
+    host.register(defineTrustedExtension(
+      "bounded-probe",
+      (context) => {
         return lifecycle({
           update: () => {
             handles.push(context.allocateResource("text-buffer", 4));
@@ -253,7 +263,8 @@ describe("TrustedExtensionHost conformance", () => {
           },
         });
       },
-    });
+      "bounded-resources", "diagnostics", "source-messages",
+    ));
     const instance = host.instantiate("bounded-probe", "bounded-instance");
     instance.configure({});
     instance.attachSource(1);
@@ -274,15 +285,14 @@ describe("TrustedExtensionHost conformance", () => {
   it("revokes handles allocated by a factory that fails during instantiation", () => {
     let leaked: TrustedResourceHandle | undefined;
     const host = new TrustedExtensionHost();
-    host.register({
-      apiVersion: 1,
-      id: "failing-factory",
-      requiredCapabilities: ["bounded-resources"],
-      create(context) {
+    host.register(defineTrustedExtension(
+      "failing-factory",
+      (context) => {
         leaked = context.allocateResource("text-buffer", 4);
         throw new Error("factory failed");
       },
-    });
+      "bounded-resources",
+    ));
 
     expect(() => host.instantiate("failing-factory", "factory-instance")).toThrow(/factory failed/);
     expect(leaked?.disposed).toBe(true);
@@ -290,11 +300,9 @@ describe("TrustedExtensionHost conformance", () => {
 
   it("surfaces both an operation failure and a failing error callback", () => {
     const host = new TrustedExtensionHost();
-    host.register({
-      apiVersion: 1,
-      id: "double-failure",
-      requiredCapabilities: [],
-      create() {
+    host.register(defineTrustedExtension(
+      "double-failure",
+      () => {
         return lifecycle({
           configure: () => {
             throw new Error("configure failed");
@@ -304,7 +312,7 @@ describe("TrustedExtensionHost conformance", () => {
           },
         });
       },
-    });
+    ));
     const instance = host.instantiate("double-failure", "double-failure-instance");
 
     let failure: unknown;
@@ -322,6 +330,9 @@ describe("TrustedExtensionHost conformance", () => {
       state: "error",
       lastError: "configure failed; handleError failed: error callback failed",
     });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-error", facts: {
+      aggregateErrors: (failure as AggregateError).errors.length, state: instance.state,
+    } });
   });
 
   it("revokes retained context access and requires a successful configuration", () => {
@@ -334,19 +345,22 @@ describe("TrustedExtensionHost conformance", () => {
     expect(() => value.context?.allocateResource("text-buffer", 1)).toThrow(/not active/);
 
     const failing = new TrustedExtensionHost();
-    failing.register({
-      apiVersion: 1, id: "configure-failure", requiredCapabilities: [],
-      create: () => lifecycle({ configure: () => { throw new Error("bad config"); } }),
-    });
+    failing.register(defineTrustedExtension(
+      "configure-failure",
+      () => lifecycle({ configure: () => { throw new Error("bad config"); } }),
+    ));
     const failed = failing.instantiate("configure-failure", "failed-config");
     expect(() => failed.configure({})).toThrow(/bad config/);
     expect(() => failed.attachSource(1)).toThrow(/successfully configured/);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-configure", facts: {
+      configured: false, state: failed.state,
+    } });
   });
 
   it("rejects lifecycle re-entry and deeply nested snapshots without state resurrection", () => {
     const holder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
     const host = new TrustedExtensionHost();
-    host.register({ apiVersion: 1, id: "reentry", requiredCapabilities: ["source-messages"], create: () => lifecycle({ update: () => holder.instance?.dispose() }) });
+    host.register(defineTrustedExtension("reentry", () => lifecycle({ update: () => holder.instance?.dispose() }), "source-messages"));
     const instance = host.instantiate("reentry", "reentry-instance"); holder.instance = instance;
     instance.configure({}); instance.attachSource(1);
     expect(() => instance.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: {} })).toThrow(/re-entry/);
@@ -354,12 +368,10 @@ describe("TrustedExtensionHost conformance", () => {
 
     const nestedHolder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
     const nestedHost = new TrustedExtensionHost();
-    nestedHost.register({
-      apiVersion: 1,
-      id: "nested-configure",
-      requiredCapabilities: [],
-      create: () => lifecycle({ configure: () => nestedHolder.instance?.configure({}) }),
-    });
+    nestedHost.register(defineTrustedExtension(
+      "nested-configure",
+      () => lifecycle({ configure: () => nestedHolder.instance?.configure({}) }),
+    ));
     const nested = nestedHost.instantiate("nested-configure", "nested-instance"); nestedHolder.instance = nested;
     expect(() => nested.configure({})).toThrow(/re-entry/);
     expect(nested.state).toBe("error");
@@ -367,12 +379,10 @@ describe("TrustedExtensionHost conformance", () => {
 
     const epochHolder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
     const epochHost = new TrustedExtensionHost();
-    epochHost.register({
-      apiVersion: 1,
-      id: "nested-attach",
-      requiredCapabilities: [],
-      create: () => lifecycle({ attachSource: () => epochHolder.instance?.attachSource(1) }),
-    });
+    epochHost.register(defineTrustedExtension(
+      "nested-attach",
+      () => lifecycle({ attachSource: () => epochHolder.instance?.attachSource(1) }),
+    ));
     const epoch = epochHost.instantiate("nested-attach", "nested-epoch"); epochHolder.instance = epoch;
     epoch.configure({});
     expect(() => epoch.attachSource(2)).toThrow(/re-entry/);
@@ -390,7 +400,7 @@ describe("TrustedExtensionHost conformance", () => {
     const unsafeDefinition = { ...harness().definition } as Record<string, unknown>;
     Object.defineProperty(unsafeDefinition, "id", { enumerable: true, get: definitionGetter });
     const definitionHost = new TrustedExtensionHost();
-    expect(() => definitionHost.register(unsafeDefinition as unknown as TrustedExtensionDefinition)).toThrow(/data field/);
+    expect(() => definitionHost.register(unsafeDefinition as unknown as TrustedExtensionDefinition)).toThrow(/trusted host realm/);
     expect(definitionGetter).not.toHaveBeenCalled();
     expect(definitionHost.registeredExtensionIds()).toEqual([]);
 
@@ -399,23 +409,25 @@ describe("TrustedExtensionHost conformance", () => {
     Object.defineProperty(capabilities, "0", { enumerable: true, configurable: true, get: capabilityGetter });
     capabilities.length = 1;
     expect(() => definitionHost.register({ ...harness().definition, id: "unsafe-capability", requiredCapabilities: capabilities as TrustedExtensionCapability[] }))
-      .toThrow(/data field/);
+      .toThrow(/trusted host realm/);
     expect(capabilityGetter).not.toHaveBeenCalled();
 
     let lifecycleObject: TrustedExtensionLifecycle | undefined;
     let originalUpdates = 0;
     const lifecycleHost = new TrustedExtensionHost();
-    lifecycleHost.register({
-      apiVersion: 1,
-      id: "captured-lifecycle",
-      requiredCapabilities: ["source-messages"],
-      create: () => {
+    lifecycleHost.register(defineTrustedExtension(
+      "captured-lifecycle",
+      () => {
         lifecycleObject = lifecycle({ update: () => { originalUpdates += 1; } });
         return lifecycleObject;
       },
-    });
+      "source-messages",
+    ));
     const captured = lifecycleHost.instantiate("captured-lifecycle", "captured-instance");
-    lifecycleObject!.update = () => { throw new Error("mutated lifecycle"); };
+    expect(Object.isFrozen(lifecycleObject)).toBe(true);
+    expect(() => {
+      lifecycleObject!.update = () => { throw new Error("mutated lifecycle"); };
+    }).toThrow(TypeError);
     captured.configure({}); captured.attachSource(1);
     captured.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: {} });
     expect(originalUpdates).toBe(1);
@@ -460,8 +472,11 @@ describe("TrustedExtensionHost conformance", () => {
       ...harness().definition,
       id: "hostile-capabilities",
       requiredCapabilities: hostileCapabilities,
-    })).toThrow(/item limit/);
+    })).toThrow(/trusted host realm/);
     expect(capabilityOwnKeys).not.toHaveBeenCalled();
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-update", facts: {
+      originalUpdates, proxyEnumerated: ownKeys.mock.calls.length > 0,
+    } });
   });
 
   it("charges UTF-8 exactly and stops before attacker-controlled tails", () => {
@@ -470,12 +485,7 @@ describe("TrustedExtensionHost conformance", () => {
       const calls = vi.fn();
       const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes } });
       const id = `utf8-${nextId++}`;
-      host.register({
-        apiVersion: 1,
-        id,
-        requiredCapabilities: [],
-        create: () => lifecycle({ configure: calls }),
-      });
+      host.register(defineTrustedExtension(id, () => lifecycle({ configure: calls })));
       const instance = host.instantiate(id, `${id}-instance`);
       return { calls, instance, run: () => instance.configure(value) };
     };
@@ -542,6 +552,9 @@ describe("out-of-core range summary example", () => {
     const instance = runningInstance("range-summary-render");
     expect(instance.telemetry()).toMatchObject({ state: "rendering", activeHandles: 1, resourceBytes: 24 });
     expect(instance.telemetry().diagnostics[0]?.message).toBe("topic=/scan; samples=3; epoch=1");
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-render", facts: {
+      activeHandles: instance.telemetry().activeHandles, resourceBytes: instance.telemetry().resourceBytes, state: instance.state,
+    } });
   });
 
   it("disposes its bounded handle idempotently", () => {
@@ -549,6 +562,9 @@ describe("out-of-core range summary example", () => {
     instance.dispose();
     instance.dispose();
     expect(instance.telemetry()).toMatchObject({ state: "disposed", activeHandles: 0, resourceBytes: 0 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "display-extension", result: "pass", code: "extension-dispose", facts: {
+      activeHandles: instance.telemetry().activeHandles, state: instance.state,
+    } });
   });
 
   it("is private, statically linked, and imports no privileged internal package", () => {
@@ -594,6 +610,11 @@ describe("out-of-core range summary example", () => {
       '(function*(){}).constructor`return 1`;',
       '(async function(){}).constructor("return 1")();',
       'const R=Reflect; R.get(function(){}, "constructor");',
+      'alert("x");',
+      'setTimeout(() => {}, 0);',
+      'queueMicrotask(() => {});',
+      'new XMLHttpRequest();',
+      'export const harmless = 1;',
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
@@ -605,7 +626,10 @@ describe("out-of-core range summary example", () => {
     const allowed = spawnSync(process.execPath, [
       "scripts/toolchain/audit-extension-examples.mjs",
       "--source-base64",
-      Buffer.from("class Safe { constructor() {} } const a=[1]; a[0]; const tag=(s:TemplateStringsArray)=>s; tag`safe`;").toString("base64"),
+      Buffer.from(`import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const safe = defineTrustedExtension("safe", () => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`).toString("base64"),
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
     expect(allowed.stderr).toBe("");
     expect(allowed.status).toBe(0);
@@ -615,14 +639,13 @@ describe("out-of-core range summary example", () => {
 function lifecycle(
   overrides: Partial<TrustedExtensionLifecycle> = {},
 ): TrustedExtensionLifecycle {
-  return {
-    configure() {},
-    attachSource() {},
-    update() {},
-    render() {},
-    suspend() {},
-    handleError() {},
-    dispose() {},
-    ...overrides,
-  };
+  return defineTrustedLifecycle(
+    overrides.configure ?? (() => {}),
+    overrides.attachSource ?? (() => {}),
+    overrides.update ?? (() => {}),
+    overrides.render ?? (() => {}),
+    overrides.suspend ?? (() => {}),
+    overrides.handleError ?? (() => {}),
+    overrides.dispose ?? (() => {}),
+  );
 }

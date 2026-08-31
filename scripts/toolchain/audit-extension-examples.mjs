@@ -1,20 +1,38 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import ts from "typescript";
+import {
+  decodeBoundedBase64,
+  decodeBoundedUtf8,
+  parseBoundedJsonText,
+  readBoundedBytes,
+  readBoundedJson,
+  readBoundedText,
+} from "./bounded-input.mjs";
 
 const defaultRoot = fileURLToPath(new URL("../..", import.meta.url));
 const allowedModule = "@ros-web-viewer/extension-api";
+const sourceMaxBytes = 1024 * 1024;
+const configMaxBytes = 256 * 1024;
+const emittedMaxBytes = 2 * 1024 * 1024;
+const allowedExtensionImports = new Set([
+  "defineTrustedExtension", "defineTrustedLifecycle", "TrustedExtensionContext", "TrustedExtensionDefinition",
+  "TrustedExtensionLifecycle", "TrustedResourceHandle", "TrustedExtensionCapability",
+]);
+const safeStandardGlobals = new Set(["Array", "Boolean", "Error", "JSON", "Map", "Math", "Number", "Object", "Set", "String", "undefined"]);
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 const privilegedNames = new Set([
   "Worker", "WebSocket", "localStorage", "sessionStorage", "indexedDB", "fetch", "document", "window", "navigator",
   "WebGL2RenderingContext", "OffscreenCanvas", "SharedArrayBuffer", "process", "Deno", "Bun",
   "publish", "callService", "sendAction", "setParameter", "rawCommand",
   "global", "self", "WebAssembly", "Atomics",
+  "XMLHttpRequest", "EventSource", "BroadcastChannel", "MessageChannel", "SharedWorker", "WorkerGlobalScope",
+  "caches", "cookieStore", "location", "history", "crypto", "performance", "console",
 ]);
 const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect"]);
 const deniedRuntimeProperties = new Set([
@@ -51,10 +69,47 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const scriptKind = filename.endsWith(".tsx") ? ts.ScriptKind.TSX : filename.endsWith(".jsx") ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKind);
   if (file.parseDiagnostics.length > 0) fail(`${filename} contains TypeScript parse errors`);
+  const bound = new Set();
+  const bindName = (name) => {
+    if (ts.isIdentifier(name)) bound.add(name.text);
+    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) if (ts.isBindingElement(element)) bindName(element.name);
+    }
+  };
+  const collectBindings = (node) => {
+    if ((ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) && node.name) bindName(node.name);
+    if (ts.isImportClause(node) && node.name) bindName(node.name);
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) ||
+        ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+      if (node.name) bindName(node.name);
+    }
+    ts.forEachChild(node, collectBindings);
+  };
+  collectBindings(file);
+  const rootIdentifier = (expression) => {
+    let current = expression;
+    while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) current = current.expression;
+    while (ts.isParenthesizedExpression(current) || ts.isNonNullExpression(current)) current = current.expression;
+    return ts.isIdentifier(current) ? current.text : undefined;
+  };
+  let extensionApiImport = false;
+  let extensionDefinitionExports = 0;
   const visit = (node) => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier !== undefined) {
       if (!ts.isStringLiteral(node.moduleSpecifier)) fail(`${filename} has a non-literal module specifier`);
       assertModule(node.moduleSpecifier.text, filename, resolveRelative);
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier.text === allowedModule) fail(`${filename} must not re-export the host API`);
+      if (ts.isImportDeclaration(node) && node.moduleSpecifier.text === allowedModule) {
+        const clause = node.importClause;
+        if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) {
+          fail(`${filename} must use exact named extension-api imports`);
+        }
+        for (const element of clause.namedBindings.elements) {
+          const imported = element.propertyName?.text ?? element.name.text;
+          if (!allowedExtensionImports.has(imported)) fail(`${filename} imports unsupported extension-api symbol ${imported}`);
+        }
+        extensionApiImport = true;
+      }
     }
     if (ts.isImportEqualsDeclaration(node)) {
       const reference = node.moduleReference;
@@ -64,6 +119,9 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       assertModule(reference.expression.text, filename, resolveRelative);
     }
     if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression) && !bound.has(node.expression.text) && !safeStandardGlobals.has(node.expression.text)) {
+        fail(`${filename} calls unbound ambient ${node.expression.text}`);
+      }
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) fail(`${filename} uses dynamic import`);
       if (ts.isIdentifier(node.expression) && ["require", "eval", "Function"].includes(node.expression.text)) {
         fail(`${filename} calls ${node.expression.text}`);
@@ -80,11 +138,22 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         fail(`${filename} acquires a runtime descriptor`);
       }
     }
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "Function") {
-      fail(`${filename} constructs Function`);
+    if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && !bound.has(node.tag.text)) {
+      fail(`${filename} calls unbound ambient tag ${node.tag.text}`);
+    }
+    if (ts.isNewExpression(node)) {
+      if (!ts.isIdentifier(node.expression) || node.expression.text !== "Error") {
+        fail(`${filename} constructs a non-approved runtime object`);
+      }
     }
     if (ts.isPropertyAccessExpression(node) && deniedRuntimeProperties.has(node.name.text)) {
       fail(`${filename} accesses denied runtime property ${node.name.text}`);
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      const root = rootIdentifier(node);
+      if (root !== undefined && !bound.has(root) && !safeStandardGlobals.has(root)) {
+        fail(`${filename} references unbound ambient ${root}`);
+      }
     }
     if (ts.isBindingElement(node) && node.propertyName !== undefined) {
       const property = constantString(node.propertyName);
@@ -99,9 +168,20 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         fail(`${filename} accesses denied computed property ${property}`);
       }
     }
+    if (!filename.endsWith(".d.ts") && ts.isVariableStatement(node) && node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword)) {
+      for (const declaration of node.declarationList.declarations) {
+        if (declaration.initializer && ts.isCallExpression(declaration.initializer) &&
+            ts.isIdentifier(declaration.initializer.expression) && declaration.initializer.expression.text === "defineTrustedExtension") {
+          extensionDefinitionExports += 1;
+        } else fail(`${filename} exports unsupported runtime state`);
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(file);
+  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1)) {
+    fail(`${filename} must import the exact extension API and export one defineTrustedExtension result`);
+  }
 }
 
 export function auditManifest(manifest, label = "package.json") {
@@ -166,13 +246,11 @@ function resolveEmittedModule(outputRoot, filename, specifier, available) {
   if (!target || relative(outputRoot, target).startsWith(`..${sep}`)) fail(`${filename} has an unresolved emitted module ${specifier}`);
 }
 
-function emitAuditedPackage(packageRoot, configPath, manifest) {
+function emitAuditedPackage(packageRoot, configPath, manifest, auditedConfig) {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "extension-example-audit-"));
   try {
     const outputRoot = join(temporaryRoot, "dist");
-    const read = ts.readConfigFile(configPath, ts.sys.readFile);
-    if (read.error) fail(`${configPath} cannot be read by TypeScript`);
-    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, packageRoot, {
+    const parsed = ts.parseJsonConfigFileContent(auditedConfig, ts.sys, packageRoot, {
       composite: false,
       declaration: true,
       declarationMap: false,
@@ -182,7 +260,13 @@ function emitAuditedPackage(packageRoot, configPath, manifest) {
       tsBuildInfoFile: join(temporaryRoot, "build.tsbuildinfo"),
     }, configPath);
     if (parsed.errors.length > 0) fail(`${configPath} contains TypeScript configuration errors`);
-    const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
+    const host = ts.createCompilerHost(parsed.options);
+    const defaultReadFile = host.readFile.bind(host);
+    host.readFile = (filename) => {
+      const withinPackage = relative(packageRoot, filename) === "" || !relative(packageRoot, filename).startsWith(`..${sep}`);
+      return withinPackage ? readBoundedText(filename, sourceMaxBytes, relative(defaultRoot, filename)) : defaultReadFile(filename);
+    };
+    const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences, host });
     const diagnostics = ts.getPreEmitDiagnostics(program);
     const emitted = program.emit();
     if (diagnostics.length > 0 || emitted.emitSkipped) fail(`${configPath} does not build without diagnostics`);
@@ -199,9 +283,9 @@ function emitAuditedPackage(packageRoot, configPath, manifest) {
     }
     const artifactMap = files.map((path) => {
       const name = relative(outputRoot, path).split(sep).join("/");
-      const bytes = readFileSync(path);
+      const bytes = readBoundedBytes(path, emittedMaxBytes, `${packageRoot}/dist/${name}`);
       if (sourceExtensions.has(extname(path)) || path.endsWith(".d.ts")) {
-        auditSourceText(bytes.toString("utf8"), `${packageRoot}/dist/${name}`, (specifier) => {
+        auditSourceText(decodeBoundedUtf8(bytes, emittedMaxBytes, `${packageRoot}/dist/${name}`), `${packageRoot}/dist/${name}`, (specifier) => {
           resolveEmittedModule(outputRoot, path, specifier, available);
         });
       } else fail(`${packageRoot}/dist/${name} is an unaudited emitted artifact`);
@@ -229,13 +313,14 @@ export function auditExtensionExamples(root = defaultRoot) {
     if (relative(packageRoot, path).startsWith(`..${sep}`)) fail(`${entry.path} escapes its package`);
     const name = parts.at(-1);
     if (name === "package.json") {
-      packageState.manifest = JSON.parse(readFileSync(path, "utf8"));
+      packageState.manifest = readBoundedJson(path, configMaxBytes, entry.path);
       auditManifest(packageState.manifest, entry.path);
     } else if (name === "tsconfig.json") {
       packageState.configPath = path;
-      auditTsconfig(JSON.parse(readFileSync(path, "utf8")), entry.path);
+      packageState.config = readBoundedJson(path, configMaxBytes, entry.path);
+      auditTsconfig(packageState.config, entry.path);
     }
-    else if (sourceExtensions.has(extname(name))) auditSourceText(readFileSync(path, "utf8"), entry.path, (specifier) => {
+    else if (sourceExtensions.has(extname(name))) auditSourceText(readBoundedText(path, sourceMaxBytes, entry.path), entry.path, (specifier) => {
       const requested = resolve(dirname(path), specifier);
       const candidates = [requested];
       if ([".js", ".mjs", ".cjs"].includes(extname(requested))) {
@@ -257,8 +342,8 @@ export function auditExtensionExamples(root = defaultRoot) {
   }
   for (const [packageRoot, packageState] of packages) {
     if (!packageState.manifest || !packageState.configPath) fail(`${relative(root, packageRoot)} is missing its audited package/config surface`);
-    const first = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest);
-    const second = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest);
+    const first = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest, packageState.config);
+    const second = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest, packageState.config);
     if (JSON.stringify(first) !== JSON.stringify(second)) fail(`${relative(root, packageRoot)} does not emit reproducibly`);
   }
 }
@@ -266,8 +351,13 @@ export function auditExtensionExamples(root = defaultRoot) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const sourceProbe = process.argv.indexOf("--source-base64");
   const manifestProbe = process.argv.indexOf("--manifest-base64");
-  if (sourceProbe >= 0) auditSourceText(Buffer.from(process.argv[sourceProbe + 1] ?? "", "base64").toString("utf8"));
-  else if (manifestProbe >= 0) auditManifest(JSON.parse(Buffer.from(process.argv[manifestProbe + 1] ?? "", "base64").toString("utf8")));
+  if (sourceProbe >= 0) {
+    const bytes = decodeBoundedBase64(process.argv[sourceProbe + 1] ?? "", sourceMaxBytes, "source probe");
+    auditSourceText(decodeBoundedUtf8(bytes, sourceMaxBytes, "source probe"));
+  } else if (manifestProbe >= 0) {
+    const bytes = decodeBoundedBase64(process.argv[manifestProbe + 1] ?? "", configMaxBytes, "manifest probe");
+    auditManifest(parseBoundedJsonText(decodeBoundedUtf8(bytes, configMaxBytes, "manifest probe"), configMaxBytes, "manifest probe"));
+  }
   else auditExtensionExamples(process.argv[2] ? resolve(process.argv[2]) : defaultRoot);
   console.log("extension example audit: ok");
 }

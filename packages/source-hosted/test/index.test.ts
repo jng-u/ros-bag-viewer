@@ -1,6 +1,7 @@
 import { McapWriter, type IWritable } from "@mcap/core";
 import { describe, expect, it, vi } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { McapSourceSession } from "../../source-mcap/src/index.js";
 import {
   BlobRangeSource,
@@ -276,6 +277,9 @@ describe("hosted SourceBundle adapter", () => {
       }],
     });
     expect(Object.values(session.telemetry()).map(String).join(" ")).not.toContain("opaque-capability");
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "hosted-source-bundle", facts: {
+      manifestVerifications: verifier.calls, rangeScopes: transport.scopes.length, messages: hosted.messages.length,
+    } });
   });
 
   it("rejects tampered signatures, traversal, duplicate normalized paths, invalid hashes, and oversized chunk declarations", async () => {

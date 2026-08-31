@@ -152,6 +152,7 @@ interface ConformancePass {
   readonly evidence: string;
   readonly testName: string;
   readonly evidenceDigest: string;
+  readonly semanticEvent: V1ConformanceSemanticEvent;
   readonly resultDigest: string;
 }
 
@@ -161,7 +162,16 @@ interface ConformanceRejection {
   readonly evidence: string;
   readonly testName: string;
   readonly evidenceDigest: string;
+  readonly semanticEvent: V1ConformanceSemanticEvent;
   readonly resultDigest: string;
+}
+
+export interface V1ConformanceSemanticEvent {
+  readonly schemaVersion: 1;
+  readonly domain: "display-extension" | "rejection" | "schema" | "source" | "time-tf";
+  readonly result: "pass" | "rejected";
+  readonly code: string;
+  readonly facts: Readonly<Record<string, boolean | number | string>>;
 }
 
 export interface V1ConformanceFixture {
@@ -248,7 +258,7 @@ function assertConformanceCases(
     throw new V1ConformanceViolation("incomplete-conformance", `${label} does not cover every frozen v1 case`);
   }
   value.forEach((candidate, index) => {
-    assertExactKeys(candidate, ["evidence", "evidenceDigest", "id", "result", "resultDigest", "testName"], `${label}[${index}]`);
+    assertExactKeys(candidate, ["evidence", "evidenceDigest", "id", "result", "resultDigest", "semanticEvent", "testName"], `${label}[${index}]`);
     if (candidate.id !== expectedIds[index] || candidate.result !== result) {
       throw new V1ConformanceViolation("incomplete-conformance", `${label}[${index}] did not produce the required result`);
     }
@@ -264,17 +274,40 @@ function assertConformanceCases(
     if (encoder.encode(candidate.testName).byteLength > V1_CONFORMANCE_TEST_NAME_MAX_BYTES) {
       throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence test name is oversized`);
     }
+    assertSemanticEvent(candidate.semanticEvent, result, `${label}[${index}] semantic event`);
     const expectedDigest = sha256(canonicalJson([
       candidate.id,
       candidate.result,
       candidate.evidence,
       candidate.testName,
       candidate.evidenceDigest,
+      candidate.semanticEvent,
     ]));
     if (candidate.resultDigest !== expectedDigest) {
       throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] result digest is not host-derived`);
     }
   });
+}
+
+function assertSemanticEvent(
+  value: unknown,
+  result: "pass" | "rejected",
+  label: string,
+): asserts value is V1ConformanceSemanticEvent {
+  assertExactKeys(value, ["schemaVersion", "domain", "result", "code", "facts"], label);
+  if (value.schemaVersion !== 1 || value.result !== result ||
+      !["display-extension", "rejection", "schema", "source", "time-tf"].includes(value.domain as string) ||
+      typeof value.code !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.code)) {
+    throw new V1ConformanceViolation("invalid-fixture", `${label} identity is invalid`);
+  }
+  assertExactKeys(value.facts, Object.keys(value.facts as object), `${label} facts`);
+  const facts = value.facts as Record<string, unknown>;
+  if (Object.keys(facts).length === 0 || Object.entries(facts).some(([key, fact]) =>
+    !/^[a-z][A-Za-z0-9]*$/u.test(key) ||
+    !["boolean", "number", "string"].includes(typeof fact) ||
+    typeof fact === "number" && !Number.isFinite(fact))) {
+    throw new V1ConformanceViolation("invalid-fixture", `${label} facts are invalid`);
+  }
 }
 
 function canonicalPlainData(

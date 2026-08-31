@@ -163,7 +163,6 @@ export type EdgeReply =
   | Readonly<{ version: 1; kind: "discovery"; topics: readonly TopicDescriptor[] }>
   | Readonly<{ version: 1; kind: "ack"; operation: "subscribe" | "unsubscribe" }>;
 
-const encoder = new TextEncoder();
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const topicPattern = /^\/[A-Za-z0-9_.~/-]+$/;
 const typePattern = /^[A-Za-z0-9_]+\/[A-Za-z0-9_]+(?:\/[A-Za-z0-9_]+)?$/;
@@ -175,8 +174,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function byteLength(value: string): number {
-  return encoder.encode(value).byteLength;
+function exceedsUtf8Bytes(value: string, maximum: number): boolean {
+  if (value.length > maximum) return true;
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    let width: number;
+    if (code < 0x80) width = 1;
+    else if (code < 0x800) width = 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) { width = 4; index += 1; }
+      else width = 3;
+    } else width = 3;
+    if (width > maximum - bytes) return true;
+    bytes += width;
+  }
+  return false;
 }
 
 function assertSafePositive(value: unknown, name: string, maximum: number): asserts value is number {
@@ -195,7 +209,7 @@ function assertIdentifier(value: unknown, name: string, limits: ProtocolLimits):
   if (
     typeof value !== "string" ||
     !identifierPattern.test(value) ||
-    byteLength(value) > limits.maxIdentifierBytes
+    exceedsUtf8Bytes(value, limits.maxIdentifierBytes)
   ) {
     throw new ProtocolViolation("invalid-field", `${name} is invalid`);
   }
@@ -207,14 +221,14 @@ function assertTopic(value: unknown, limits: ProtocolLimits): asserts value is s
     !topicPattern.test(value) ||
     value.includes("//") ||
     [..."*?[]{}"].some((forbidden) => value.includes(forbidden)) ||
-    byteLength(value) > limits.maxTopicBytes
+    exceedsUtf8Bytes(value, limits.maxTopicBytes)
   ) {
     throw new ProtocolViolation("invalid-field", "topic must be an exact normalized name without wildcards");
   }
 }
 
 function assertType(value: unknown, limits: ProtocolLimits): asserts value is string {
-  if (typeof value !== "string" || !typePattern.test(value) || byteLength(value) > limits.maxTypeBytes) {
+  if (typeof value !== "string" || !typePattern.test(value) || exceedsUtf8Bytes(value, limits.maxTypeBytes)) {
     throw new ProtocolViolation("invalid-field", "type must be an exact ROS type name");
   }
 }
@@ -259,7 +273,7 @@ function assertFrameBytes(value: unknown, limits: ProtocolLimits): void {
   } catch {
     throw new ProtocolViolation("invalid-frame", "frame is not JSON serializable");
   }
-  if (encoded === undefined || byteLength(encoded) > limits.maxFrameBytes) {
+  if (encoded === undefined || exceedsUtf8Bytes(encoded, limits.maxFrameBytes)) {
     throw new ProtocolViolation("frame-too-large", "frame exceeds the configured byte ceiling");
   }
 }
@@ -338,7 +352,7 @@ export function parseBrowserFrameJson(
   limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): BrowserFrame {
   const canonicalProtocolLimits = canonicalLimits(limits);
-  if (byteLength(text) > canonicalProtocolLimits.maxFrameBytes) {
+  if (exceedsUtf8Bytes(text, canonicalProtocolLimits.maxFrameBytes)) {
     throw new ProtocolViolation("frame-too-large", "frame exceeds the configured byte ceiling");
   }
   assertNoDuplicateTopLevelKeys(text);
@@ -442,7 +456,7 @@ export function validateEdgePlan(
   if (
     typeof plan.allowlistDigest !== "string" ||
     !digestPattern.test(plan.allowlistDigest) ||
-    byteLength(plan.allowlistDigest) > limits.maxIdentifierBytes
+    exceedsUtf8Bytes(plan.allowlistDigest, limits.maxIdentifierBytes)
   ) {
     throw new ProtocolViolation("invalid-field", "allowlistDigest is invalid");
   }

@@ -4,7 +4,6 @@ import {
   DEFAULT_PROTOCOL_LIMITS,
   LIVE_PROTOCOL_VERSION,
   ProtocolViolation,
-  parseBrowserFrame,
   parseBrowserFrameJson,
   validateEdgePlan,
   validateTopicDescriptor,
@@ -168,13 +167,23 @@ function exactOrigin(origin: string): string | undefined {
   }
 }
 
-function frameByteLength(value: unknown): number {
-  if (typeof value === "string") return encoder.encode(value).byteLength;
-  try {
-    return encoder.encode(JSON.stringify(value)).byteLength;
-  } catch {
-    return Number.POSITIVE_INFINITY;
+function frameByteLength(value: string, maximum: number): number {
+  if (value.length > maximum) return maximum + 1;
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    let width: number;
+    if (code < 0x80) width = 1;
+    else if (code < 0x800) width = 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) { width = 4; index += 1; }
+      else width = 3;
+    } else width = 3;
+    if (width > maximum - bytes) return maximum + 1;
+    bytes += width;
   }
+  return bytes;
 }
 
 function mergeLimits(overrides: Partial<RelayLimits> | undefined): RelayLimits {
@@ -431,16 +440,15 @@ export class RelayConnection {
     return this.#closed;
   }
 
-  async handle(input: unknown): Promise<RelayResponse> {
+  async handle(input: string): Promise<RelayResponse> {
     if (this.#closed) return this.#reject("closed");
-    const chargedBytes = frameByteLength(input);
+    if (typeof input !== "string") return this.#reject("invalid-request");
+    const chargedBytes = frameByteLength(input, this.#protocolLimits.maxFrameBytes);
     if (!this.#chargeRequest(chargedBytes)) return this.#reject("quota-exceeded");
 
     let frame: BrowserFrame;
     try {
-      frame = typeof input === "string"
-        ? parseBrowserFrameJson(input, this.#protocolLimits)
-        : parseBrowserFrame(input, this.#protocolLimits);
+      frame = parseBrowserFrameJson(input, this.#protocolLimits);
     } catch (error) {
       if (error instanceof ProtocolViolation) return this.#reject("invalid-request");
       return this.#reject("invalid-request");
@@ -473,6 +481,11 @@ export class RelayConnection {
       if (error instanceof RelayDenied) return this.#reject(error.code, frame.requestId);
       return this.#reject("edge-unavailable", frame.requestId);
     }
+  }
+
+  /** Serializes a host-owned frame before it crosses the untrusted wire boundary. */
+  async handleHostFrame(input: Readonly<Record<string, unknown>>): Promise<RelayResponse> {
+    return this.handle(JSON.stringify(input));
   }
 
   async #discover(frame: Extract<BrowserFrame, { operation: "discover" }>): Promise<RelayResponse> {

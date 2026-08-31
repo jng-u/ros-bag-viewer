@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
-import { readBoundedBytes, readBoundedJson } from "./bounded-input.mjs";
+import { decodeBoundedBase64, parseBoundedJsonBytes, readBoundedBytes, readBoundedJson } from "./bounded-input.mjs";
 
 import {
   V1_CONFORMANCE_DETERMINISTIC_REPORTER,
@@ -25,6 +25,11 @@ const manifestMaxBytes = 16 * 1024 * 1024;
 function fail(message) { throw new Error(`conformance execution manifest: ${message}`); }
 function digest(value) { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
 function canonical(value) { return JSON.stringify(value); }
+function canonicalSemantic(value) {
+  const stable = (item) => Array.isArray(item) ? item.map(stable) : item && typeof item === "object"
+    ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, stable(item[key])])) : item;
+  return JSON.stringify(stable(value));
+}
 function exactKeys(value, keys, label) {
   if (typeof value !== "object" || value === null || Array.isArray(value) ||
       Object.keys(value).sort().join("\0") !== [...keys].sort().join("\0")) fail(`${label} has unexpected fields`);
@@ -44,48 +49,22 @@ function identity(root) {
 }
 function fixtureState(root) {
   const bytes = readBoundedBytes(join(root, fixtureRelativePath), fixtureMaxBytes, fixtureRelativePath);
-  const fixture = JSON.parse(bytes.toString("utf8"));
+  const fixture = parseBoundedJsonBytes(bytes, fixtureMaxBytes, fixtureRelativePath);
   const rows = categories.flatMap((category) => fixture[category].map((row) => ({ category, row })));
   return { fixture, rows, digest: digest(bytes) };
 }
-function executionTestName(caseId) { return `v1 execution receipts observes ${caseId}`; }
-function exactPattern(value) { return `^${value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`; }
 function commandForCase(caseId) {
   const receipt = `artifacts/v1-conformance-receipts/${digest(caseId).slice("sha256:".length)}.json`;
-  return Object.freeze({
-    cwd: ".",
-    argv: Object.freeze([
-      process.execPath,
-      "node_modules/vitest/vitest.mjs",
-      "run",
-      executionEvidence,
-      "-t",
-      exactPattern(executionTestName(caseId)),
-      `--reporter=./${V1_CONFORMANCE_DETERMINISTIC_REPORTER}`,
-      "--maxWorkers=1",
-    ]),
-    env: Object.freeze({
-      CI: "1",
-      LANG: "C.UTF-8",
-      LC_ALL: "C.UTF-8",
-      NODE_OPTIONS: "",
-      NO_COLOR: "1",
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
-      TZ: "UTC",
-      V1_CONFORMANCE_CASE_ID: caseId,
-      V1_CONFORMANCE_RECEIPT_PATH: receipt,
-    }),
-  });
+  return v1ConformanceProductionCommand(caseId, receipt);
 }
-function rawFromBase64(value, label) {
-  if (typeof value !== "string" || value.length > 2 * 1024 * 1024) fail(`${label} is invalid or oversized`);
-  const raw = Buffer.from(value, "base64");
-  if (raw.toString("base64") !== value) fail(`${label} is not canonical base64`);
-  return raw;
+function rawFromBase64(value, maxBytes, label) {
+  try { return decodeBoundedBase64(value, maxBytes, label); }
+  catch (error) { fail(error.message); }
 }
 function normalizedReport(raw, label) {
   let report;
-  try { report = JSON.parse(Buffer.isBuffer(raw) ? raw.toString("utf8") : raw); } catch { fail(`${label} is invalid JSON`); }
+  try { report = Buffer.isBuffer(raw) ? parseBoundedJsonBytes(raw, 1024 * 1024, label) : JSON.parse(raw); }
+  catch { fail(`${label} is invalid JSON`); }
   exactKeys(report, ["schemaVersion", "reason", "unhandledErrors", "assertions"], label);
   if (report.schemaVersion !== 1 || report.reason !== "passed" || report.unhandledErrors !== 0 ||
       !Array.isArray(report.assertions) || report.assertions.length !== 1) fail(`${label} is not one passing assertion`);
@@ -94,8 +73,10 @@ function normalizedReport(raw, label) {
   return { report, assertion: report.assertions[0] };
 }
 function runReporter(root, command) {
-  const receiptPath = join(root, command.env.V1_CONFORMANCE_RECEIPT_PATH);
+  const receiptPath = join(root, command.env.V1_CONFORMANCE_PRODUCTION_RECEIPT_PATH);
+  const eventPath = join(root, command.env.V1_CONFORMANCE_PRODUCTION_EVENT_PATH);
   rmSync(receiptPath, { force: true });
+  rmSync(eventPath, { force: true });
   const result = spawnSync(command.argv[0], command.argv.slice(1), {
     cwd: join(root, command.cwd),
     maxBuffer: 1024 * 1024,
@@ -109,7 +90,7 @@ function runReporter(root, command) {
   try { receipt = readBoundedJson(receiptPath, receiptMaxBytes, "semantic receipt"); } catch { fail("case command did not emit one bounded semantic receipt"); }
   return { reporterRawBase64: reporterRaw.toString("base64"), reporterRawDigest, assertion, receipt };
 }
-function artifact(root, path) { return Object.freeze({ path, digest: digest(readFileSync(join(root, path))) }); }
+function artifact(root, path) { return Object.freeze({ path, digest: digest(readBoundedBytes(join(root, path), 8 * 1024 * 1024, path)) }); }
 function executionArtifacts(root) {
   return Object.freeze([
     artifact(root, executionEvidence),
@@ -117,35 +98,36 @@ function executionArtifacts(root) {
     artifact(root, V1_CONFORMANCE_DETERMINISTIC_REPORTER),
   ]);
 }
-function validateSemanticReceipt(receipt, caseId) {
+function validateSemanticReceipt(receipt, caseId, expectedEvent) {
   exactKeys(receipt, [
-    "schemaVersion", "caseId", "observedResult", "status", "semanticFacts", "diagnosticDigest", "productionAssertion",
+    "schemaVersion", "status", "semanticEventRawBase64", "semanticEventRawDigest", "productionAssertion",
     "productionReporterRawBase64", "productionReporterRawDigest", "productionAssertionDigest",
   ], `${caseId} semantic receipt`);
   const probe = v1ConformanceProductionProbe(caseId);
-  if (receipt.schemaVersion !== 2 || receipt.caseId !== caseId || !["pass", "rejected"].includes(receipt.observedResult) || receipt.status !== "passed") {
-    fail(`${caseId} emitted an invalid independently observed result`);
+  if (receipt.schemaVersion !== 3 || receipt.status !== "passed") fail(`${caseId} emitted an invalid production receipt`);
+  const eventRaw = rawFromBase64(receipt.semanticEventRawBase64, 8 * 1024, `${caseId} semantic event raw bytes`);
+  let semanticEvent;
+  try { semanticEvent = parseBoundedJsonBytes(eventRaw, 8 * 1024, `${caseId} semantic event raw bytes`); }
+  catch { fail(`${caseId} semantic event raw bytes are invalid JSON`); }
+  exactKeys(semanticEvent, ["schemaVersion", "domain", "result", "code", "facts"], `${caseId} semantic event`);
+  const facts = semanticEvent.facts;
+  if (semanticEvent.schemaVersion !== 1 || !["pass", "rejected"].includes(semanticEvent.result) ||
+      !["display-extension", "rejection", "schema", "source", "time-tf"].includes(semanticEvent.domain) ||
+      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(semanticEvent.code) ||
+      typeof facts !== "object" || facts === null || Array.isArray(facts) || Object.keys(facts).length === 0 ||
+      Object.entries(facts).some(([key, value]) => !/^[a-z][A-Za-z0-9]*$/u.test(key) ||
+        !["boolean", "number", "string"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value)) ||
+      canonicalSemantic(semanticEvent) !== canonicalSemantic(expectedEvent) || receipt.semanticEventRawDigest !== digest(eventRaw)) {
+    fail(`${caseId} semantic event raw binding mismatch`);
   }
-  exactKeys(receipt.semanticFacts, ["assertionFile", "assertionStatus", "assertionTestName", "observationClass"], `${caseId} semantic facts`);
-  if (receipt.diagnosticDigest !== digest(canonical(receipt.semanticFacts))) fail(`${caseId} diagnostic digest mismatch`);
-  const raw = rawFromBase64(receipt.productionReporterRawBase64, `${caseId} production reporter raw bytes`);
+  const raw = rawFromBase64(receipt.productionReporterRawBase64, 1024 * 1024, `${caseId} production reporter raw bytes`);
   const { assertion } = normalizedReport(raw, `${caseId} production reporter output`);
-  const assertionObservedResult = caseId.startsWith("rejections/") ? "rejected" : "pass";
-  if (canonical(assertion) !== canonical(receipt.productionAssertion) ||
-      assertion.file !== probe.evidence || assertion.testName !== probe.testName || assertion.status !== "passed" ||
-      receipt.observedResult !== assertionObservedResult) {
-    fail(`${caseId} production assertion mismatch`);
-  }
-  if (canonical(receipt.semanticFacts) !== canonical({
-    assertionFile: assertion.file,
-    assertionStatus: assertion.status,
-    assertionTestName: assertion.testName,
-    observationClass: assertionObservedResult === "rejected" ? "rejection-observed" : "behavior-pass",
-  }) || receipt.productionReporterRawDigest !== digest(raw) ||
-      receipt.productionAssertionDigest !== digest(canonical(receipt.productionAssertion))) {
+  if (canonical(assertion) !== canonical(receipt.productionAssertion) || assertion.file !== probe.evidence ||
+      assertion.testName !== probe.testName || assertion.status !== "passed") fail(`${caseId} production assertion mismatch`);
+  if (receipt.productionReporterRawDigest !== digest(raw) || receipt.productionAssertionDigest !== digest(canonical(receipt.productionAssertion))) {
     fail(`${caseId} production reporter or assertion digest mismatch`);
   }
-  return probe;
+  return { probe, semanticEvent };
 }
 function validateRegistry(state) {
   const fixtureIds = state.rows.map(({ category, row }) => `${category}/${row.id}`);
@@ -168,16 +150,15 @@ function caseRecord(root, fixtureDigest, source, category, row) {
   const caseId = `${category}/${row.id}`;
   const command = commandForCase(caseId);
   const { reporterRawBase64, reporterRawDigest, assertion, receipt } = runReporter(root, command);
-  if (assertion.file !== executionEvidence || assertion.testName !== executionTestName(caseId)) fail(`${caseId} outer reporter identity mismatch`);
-  const probe = validateSemanticReceipt(receipt, caseId);
-  if (receipt.observedResult !== row.result) fail(`${caseId} observed result does not match the fixture expectation`);
-  const productionCommand = v1ConformanceProductionCommand(caseId, command.env.V1_CONFORMANCE_RECEIPT_PATH);
+  const { probe, semanticEvent } = validateSemanticReceipt(receipt, caseId, row.semanticEvent);
+  if (semanticEvent.result !== row.result) fail(`${caseId} observed result does not match the fixture expectation`);
+  const productionCommand = command;
   const evidenceArtifact = artifact(root, row.evidence);
   if (evidenceArtifact.digest !== row.evidenceDigest) fail(`${caseId} has stale evidence bytes`);
   const core = {
     caseId,
     expectedResult: row.result,
-    observedResult: receipt.observedResult,
+    observedResult: semanticEvent.result,
     status: assertion.status,
     commit: source.commit,
     tree: source.tree,
@@ -189,6 +170,7 @@ function caseRecord(root, fixtureDigest, source, category, row) {
     normalizedAssertionDigest: digest(canonical(assertion)),
     semanticReceipt: receipt,
     semanticReceiptDigest: digest(canonical(receipt)),
+    semanticEvent,
     productionCommand,
     productionExecutionEnvironmentDigest: digest(canonical(productionCommand.env)),
     productionProbe: probe,
@@ -236,7 +218,7 @@ export function verifyConformanceExecutionManifest(root, envelope) {
     const caseId = `${category}/${row.id}`;
     exactKeys(candidate, [
       "caseId", "expectedResult", "observedResult", "status", "commit", "tree", "command", "executionEnvironmentDigest",
-      "reporterRawBase64", "reporterRawDigest", "reporter", "normalizedAssertionDigest", "semanticReceipt", "semanticReceiptDigest",
+      "reporterRawBase64", "reporterRawDigest", "reporter", "normalizedAssertionDigest", "semanticReceipt", "semanticReceiptDigest", "semanticEvent",
       "productionCommand", "productionExecutionEnvironmentDigest", "productionProbe", "evidenceArtifact", "executionArtifacts", "fixtureDigest", "caseDigest",
     ], `case[${index}]`);
     if (candidate.caseId !== caseId || candidate.expectedResult !== row.result || candidate.observedResult !== row.result || candidate.status !== "passed") {
@@ -249,25 +231,26 @@ export function verifyConformanceExecutionManifest(root, envelope) {
     if (commands.has(canonical(candidate.command))) fail("duplicate case command");
     commands.add(canonical(candidate.command));
     if (candidate.executionEnvironmentDigest !== digest(canonical(command.env))) fail(`case[${index}] environment digest mismatch`);
-    const reporterRaw = rawFromBase64(candidate.reporterRawBase64, `case[${index}] reporter raw bytes`);
+    const reporterRaw = rawFromBase64(candidate.reporterRawBase64, 1024 * 1024, `case[${index}] reporter raw bytes`);
     const { assertion } = normalizedReport(reporterRaw, `case[${index}] reporter output`);
     if (candidate.reporterRawDigest !== digest(reporterRaw) || canonical(candidate.reporter) !== canonical(assertion) ||
-        candidate.normalizedAssertionDigest !== digest(canonical(assertion)) || assertion.file !== executionEvidence ||
-        assertion.testName !== executionTestName(caseId)) fail(`case[${index}] reporter binding mismatch`);
+        candidate.normalizedAssertionDigest !== digest(canonical(assertion)) || assertion.file !== row.evidence ||
+        assertion.testName !== row.testName) fail(`case[${index}] reporter binding mismatch`);
     if (reporters.has(canonical(assertion))) fail("duplicate reporter assertion");
     reporters.add(canonical(assertion));
-    const probe = validateSemanticReceipt(candidate.semanticReceipt, caseId);
+    const { probe, semanticEvent } = validateSemanticReceipt(candidate.semanticReceipt, caseId, row.semanticEvent);
     if (candidate.semanticReceiptDigest !== digest(canonical(candidate.semanticReceipt)) ||
-        candidate.observedResult !== candidate.semanticReceipt.observedResult || canonical(candidate.productionProbe) !== canonical(probe)) {
+        candidate.observedResult !== semanticEvent.result || canonicalSemantic(candidate.semanticEvent) !== canonicalSemantic(semanticEvent) ||
+        canonical(candidate.productionProbe) !== canonical(probe)) {
       fail(`case[${index}] semantic receipt mismatch`);
     }
-    const productionCommand = v1ConformanceProductionCommand(caseId, command.env.V1_CONFORMANCE_RECEIPT_PATH);
+    const productionCommand = command;
     if (canonical(candidate.productionCommand) !== canonical(productionCommand) ||
         candidate.productionExecutionEnvironmentDigest !== digest(canonical(productionCommand.env))) {
       fail(`case[${index}] production command binding mismatch`);
     }
-    if (receipts.has(candidate.semanticReceipt.caseId)) fail("duplicate semantic receipt");
-    receipts.add(candidate.semanticReceipt.caseId);
+    if (receipts.has(candidate.semanticReceiptDigest)) fail("duplicate semantic receipt");
+    receipts.add(candidate.semanticReceiptDigest);
     const evidenceArtifact = artifact(root, row.evidence);
     if (canonical(candidate.evidenceArtifact) !== canonical(evidenceArtifact) || evidenceArtifact.digest !== row.evidenceDigest) {
       fail(`case[${index}] evidence artifact mismatch`);

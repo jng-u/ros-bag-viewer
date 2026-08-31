@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -220,13 +221,17 @@ describe("ROS2 SQLite SourceBundle adapter", () => {
     createDatabase(join(directory, "bag.db3"), [{ timestamp: 10n, data: [1] }], 4, false);
     const access = await fixtureBundle(directory, ["bag.db3"], metadata(["bag.db3"], 1));
     const session = await Ros2SqliteSourceSession.open(access, new NodeQueryProvider(directory), new TestEpoch());
-    expect(session.schemas()).toEqual([{
+    const schemas = session.schemas();
+    expect(schemas).toEqual([{
       name: "example_msgs/msg/Point",
       capability: "schema-resolvable",
       typeDescriptionHash: "RIHS01_fixture",
       provenance: [{ kind: "metadata-yaml", metadataVersion: 9 }],
       diagnostic: "SQLite bag does not embed this message definition; an external schema provider is required",
     }]);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "schema", result: "pass", code: "schema-resolvable", facts: {
+      capability: schemas[0]?.capability ?? "missing", schemaCount: schemas.length,
+    } });
     await session.close();
   });
 
@@ -277,6 +282,9 @@ describe("ROS2 SQLite SourceBundle adapter", () => {
       [30n, 0, [30]],
     ]);
     expect(session.telemetry()).toMatchObject({ partsOpened: 2, peakRowsBuffered: 2, messagesYielded: 4 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "local-ros2-sqlite", facts: {
+      messages: messages.length, partsOpened: session.telemetry().partsOpened, peakRowsBuffered: session.telemetry().peakRowsBuffered,
+    } });
     const totalDatabaseBytes = BigInt((await stat(join(directory, "bag_0.db3"))).size + (await stat(join(directory, "bag_1.db3"))).size);
     expect(session.telemetry().rangeBytesRead).toBeLessThan(totalDatabaseBytes);
     await session.close();

@@ -1,6 +1,7 @@
 import { McapWriter, type IWritable } from "@mcap/core";
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { BlobRangeSource, BoundedByteReader, SourceEpochController, type WorkerResourceLimits } from "../../worker-runtime/src/index.js";
 import { McapSourceSession } from "../src/index.js";
 
@@ -99,6 +100,9 @@ describe("MCAP adapter", () => {
     const telemetry = reader.snapshotTelemetry();
     expect(telemetry.readCalls).toBeGreaterThan(1);
     expect(telemetry.peakInFlightBytes).toBeLessThan(bytes.byteLength);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "local-mcap-indexed", facts: {
+      mode: session.mode, messages: messages.length, readCalls: telemetry.readCalls,
+    } });
   });
 
   it("exposes embedded schema bytes as schema-present", async () => {
@@ -112,12 +116,16 @@ describe("MCAP adapter", () => {
         maxMessageIndexCacheBytes: 256,
       },
     });
-    expect(session.channels()[0]?.schema).toMatchObject({
+    const schema = session.channels()[0]?.schema;
+    expect(schema).toMatchObject({
       capability: "schema-present",
       name: "example_msgs/msg/Point",
       encoding: "ros2msg",
     });
-    expect(session.channels()[0]?.schema?.data).toEqual(new TextEncoder().encode("float64 x\n"));
+    expect(schema?.data).toEqual(new TextEncoder().encode("float64 x\n"));
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "schema", result: "pass", code: "schema-present", facts: {
+      capability: schema?.capability ?? "missing", schemaBytes: schema?.data?.byteLength ?? 0,
+    } });
   });
 
   it("exposes explicit degraded sequential progress for unindexed MCAP", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { TfBuffer, type TfSample } from "../src/index.js";
 
 const identity = { x: 0, y: 0, z: 0, w: 1 };
@@ -22,32 +23,45 @@ describe("TF buffer", () => {
     const buffer = new TfBuffer(1, 8);
     buffer.add(sample({ timeNanos: 0n, translation: { x: 0, y: 0, z: 0 } }));
     buffer.add(sample({ timeNanos: 10n, translation: { x: 10, y: 0, z: 0 } }));
-    expect(buffer.lookup("map", "base", 5n, 1)).toMatchObject({
+    const observed = buffer.lookup("map", "base", 5n, 1);
+    expect(observed).toMatchObject({
       ok: true,
       interpolated: true,
       transform: { translation: { x: 5, y: 0, z: 0 } },
     });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "tf-interpolation", facts: {
+      ok: observed.ok, interpolated: observed.ok ? observed.interpolated : false,
+    } });
   });
 
   it("rejects extrapolation outside bracketing samples", () => {
     const buffer = new TfBuffer(1, 8);
     buffer.add(sample({ timeNanos: 0n }));
     buffer.add(sample({ timeNanos: 10n, translation: { x: 10, y: 0, z: 0 } }));
-    expect(buffer.lookup("map", "base", 11n, 1)).toMatchObject({
+    const observed = buffer.lookup("map", "base", 11n, 1);
+    expect(observed).toMatchObject({
       ok: false,
       reason: "extrapolation",
     });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "tf-extrapolation", facts: {
+      ok: observed.ok, reason: observed.ok ? "none" : observed.reason,
+    } });
   });
 
   it("composes static chains and reports missing paths", () => {
     const buffer = new TfBuffer(1, 8);
     buffer.add(sample({ isStatic: true, parentFrame: "map", childFrame: "odom", translation: { x: 1, y: 0, z: 0 } }));
     buffer.add(sample({ isStatic: true, parentFrame: "odom", childFrame: "base", translation: { x: 2, y: 0, z: 0 } }));
-    expect(buffer.lookup("map", "base", 100n, 1)).toMatchObject({
+    const composed = buffer.lookup("map", "base", 100n, 1);
+    expect(composed).toMatchObject({
       ok: true,
       transform: { translation: { x: 3, y: 0, z: 0 } },
     });
-    expect(buffer.lookup("camera", "base", 100n, 1)).toMatchObject({ ok: false, reason: "missing" });
+    const missing = buffer.lookup("camera", "base", 100n, 1);
+    expect(missing).toMatchObject({ ok: false, reason: "missing" });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "tf-missing", facts: {
+      composed: composed.ok, missingReason: missing.ok ? "none" : missing.reason,
+    } });
   });
 
   it("detects cycles and invalidates all history on epoch advance", () => {

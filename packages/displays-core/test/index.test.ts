@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import {
   CameraInfoDisplay,
   FrameTreeDisplay,
@@ -485,6 +486,11 @@ describe("M2 raster and generic fallback displays", () => {
       displayKind: "raw-inspector",
       details: { capability: "schema-present", typeName: "custom/State", truncated: true },
     });
-    expect(raw.inspection()?.tree).toEqual({ a: [1, 2], z: 1 });
+    const inspection = raw.inspection();
+    expect(inspection?.tree).toEqual({ a: [1, 2], z: 1 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "schema", result: "pass", code: "schema-opaque-fallback", facts: {
+      capability: inspection?.capability ?? "missing", fieldsVisited: inspection?.fieldsVisited ?? 0,
+      truncated: inspection?.truncated ?? false,
+    } });
   });
 });

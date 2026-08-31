@@ -333,20 +333,25 @@ function cloneFrozen<T>(value: T): T {
   return freeze(clone) as T;
 }
 
+function decodeCanonicalBase64Url(value: string, maxBytes: number, label: string): Buffer {
+  if (typeof value !== "string" || !Number.isSafeInteger(maxBytes) || maxBytes <= 0 ||
+      value.length > Math.ceil(maxBytes / 3) * 4 || !/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error(`invalid hosted manifest ${label}`);
+  }
+  const bytes = Buffer.from(value, "base64url");
+  if (bytes.byteLength > maxBytes || bytes.toString("base64url") !== value) throw new Error(`invalid hosted manifest ${label}`);
+  return bytes;
+}
+
 function assertManifestShape(manifest: SignedHostedManifest): void {
   if (!manifest || typeof manifest !== "object" || !exactKeys(manifest, ["algorithm", "keyId", "publicKeySpki", "payload", "signature"])) {
     throw new Error("invalid hosted manifest envelope");
   }
   if (manifest.algorithm !== "Ed25519" || !SHA256_PATTERN.test(manifest.keyId)) throw new Error("invalid hosted manifest key");
-  if (!/^[A-Za-z0-9_-]+$/.test(manifest.publicKeySpki) || !/^[A-Za-z0-9_-]+$/.test(manifest.signature)) {
-    throw new Error("invalid hosted manifest encoding");
-  }
-  const publicKeyBytes = Buffer.from(manifest.publicKeySpki, "base64url");
-  const signatureBytes = Buffer.from(manifest.signature, "base64url");
+  const publicKeyBytes = decodeCanonicalBase64Url(manifest.publicKeySpki, 128, "public key encoding");
+  const signatureBytes = decodeCanonicalBase64Url(manifest.signature, 64, "signature encoding");
   if (
-    publicKeyBytes.toString("base64url") !== manifest.publicKeySpki
-    || signatureBytes.toString("base64url") !== manifest.signature
-    || signatureBytes.byteLength !== 64
+    publicKeyBytes.byteLength === 0 || signatureBytes.byteLength !== 64
   ) {
     throw new Error("invalid hosted manifest encoding");
   }
@@ -412,10 +417,11 @@ function assertManifestShape(manifest: SignedHostedManifest): void {
 export function verifyHostedManifest(manifest: SignedHostedManifest, trustedPublicKeySpki: string): SourceBundle {
   assertManifestShape(manifest);
   if (manifest.publicKeySpki !== trustedPublicKeySpki) throw new Error("hosted manifest signer is not trusted");
-  const publicKeyBytes = Buffer.from(manifest.publicKeySpki, "base64url");
+  const publicKeyBytes = decodeCanonicalBase64Url(manifest.publicKeySpki, 128, "public key encoding");
   if (sha256(publicKeyBytes) !== manifest.keyId) throw new Error("hosted manifest key id mismatch");
   const publicKey = createPublicKey({ key: publicKeyBytes, format: "der", type: "spki" });
-  const valid = verify(null, Buffer.from(serializeHostedManifestPayload(manifest.payload)), publicKey, Buffer.from(manifest.signature, "base64url"));
+  const valid = verify(null, Buffer.from(serializeHostedManifestPayload(manifest.payload)), publicKey,
+    decodeCanonicalBase64Url(manifest.signature, 64, "signature encoding"));
   if (!valid) throw new Error("hosted manifest signature is invalid");
 
   const entries: SourceEntry[] = manifest.payload.entries.map((entry) => ({

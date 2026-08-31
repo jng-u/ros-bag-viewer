@@ -34,49 +34,117 @@
       "id": "local-mcap",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:ef02c227f5178846a462b7865033c4989bf7d27f89541364d13ddf7ea29cf3bc",
-      "evidenceDigest": "sha256:364cf04fe137a664026a17b0d165b03904d9cbf09a5e909fc1434c22ceb8e1a5",
-      "testName": "MCAP adapter uses bounded official-reader range seeks for indexed MCAP"
+      "resultDigest": "sha256:c88b6721f1f289ae14317ae9eeec681bcc6a81c5a4c224e328b8491ac1d82cb8",
+      "evidenceDigest": "sha256:db192d20fd54920194ebeb25c14c430ce20d218e67fc507b2609c9949f28dde9",
+      "testName": "MCAP adapter uses bounded official-reader range seeks for indexed MCAP",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "local-mcap-indexed",
+        "facts": {
+          "mode": "indexed",
+          "messages": 1,
+          "readCalls": 6
+        }
+      }
     },
     {
       "id": "local-ros1-bag",
       "result": "pass",
       "evidence": "packages/source-ros1bag/test/index.test.ts",
-      "resultDigest": "sha256:ba559957492a7c37dbabfbf56ea69612c88b11b493dcf98174e5623e1689bece",
-      "evidenceDigest": "sha256:b6f38cf62f43b9be44dcff3719e015f06c48908be5faa36f47ab9cb184a862d4",
-      "testName": "ROS1 bag SourceBundle adapter uses bounded v2 header/index/chunk/message traversal with schema provenance"
+      "resultDigest": "sha256:1894d0702759fac253b67c1e58bbf3be78041e42cf4473bd3d4765b28e1a7167",
+      "evidenceDigest": "sha256:38240add5ba28a8198c3affd03b4955c19e3349848ca2d3a96303faed26afe69",
+      "testName": "ROS1 bag SourceBundle adapter uses bounded v2 header/index/chunk/message traversal with schema provenance",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "local-ros1-bag-indexed",
+        "facts": {
+          "mode": "indexed",
+          "messages": 1,
+          "readCalls": 23
+        }
+      }
     },
     {
       "id": "local-ros2-sqlite",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:feaa8fe41092bf490b1e4a70ee482b6e1bdc6320c02fe490731563f3b1d3284e",
-      "evidenceDigest": "sha256:931a94c37e2d47561a32bc4cbb8468a7963da433189a044fc131f04cccfcf924",
-      "testName": "ROS2 SQLite SourceBundle adapter opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries"
+      "resultDigest": "sha256:4fdb00a7a741b1924c822c3eaec0468e95adbbeaa57c86e46ce144c86dfb83b9",
+      "evidenceDigest": "sha256:a742ce5968ef960bd9345b903626a433d4c6c2e408be6ab301925c65d61e1c07",
+      "testName": "ROS2 SQLite SourceBundle adapter opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "local-ros2-sqlite",
+        "facts": {
+          "messages": 4,
+          "partsOpened": 2,
+          "peakRowsBuffered": 2
+        }
+      }
     },
     {
       "id": "hosted-source-bundle",
       "result": "pass",
       "evidence": "packages/source-hosted/test/index.test.ts",
-      "resultDigest": "sha256:cce9804945433c62a79e74431a527abd04d75e046880ae4ce39785c44e0785e4",
-      "evidenceDigest": "sha256:65108dec5d272197d299c1dc963586e1cf40157982f9095ef98e97ebb319dcd2",
-      "testName": "hosted SourceBundle adapter verifies the signed manifest and preserves local MCAP schema, order, timeline, payload hashes, and diagnostics"
+      "resultDigest": "sha256:1ece741af0d0fee19a365972f5ba80e848f6e3241baa5862a742bbc542612c6e",
+      "evidenceDigest": "sha256:64913e4717746aeb33b841a412d7d7faa63000bc3511d30a0b8592cf00e226da",
+      "testName": "hosted SourceBundle adapter verifies the signed manifest and preserves local MCAP schema, order, timeline, payload hashes, and diagnostics",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "hosted-source-bundle",
+        "facts": {
+          "manifestVerifications": 1,
+          "rangeScopes": 21,
+          "messages": 2
+        }
+      }
     },
     {
       "id": "ros1-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:3c334b4cc3d1e40c4e04cc3ca603c20af77ec65d8aa6262460ce7a8a14972c8c",
-      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70",
-      "testName": "M3 deterministic synthetic load evidence keeps ros1 point-cloud/image-like load bounded and reconnects by epoch"
+      "resultDigest": "sha256:24c065979cba4655e3612ed4ab35a9dc4b426c1066558663e41480a9d1739724",
+      "evidenceDigest": "sha256:10db49192b7f86be48133f11ed0abe66d06e382254487e5e2ceff552ce88081a",
+      "testName": "M3 deterministic synthetic load evidence keeps ros1 point-cloud/image-like load bounded and reconnects by epoch",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "ros1-live-bounded",
+        "facts": {
+          "acceptedFrames": 400,
+          "droppedFrames": 600,
+          "generation": "ros1",
+          "reconnectEpochs": "1,2"
+        }
+      }
     },
     {
       "id": "ros2-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:ce96660373f1994980be8bd2f7c1f1b55b70c2170abce5c42f22be0687b8932b",
-      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70",
-      "testName": "M3 deterministic synthetic load evidence keeps ros2 point-cloud/image-like load bounded and reconnects by epoch"
+      "resultDigest": "sha256:0d77bf1e5680d6f2d2081ec4bbc8f863cf528dfba10f90adaf83fcbd97f98381",
+      "evidenceDigest": "sha256:10db49192b7f86be48133f11ed0abe66d06e382254487e5e2ceff552ce88081a",
+      "testName": "M3 deterministic synthetic load evidence keeps ros2 point-cloud/image-like load bounded and reconnects by epoch",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "source",
+        "result": "pass",
+        "code": "ros2-live-bounded",
+        "facts": {
+          "acceptedFrames": 400,
+          "droppedFrames": 600,
+          "generation": "ros2",
+          "reconnectEpochs": "1,2"
+        }
+      }
     }
   ],
   "schemas": [
@@ -84,25 +152,56 @@
       "id": "schema-present",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:6a07956cd40da85887d71acdcb626a81cf1119f10985244dd3956236548457b5",
-      "evidenceDigest": "sha256:364cf04fe137a664026a17b0d165b03904d9cbf09a5e909fc1434c22ceb8e1a5",
-      "testName": "MCAP adapter exposes embedded schema bytes as schema-present"
+      "resultDigest": "sha256:52711df4f11def44b031e2d25e088074eda285dee9a61fc4ece3c44080bcb787",
+      "evidenceDigest": "sha256:db192d20fd54920194ebeb25c14c430ce20d218e67fc507b2609c9949f28dde9",
+      "testName": "MCAP adapter exposes embedded schema bytes as schema-present",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "schema",
+        "result": "pass",
+        "code": "schema-present",
+        "facts": {
+          "capability": "schema-present",
+          "schemaBytes": 10
+        }
+      }
     },
     {
       "id": "schema-resolvable",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:8ef0568b09969b19aca8288593e6c7b45c09dbb72409ef18411756085badb19b",
-      "evidenceDigest": "sha256:931a94c37e2d47561a32bc4cbb8468a7963da433189a044fc131f04cccfcf924",
-      "testName": "ROS2 SQLite SourceBundle adapter exposes metadata-only schemas as schema-resolvable"
+      "resultDigest": "sha256:a3bbf0ee4ee10f9877b6f3ec3a0f1d78af430d3320f3dcdf262ecf74e6b8cfa0",
+      "evidenceDigest": "sha256:a742ce5968ef960bd9345b903626a433d4c6c2e408be6ab301925c65d61e1c07",
+      "testName": "ROS2 SQLite SourceBundle adapter exposes metadata-only schemas as schema-resolvable",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "schema",
+        "result": "pass",
+        "code": "schema-resolvable",
+        "facts": {
+          "capability": "schema-resolvable",
+          "schemaCount": 1
+        }
+      }
     },
     {
       "id": "opaque",
       "result": "pass",
       "evidence": "packages/displays-core/test/index.test.ts",
-      "resultDigest": "sha256:6cbf083904e236eace7728c67b6f989ff38f70e13cda6ca99d8e4ebeca26630a",
-      "evidenceDigest": "sha256:58e0f0f6f9585cb4da19659a579f2776d299987dfece87c024e502df29a16121",
-      "testName": "M2 raster and generic fallback displays keeps schema-backed trees bounded and opaque payloads byte-only"
+      "resultDigest": "sha256:18b2d677d375ea6502af36e290ebae19960cb1c4ecd436a0e9230307d288861f",
+      "evidenceDigest": "sha256:8e873576e45bd6eaa86dd1103dbb3508bfccffbb192ef52a01c1edb44bc926a5",
+      "testName": "M2 raster and generic fallback displays keeps schema-backed trees bounded and opaque payloads byte-only",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "schema",
+        "result": "pass",
+        "code": "schema-opaque-fallback",
+        "facts": {
+          "capability": "schema-present",
+          "fieldsVisited": 2,
+          "truncated": true
+        }
+      }
     }
   ],
   "timeTf": [
@@ -110,65 +209,149 @@
       "id": "record-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:411eea28b181220f6dc73d50b064e7faaf48bf2f5647fb504675eab7535c7042",
-      "evidenceDigest": "sha256:e5947b7a48274d4554a46ed935e7608f605825070528700a6392931924afd3c6",
-      "testName": "timeline normalization selects valid record timestamps exactly"
+      "resultDigest": "sha256:bcdfa951be620d500323139e9b2df3c226c33c7cb170bf938f3305574e1a070a",
+      "evidenceDigest": "sha256:6bc4522c3290ad55f7238d2f29c0175c30efbdc7c8524cdf261cdc4a2401f249",
+      "testName": "timeline normalization selects valid record timestamps exactly",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "record-time",
+        "facts": {
+          "source": "record",
+          "valueNanos": "10",
+          "diagnostics": 0
+        }
+      }
     },
     {
       "id": "header-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:1010ba29a37b22c4876ad7dd5fc117aa4e762e8dfc6281243d3535ec78d2be73",
-      "evidenceDigest": "sha256:e5947b7a48274d4554a46ed935e7608f605825070528700a6392931924afd3c6",
-      "testName": "timeline normalization selects valid header timestamps with diagnosed fallback"
+      "resultDigest": "sha256:2ab519008947363e50966ecdccf11755d91ecf1d4e5c479de12a8e5725fe1481",
+      "evidenceDigest": "sha256:6bc4522c3290ad55f7238d2f29c0175c30efbdc7c8524cdf261cdc4a2401f249",
+      "testName": "timeline normalization selects valid header timestamps with diagnosed fallback",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "header-time",
+        "facts": {
+          "source": "header",
+          "valueNanos": "12",
+          "diagnostics": 2
+        }
+      }
     },
     {
       "id": "receipt-time",
       "result": "pass",
       "evidence": "packages/source-live/test/index.test.ts",
-      "resultDigest": "sha256:8fd9c033d17131fbe511f8fc85e3131c27500082f1ba33554ec2ae0461a6363e",
-      "evidenceDigest": "sha256:532c216f2b291ddf2833ab55e184131a4d17260110aa119174025313100de5da",
-      "testName": "bounded live source normalizes schema/time envelopes and drains them in deterministic order"
+      "resultDigest": "sha256:e364dad8c5b88dd275ccd691e85aa0dcfa78c08576bf0729c3ee9ba4e33552a5",
+      "evidenceDigest": "sha256:b9af34b3b6b3372eef2c664e1ed94938a0c5413f3ba06c342cf350b5ad92b008",
+      "testName": "bounded live source normalizes schema/time envelopes and drains them in deterministic order",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "receipt-time",
+        "facts": {
+          "deliveredMessages": 3,
+          "receiptTimeNanos": "20",
+          "sourceTimeNanos": "10"
+        }
+      }
     },
     {
       "id": "clock-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:08b47b1d35e0f7643d20930360aef2ff20bb39c67705e3750b9be10d8ad44006",
-      "evidenceDigest": "sha256:e5947b7a48274d4554a46ed935e7608f605825070528700a6392931924afd3c6",
-      "testName": "timeline normalization selects valid clock timestamps with diagnosed fallback"
+      "resultDigest": "sha256:fd2380a579102075d64c2b25930a3e98c9ff85ab164a79f7cd75550ee7bb202e",
+      "evidenceDigest": "sha256:6bc4522c3290ad55f7238d2f29c0175c30efbdc7c8524cdf261cdc4a2401f249",
+      "testName": "timeline normalization selects valid clock timestamps with diagnosed fallback",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "clock-time",
+        "facts": {
+          "source": "clock",
+          "valueNanos": "42",
+          "diagnostics": 3
+        }
+      }
     },
     {
       "id": "source-epoch-invalidation",
       "result": "pass",
       "evidence": "packages/core-model/test/index.test.ts",
-      "resultDigest": "sha256:c673273b448e8fc694ec7aa492cff251b64bcf5197835934231b4a3ca861473c",
-      "evidenceDigest": "sha256:dfc368ee020b523cdc9928bc3aab8aa4470ef124dab081a67c235788aca88c64",
-      "testName": "payload lease contract rejects stale epochs and invalidation"
+      "resultDigest": "sha256:74a9ee4a98038df3ffa36d7d82832df0b16e1605aa3e44b776d2c0782162ae1f",
+      "evidenceDigest": "sha256:0fd15d8280f79d139c36aa4e0f03d30bffcc563216cd995043dff6707cc0a9f2",
+      "testName": "payload lease contract rejects stale epochs and invalidation",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "source-epoch-invalidation",
+        "facts": {
+          "invalidated": true,
+          "staleRejected": true
+        }
+      }
     },
     {
       "id": "tf-interpolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:866798a468dddd305c375712e1af449cdf5f146c21ec16c5a2338d8502964332",
-      "evidenceDigest": "sha256:fc8ca4901875b0021fcfc83196435ae2bf3ccb0fe618384bdb98f2d90f200c06",
-      "testName": "TF buffer interpolates bracketing transforms without latest fallback"
+      "resultDigest": "sha256:e2f2dda5187324c8553ca7963a445aefd32f665fa5370ccb5d715fed18db5be0",
+      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "testName": "TF buffer interpolates bracketing transforms without latest fallback",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "tf-interpolation",
+        "facts": {
+          "ok": true,
+          "interpolated": true
+        }
+      }
     },
     {
       "id": "tf-missing",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:9c63da2595db75ce9615d9849c5395a66e57c9d1a91992ad546463f107451cf2",
-      "evidenceDigest": "sha256:fc8ca4901875b0021fcfc83196435ae2bf3ccb0fe618384bdb98f2d90f200c06",
-      "testName": "TF buffer composes static chains and reports missing paths"
+      "resultDigest": "sha256:ab9d27f86050697c8d60a38b55eaa2c2e5c9ff104bcc7f946cf5115329480048",
+      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "testName": "TF buffer composes static chains and reports missing paths",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "tf-missing",
+        "facts": {
+          "composed": true,
+          "missingReason": "missing"
+        }
+      }
     },
     {
       "id": "tf-extrapolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:cbbbb4a428bb69a81d4c008d0cebe203ea307f9f87a29856adc1b47493f59d1a",
-      "evidenceDigest": "sha256:fc8ca4901875b0021fcfc83196435ae2bf3ccb0fe618384bdb98f2d90f200c06",
-      "testName": "TF buffer rejects extrapolation outside bracketing samples"
+      "resultDigest": "sha256:e6128c82bdbf1ad0c8c3f6eb82621d781769444f6b43d7e66a3af6e703027161",
+      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "testName": "TF buffer rejects extrapolation outside bracketing samples",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "time-tf",
+        "result": "pass",
+        "code": "tf-extrapolation",
+        "facts": {
+          "ok": false,
+          "reason": "extrapolation"
+        }
+      }
     }
   ],
   "displayExtensionLifecycle": [
@@ -176,73 +359,164 @@
       "id": "register",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:0cd3f30193d7a259b253a5cba5562550c52fbcfddbbfbda58c3fd52de94c536e",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration"
+      "resultDigest": "sha256:3bec26be49d16fb1b1be7d03a7cf9d0465599097cee6ec065c765097ed575d19",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-register",
+        "facts": {
+          "extensionId": "harness",
+          "grantedCapabilities": 2
+        }
+      }
     },
     {
       "id": "instantiate",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:1025ad3a6f106969d2d84aa490c549cca868a68f6ada302a71cdadecbb76c2fd",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly"
+      "resultDigest": "sha256:28608d411ed24119dc9c69aad6db58b482cc4c6493ee1b584c46fa0a8453a579",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-instantiate",
+        "facts": {
+          "finalState": "disposed",
+          "lifecycleStates": 7
+        }
+      }
     },
     {
       "id": "configure",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:7f20e7d8d0138236521a801890d93e3f98ebbe682819909053d4c9b7c72f4f8c",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration"
+      "resultDigest": "sha256:3072d1e6dc8846bf59e19cc7e58ffe2a6748f261641e5881ceaaac55b62a68d8",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-configure",
+        "facts": {
+          "configured": false,
+          "state": "error"
+        }
+      }
     },
     {
       "id": "attach",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:3a723ab80d74c7eeb9fecdcaac726ff10b3819abdbf18eb34b434092fd1ca2e0",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance"
+      "resultDigest": "sha256:45001c1ffb62eb5f70ac0fdbb859dc896d74a8602fca0ad60fabec8fe78510db",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-attach",
+        "facts": {
+          "disposedHandles": 2,
+          "sourceEpoch": 3
+        }
+      }
     },
     {
       "id": "update",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:6159d3b844e7c5540a4f7834e4a466bed71b0c1fda27714e1bb1eb407452b21e",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once"
+      "resultDigest": "sha256:8746df1a2ae8ec75f14509e40c069467a9e3d95e8ddc6dd8cdb363f5c8e7a386",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-update",
+        "facts": {
+          "originalUpdates": 1,
+          "proxyEnumerated": false
+        }
+      }
     },
     {
       "id": "render",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:18621a4c3e550eae2cc1d03778aa11e79c0e03b75411f08e4949cce94504211f",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "out-of-core range summary example renders through the v1 host with a bounded handle"
+      "resultDigest": "sha256:d3f9f32aa6d05f2888b0c1079b41768371a93368282d9d2430ee00b63f225c28",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "out-of-core range summary example renders through the v1 host with a bounded handle",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-render",
+        "facts": {
+          "activeHandles": 1,
+          "resourceBytes": 24,
+          "state": "rendering"
+        }
+      }
     },
     {
       "id": "suspend",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:d64cd9507e107b694f1254d05bb6846c86ec9b85d2c03d31035b653fb49a28f0",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance suspends an attached source and records the lifecycle transition"
+      "resultDigest": "sha256:88a142e81f8f3207d943c7a76691acfb5b594bd2e3bac1dc80811b467a02f693",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance suspends an attached source and records the lifecycle transition",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-suspend",
+        "facts": {
+          "sourceEpoch": 1,
+          "state": "suspended"
+        }
+      }
     },
     {
       "id": "error",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:df4435741a80b60d969236b15e0f39daff7b79f99b1bab24d7841b9c6e7a5240",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback"
+      "resultDigest": "sha256:d4bfea38640c901efe222b2ab1d3674ea37e41d51c166c3b4adaddfe021142f8",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-error",
+        "facts": {
+          "aggregateErrors": 2,
+          "state": "error"
+        }
+      }
     },
     {
       "id": "dispose",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:e2db97958e748e1010a8b050193f9ce0cda2f900f2164bdc5ac8af39e06519c2",
-      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
-      "testName": "out-of-core range summary example disposes its bounded handle idempotently"
+      "resultDigest": "sha256:bbd6469dc6d7f7dc1fc475f806cbc89f1439882b68af43d139fb82862b9e421e",
+      "evidenceDigest": "sha256:3d693f02a43b779466188d3b754991396268a6864f3df2c6e5b5a7b29ffb5826",
+      "testName": "out-of-core range summary example disposes its bounded handle idempotently",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "display-extension",
+        "result": "pass",
+        "code": "extension-dispose",
+        "facts": {
+          "activeHandles": 0,
+          "state": "disposed"
+        }
+      }
     }
   ],
   "rejections": [
@@ -250,81 +524,181 @@
       "id": "unknown-version",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:ef2b79dcba83e21222fe2a382914d49001149c09cf2a74bc5114562d321f58e2",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects unknown fixture versions"
+      "resultDigest": "sha256:b8dbb769d951c6c929f2748e799843b0e0569c159737480a6dad01650af175a5",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects unknown fixture versions",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "unknown-version",
+        "facts": {
+          "errorCode": "unsupported-version",
+          "message": "only exact fixture, protocol, and schema version 1 are supported"
+        }
+      }
     },
     {
       "id": "extra-key",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:c014d67dad8610f4b0de8cf52f3b6f7213e2a200345d86a09e8819f7029d1443",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects extra fixture keys"
+      "resultDigest": "sha256:fcc59a5deb4a8eec65ed40a2102329e5f02e91098800254db52a6975b2a07bb3",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects extra fixture keys",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "extra-key",
+        "facts": {
+          "errorCode": "invalid-fixture",
+          "message": "v1 conformance fixture has missing or unexpected fields"
+        }
+      }
     },
     {
       "id": "operation-widening",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:068cec516a3c2b684771daa9b918fef8481d8ef23268b958fd641d5570732e65",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects operation widening"
+      "resultDigest": "sha256:5b0d37f38d331d713036e4cf1c9fb77876d80e85701f36c279b3c2005383e03a",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects operation widening",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "operation-widening",
+        "facts": {
+          "errorCode": "operation-widening",
+          "message": "browser operations does not match the frozen v1 contract"
+        }
+      }
     },
     {
       "id": "capability-escalation",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:229fc9cdcd85ce43f27b90542d2b3739a6f4506a05e71fa43e7a7dd4f083ae56",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects capability escalation"
+      "resultDigest": "sha256:054bde728f44ca0225584324b49269d5abf6a854c4b317ff376edfe235d4c7d5",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects capability escalation",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "capability-escalation",
+        "facts": {
+          "errorCode": "capability-escalation",
+          "message": "extension capabilities does not match the frozen v1 contract"
+        }
+      }
     },
     {
       "id": "schema-conflict",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:1536c770b73cad500d898dfe9ad41a4c9aed1c0fdbbc67e376600a88f5536fbc",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects schema conflicts"
+      "resultDigest": "sha256:e7c9d035ed3486968ed2024e0eb561d7dbdfdbf8aec5b4bb7e428e4fa6217f21",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects schema conflicts",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "schema-conflict",
+        "facts": {
+          "errorCode": "schema-conflict",
+          "message": "schema providers disagree on canonical content"
+        }
+      }
     },
     {
       "id": "schema-oversize",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:907ccbd18e94c7e9c0d286a9debd6a0a1a5cdad9a0d0af0028f64bee9e6255f5",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects oversized schemas"
+      "resultDigest": "sha256:2e447582e77cc669dc2712ba4e0c478456dee982a664ab554535e05169165572",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects oversized schemas",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "schema-oversize",
+        "facts": {
+          "errorCode": "schema-oversize",
+          "message": "schema provider[0] exceeds the byte limit"
+        }
+      }
     },
     {
       "id": "schema-depth",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:e7da3dec8862e5e778de23c598f541071940ddb79804ab8046f4076896980454",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects excessively deep schemas"
+      "resultDigest": "sha256:2e32f1a5e39ddcb8b1468450272d735c55653e050dee24592f9b3279a3dbaece",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects excessively deep schemas",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "schema-depth",
+        "facts": {
+          "errorCode": "schema-depth",
+          "message": "schema admission exceeds the depth limit"
+        }
+      }
     },
     {
       "id": "lifetime-use-after-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:da7052b8ab90d8ca6ec85f4a4d5961e0aff2aedbf14c525b542f0cdc2bfd3e65",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use after release"
+      "resultDigest": "sha256:980529b1449bc84473ca0452623470cde5ad0d5fee8cf4844369fe93c1fe2af3",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use after release",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "lifetime-use-after-release",
+        "facts": {
+          "errorCode": "Error",
+          "message": "payload lease is not valid for the active source epoch"
+        }
+      }
     },
     {
       "id": "lifetime-double-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:644160379c5487e86a10097966ae45e8aa8178742da8fabdfaf1ab658da2dc55",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime double release"
+      "resultDigest": "sha256:c5107928366e394f092e45d1d7d5903237893e873c9e42f94df40cf7ca7ec447",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime double release",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "lifetime-double-release",
+        "facts": {
+          "errorCode": "Error",
+          "message": "payload lease released more than retained"
+        }
+      }
     },
     {
       "id": "lifetime-stale-epoch",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:5d292100d7128635ca344500742f93aa1b8734ee453410a72c4cac82243abb6d",
-      "evidenceDigest": "sha256:fed724c1e49650c2ab8c8f25fabbd23f7a8e5ef51e2f9aa7727fb05fc44171b7",
-      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime stale epochs"
+      "resultDigest": "sha256:b35771d631d54197a47f7bf8c3aa4091dd81de2373d1ce850074c1403f80fc05",
+      "evidenceDigest": "sha256:90a6e203fcc28e130410725fd4bb9389ee76231fa65523a81440a64316c17bec",
+      "testName": "protocol/schema v1 conformance freeze rejects payload lifetime stale epochs",
+      "semanticEvent": {
+        "schemaVersion": 1,
+        "domain": "rejection",
+        "result": "rejected",
+        "code": "lifetime-stale-epoch",
+        "facts": {
+          "errorCode": "Error",
+          "message": "payload lease is not valid for the active source epoch"
+        }
+      }
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { readBoundedBytes } from "./bounded-input.mjs";
 
 function digest(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -28,26 +29,19 @@ export default class DeterministicVitestReporter {
     };
     const raw = Buffer.from(`${JSON.stringify(report)}\n`, "utf8");
     const receiptPath = process.env.V1_CONFORMANCE_PRODUCTION_RECEIPT_PATH;
+    const eventPath = process.env.V1_CONFORMANCE_PRODUCTION_EVENT_PATH;
     const caseId = process.env.V1_CONFORMANCE_PROBE_CASE_ID;
-    if (receiptPath !== undefined || caseId !== undefined) {
-      if (receiptPath === undefined || caseId === undefined || reason !== "passed" || errors.length !== 0 || this.assertions.length !== 1 || this.assertions[0].status !== "passed") {
+    if (receiptPath !== undefined || eventPath !== undefined || caseId !== undefined) {
+      if (receiptPath === undefined || eventPath === undefined || caseId === undefined || reason !== "passed" || errors.length !== 0 || this.assertions.length !== 1 || this.assertions[0].status !== "passed") {
         throw new Error("production conformance observation requires one exact passing assertion");
       }
       const assertion = this.assertions[0];
-      const observedResult = caseId.startsWith("rejections/") ? "rejected" : "pass";
-      const semanticFacts = Object.freeze({
-        assertionFile: assertion.file,
-        assertionStatus: assertion.status,
-        assertionTestName: assertion.testName,
-        observationClass: observedResult === "rejected" ? "rejection-observed" : "behavior-pass",
-      });
+      const semanticEventRaw = readBoundedBytes(eventPath, 8 * 1024, "production semantic event");
       const receipt = Object.freeze({
-        schemaVersion: 2,
-        caseId,
-        observedResult,
+        schemaVersion: 3,
         status: "passed",
-        semanticFacts,
-        diagnosticDigest: digest(JSON.stringify(semanticFacts)),
+        semanticEventRawBase64: semanticEventRaw.toString("base64"),
+        semanticEventRawDigest: digest(semanticEventRaw),
         productionAssertion: assertion,
         productionAssertionDigest: digest(JSON.stringify(assertion)),
         productionReporterRawBase64: raw.toString("base64"),

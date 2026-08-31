@@ -1,7 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
+import { parseBoundedJsonBytes, readBoundedBytes } from "../../../scripts/toolchain/bounded-input.mjs";
 import { describe, expect, it, vi } from "vitest";
 
 import { ReferenceCountedPayloadLease, type SourceEpoch } from "../../core-model/src/index.js";
@@ -13,6 +15,7 @@ import {
   V1_FROZEN_EDGE_OPERATIONS,
   V1_FROZEN_EXTENSION_OPERATIONS,
   V1_CONFORMANCE_TEST_NAME_MAX_BYTES,
+  V1_CONFORMANCE_FIXTURE_MAX_BYTES,
   V1_SCHEMA_LIMITS,
   freezeV1Conformance,
   parseBrowserFrame,
@@ -22,7 +25,11 @@ import {
 import { sha256 } from "../src/canonical.js";
 
 const fixturePath = new URL("../fixtures/v1-conformance.json", import.meta.url);
-const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as unknown;
+const fixture = parseBoundedJsonBytes(
+  readBoundedBytes(fixturePath, V1_CONFORMANCE_FIXTURE_MAX_BYTES, "v1 conformance fixture"),
+  V1_CONFORMANCE_FIXTURE_MAX_BYTES,
+  "v1 conformance fixture",
+) as unknown;
 
 function cloneFixture(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(fixture)) as Record<string, unknown>;
@@ -40,6 +47,17 @@ function validSchemaAdmission(): Record<string, unknown> {
       },
     ],
   };
+}
+
+function captureError(run: () => unknown): Error & { readonly code?: string } {
+  try { run(); } catch (error) { return error as Error & { readonly code?: string }; }
+  throw new Error("expected operation to reject");
+}
+
+function emitRejection(code: string, error: Error & { readonly code?: string }): void {
+  emitV1SemanticEvent({ schemaVersion: 1, domain: "rejection", result: "rejected", code, facts: {
+    errorCode: error.code ?? error.name, message: error.message.slice(0, 256),
+  } });
 }
 
 describe("protocol/schema v1 conformance freeze", () => {
@@ -67,7 +85,7 @@ describe("protocol/schema v1 conformance freeze", () => {
       ...frozen.rejections,
     ]) {
       expect(existsSync(resolve(entry.evidence)), entry.evidence).toBe(true);
-      expect(`sha256:${createHash("sha256").update(readFileSync(resolve(entry.evidence))).digest("hex")}`, entry.evidence)
+      expect(`sha256:${createHash("sha256").update(readBoundedBytes(resolve(entry.evidence), 8 * 1024 * 1024, entry.evidence)).digest("hex")}`, entry.evidence)
         .toBe(entry.evidenceDigest);
     }
   });
@@ -128,15 +146,14 @@ describe("protocol/schema v1 conformance freeze", () => {
   });
 
   it("rejects unknown fixture versions", () => {
-    expect(() => parseV1ConformanceFixture({ ...cloneFixture(), protocolVersion: 2 })).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "unsupported-version" }),
-    );
+    const error = captureError(() => parseV1ConformanceFixture({ ...cloneFixture(), protocolVersion: 2 }));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "unsupported-version" }));
+    emitRejection("unknown-version", error);
   });
 
   it("rejects extra fixture keys", () => {
-    expect(() => parseV1ConformanceFixture({ ...cloneFixture(), surprise: true })).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }),
-    );
+    const error = captureError(() => parseV1ConformanceFixture({ ...cloneFixture(), surprise: true }));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
     const substitutedEvidence = cloneFixture();
     (substitutedEvidence.sources as Array<Record<string, unknown>>)[0]!.evidence = "packages/protocol/test/conformance-v1.test.ts";
     expect(() => parseV1ConformanceFixture(substitutedEvidence)).toThrow(/frozen case evidence/);
@@ -149,14 +166,15 @@ describe("protocol/schema v1 conformance freeze", () => {
     const oversizedTestName = cloneFixture();
     (oversizedTestName.sources as Array<Record<string, unknown>>)[0]!.testName = "x".repeat(V1_CONFORMANCE_TEST_NAME_MAX_BYTES + 1);
     expect(() => parseV1ConformanceFixture(oversizedTestName)).toThrow(/test name is oversized/);
+    emitRejection("extra-key", error);
   });
 
   it("rejects operation widening", () => {
     const widenedOperations = cloneFixture();
     widenedOperations.browserOperations = [...V1_FROZEN_BROWSER_OPERATIONS, "publish"];
-    expect(() => parseV1ConformanceFixture(widenedOperations)).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "operation-widening" }),
-    );
+    const error = captureError(() => parseV1ConformanceFixture(widenedOperations));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "operation-widening" }));
+    emitRejection("operation-widening", error);
   });
 
   it("rejects capability escalation", () => {
@@ -165,9 +183,9 @@ describe("protocol/schema v1 conformance freeze", () => {
       ...(escalatedCapabilities.extensionCapabilities as string[]),
       "raw-webgl",
     ];
-    expect(() => parseV1ConformanceFixture(escalatedCapabilities)).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "capability-escalation" }),
-    );
+    const error = captureError(() => parseV1ConformanceFixture(escalatedCapabilities));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "capability-escalation" }));
+    emitRejection("capability-escalation", error);
   });
 
   it("keeps write/service/action/parameter/raw command widening denied by the executable parser", () => {
@@ -184,22 +202,24 @@ describe("protocol/schema v1 conformance freeze", () => {
       ...(conflict.providers as object[]),
       { providerId: "schema-pack", providerVersion: "1", schema: { fields: [{ name: "other", type: "string" }] } },
     ];
-    expect(() => validateV1SchemaAdmission(conflict)).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-conflict" }),
-    );
+    const error = captureError(() => validateV1SchemaAdmission(conflict));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-conflict" }));
+    emitRejection("schema-conflict", error);
   });
 
   it("rejects oversized schemas", () => {
     const oversized = validSchemaAdmission(); oversized.providers = [{ providerId: "x", providerVersion: "1", schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }];
-    expect(() => validateV1SchemaAdmission(oversized))
-      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
+    const error = captureError(() => validateV1SchemaAdmission(oversized));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
+    emitRejection("schema-oversize", error);
   });
 
   it("rejects excessively deep schemas", () => {
     let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
     const tooDeep = validSchemaAdmission(); tooDeep.providers = [{ providerId: "x", providerVersion: "1", schema: deep }];
-    expect(() => validateV1SchemaAdmission(tooDeep))
-      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
+    const error = captureError(() => validateV1SchemaAdmission(tooDeep));
+    expect(error).toEqual(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
+    emitRejection("schema-depth", error);
   });
 
   it("rejects noncanonical schema provider structures and versions", () => {
@@ -227,17 +247,23 @@ describe("protocol/schema v1 conformance freeze", () => {
     const epoch = 1 as SourceEpoch;
     const lease = new ReferenceCountedPayloadLease(epoch, 16);
     lease.release();
-    expect(() => lease.assertUsable(epoch)).toThrow(/active source epoch/);
+    const error = captureError(() => lease.assertUsable(epoch));
+    expect(error.message).toMatch(/active source epoch/);
+    emitRejection("lifetime-use-after-release", error);
   });
 
   it("rejects payload lifetime double release", () => {
     const lease = new ReferenceCountedPayloadLease(1 as SourceEpoch, 16);
     lease.release();
-    expect(() => lease.release()).toThrow(/more than retained/);
+    const error = captureError(() => lease.release());
+    expect(error.message).toMatch(/more than retained/);
+    emitRejection("lifetime-double-release", error);
   });
 
   it("rejects payload lifetime stale epochs", () => {
     const stale = new ReferenceCountedPayloadLease(1 as SourceEpoch, 16);
-    expect(() => stale.assertUsable(2 as SourceEpoch)).toThrow(/active source epoch/);
+    const error = captureError(() => stale.assertUsable(2 as SourceEpoch));
+    expect(error.message).toMatch(/active source epoch/);
+    emitRejection("lifetime-stale-epoch", error);
   });
 });

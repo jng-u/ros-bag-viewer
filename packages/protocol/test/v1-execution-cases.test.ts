@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { readBoundedJson } from "../../../scripts/toolchain/bounded-input.mjs";
 
 import {
   V1_CONFORMANCE_PRODUCTION_PROBES,
@@ -15,6 +17,8 @@ function executeProductionProbe(probe: (typeof V1_CONFORMANCE_PRODUCTION_PROBES)
   const receiptPath = externalReceiptPath ?? join(tmpdir(), `v1-conformance-${process.pid}-${probe.caseId.replaceAll("/", "-")}.json`);
   if (externalReceiptPath === undefined) rmSync(receiptPath, { force: true });
   const command = v1ConformanceProductionCommand(probe.caseId, receiptPath);
+  const eventPath = command.env.V1_CONFORMANCE_PRODUCTION_EVENT_PATH!;
+  rmSync(eventPath, { force: true });
   const result = spawnSync(command.argv[0], command.argv.slice(1), {
     cwd: process.cwd(),
     env: command.env,
@@ -31,9 +35,13 @@ function executeProductionProbe(probe: (typeof V1_CONFORMANCE_PRODUCTION_PROBES)
     unhandledErrors: 0,
     assertions: [{ file: probe.evidence, testName: probe.testName, status: "passed" }],
   });
-  const receipt = JSON.parse(readFileSync(receiptPath!, "utf8")) as { caseId?: string; productionReporterRawBase64?: string };
-  expect(receipt.caseId).toBe(probe.caseId);
+  const receipt = readBoundedJson(receiptPath!, 64 * 1024, "production receipt") as {
+    semanticEventRawBase64?: string;
+    productionReporterRawBase64?: string;
+  };
+  expect(Buffer.from(receipt.semanticEventRawBase64 ?? "", "base64").byteLength).toBeGreaterThan(0);
   expect(Buffer.from(receipt.productionReporterRawBase64 ?? "", "base64")).toEqual(reporterRaw);
+  rmSync(eventPath, { force: true });
   if (externalReceiptPath === undefined) rmSync(receiptPath, { force: true });
 }
 

@@ -88,6 +88,14 @@ describe("secure live protocol", () => {
       maxRateHz: 1_000,
       maxMessageBytes: 1_024,
     })).toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "frame-too-large" }));
+    const encode = vi.spyOn(TextEncoder.prototype, "encode");
+    try {
+      expect(() => parseBrowserFrameJson("x".repeat(1_000_000), { ...DEFAULT_PROTOCOL_LIMITS, maxFrameBytes: 128 }))
+        .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "frame-too-large" }));
+      expect(encode).not.toHaveBeenCalled();
+    } finally {
+      encode.mockRestore();
+    }
   });
 
   it("binds exact edge plans to session, connection, nonce, expiry, allowlist, and bounded subscribe intent", () => {

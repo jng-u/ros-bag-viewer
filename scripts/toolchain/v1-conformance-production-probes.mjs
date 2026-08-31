@@ -79,7 +79,10 @@ export function v1ConformanceProductionCommand(caseId, receiptPath) {
       PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
       TZ: "UTC",
       V1_CONFORMANCE_PROBE_CASE_ID: caseId,
-      ...(receiptPath === undefined ? {} : { V1_CONFORMANCE_PRODUCTION_RECEIPT_PATH: receiptPath }),
+      ...(receiptPath === undefined ? {} : {
+        V1_CONFORMANCE_PRODUCTION_EVENT_PATH: `${receiptPath}.event`,
+        V1_CONFORMANCE_PRODUCTION_RECEIPT_PATH: receiptPath,
+      }),
     }),
   });
 }

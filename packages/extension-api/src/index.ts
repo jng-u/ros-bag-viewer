@@ -77,6 +77,7 @@ export interface TrustedExtensionContext {
 }
 
 export interface TrustedExtensionLifecycle<TConfig = unknown, TMessage = unknown> {
+  readonly __trustedExtensionLifecycleBrand: "same-realm-v1";
   configure(config: TConfig): void;
   attachSource(sourceEpoch: number): void;
   update(message: TrustedExtensionMessage<TMessage>): void;
@@ -87,6 +88,7 @@ export interface TrustedExtensionLifecycle<TConfig = unknown, TMessage = unknown
 }
 
 export interface TrustedExtensionDefinition<TConfig = unknown, TMessage = unknown> {
+  readonly __trustedExtensionDefinitionBrand: "same-realm-v1";
   readonly apiVersion: typeof TRUSTED_EXTENSION_API_VERSION;
   readonly id: string;
   readonly requiredCapabilities: readonly TrustedExtensionCapability[];
@@ -97,6 +99,64 @@ export interface TrustedExtensionNegotiation {
   readonly apiVersion: typeof TRUSTED_EXTENSION_API_VERSION;
   readonly extensionId: string;
   readonly grantedCapabilities: readonly TrustedExtensionCapability[];
+}
+
+const trustedBrandRegistryKey = Symbol.for("@ros-web-viewer/extension-api/trusted-brand-registry/v1");
+interface TrustedBrandRegistry { readonly definitions: WeakSet<object>; readonly lifecycles: WeakSet<object> }
+const brandGlobal = globalThis as typeof globalThis & { [trustedBrandRegistryKey]?: TrustedBrandRegistry };
+const trustedBrandRegistry = brandGlobal[trustedBrandRegistryKey] ?? Object.freeze({
+  definitions: new WeakSet<object>(),
+  lifecycles: new WeakSet<object>(),
+});
+if (brandGlobal[trustedBrandRegistryKey] === undefined) {
+  Object.defineProperty(brandGlobal, trustedBrandRegistryKey, { value: trustedBrandRegistry });
+}
+const trustedDefinitions = trustedBrandRegistry.definitions;
+const trustedLifecycles = trustedBrandRegistry.lifecycles;
+
+/**
+ * Builds the exact lifecycle object accepted by the trusted same-realm extension host.
+ * The positional API deliberately creates the object inside this module, so admission
+ * never needs to enumerate a caller-controlled Proxy.
+ */
+export function defineTrustedLifecycle<TConfig = unknown, TMessage = unknown>(
+  configure: TrustedExtensionLifecycle<TConfig, TMessage>["configure"],
+  attachSource: TrustedExtensionLifecycle<TConfig, TMessage>["attachSource"],
+  update: TrustedExtensionLifecycle<TConfig, TMessage>["update"],
+  render: TrustedExtensionLifecycle<TConfig, TMessage>["render"],
+  suspend: TrustedExtensionLifecycle<TConfig, TMessage>["suspend"],
+  handleError: TrustedExtensionLifecycle<TConfig, TMessage>["handleError"],
+  dispose: TrustedExtensionLifecycle<TConfig, TMessage>["dispose"],
+): TrustedExtensionLifecycle<TConfig, TMessage> {
+  for (const [name, operation] of Object.entries({ configure, attachSource, update, render, suspend, handleError, dispose })) {
+    if (typeof operation !== "function") throw new Error(`extension lifecycle ${name} must be a function`);
+  }
+  const lifecycle = Object.freeze({ configure, attachSource, update, render, suspend, handleError, dispose });
+  trustedLifecycles.add(lifecycle);
+  return lifecycle as unknown as TrustedExtensionLifecycle<TConfig, TMessage>;
+}
+
+/**
+ * Builds a trusted extension definition in this module's realm. Extensions are
+ * build-time workspace code, not an untrusted plugin ABI; cross-realm objects and
+ * arbitrary object-shaped definitions are intentionally unsupported.
+ */
+export function defineTrustedExtension<TConfig = unknown, TMessage = unknown>(
+  id: string,
+  create: (context: TrustedExtensionContext) => TrustedExtensionLifecycle<TConfig, TMessage>,
+  ...requiredCapabilities: TrustedExtensionCapability[]
+): TrustedExtensionDefinition<TConfig, TMessage> {
+  if (typeof id !== "string" || !IDENTIFIER.test(id)) throw new Error("extension id must be a normalized private identifier");
+  if (typeof create !== "function") throw new Error("extension create must be a function");
+  if (requiredCapabilities.length > TRUSTED_EXTENSION_CAPABILITIES.length) throw new Error("requiredCapabilities exceeds the item limit");
+  const definition = Object.freeze({
+    apiVersion: TRUSTED_EXTENSION_API_VERSION,
+    id,
+    requiredCapabilities: Object.freeze([...requiredCapabilities]),
+    create,
+  });
+  trustedDefinitions.add(definition);
+  return definition as unknown as TrustedExtensionDefinition<TConfig, TMessage>;
 }
 
 export interface TrustedExtensionTelemetry {
@@ -376,7 +436,11 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
       },
     });
     try {
-      const implementation = captureExactObject(create(context), LIFECYCLE_KEYS, "extension lifecycle");
+      const created = create(context);
+      if (typeof created !== "object" || created === null || !trustedLifecycles.has(created)) {
+        throw new Error("extension lifecycle must be created by defineTrustedLifecycle in the trusted host realm");
+      }
+      const implementation = captureExactObject(created, LIFECYCLE_KEYS, "extension lifecycle");
       if (LIFECYCLE_KEYS.some((key) => typeof implementation[key] !== "function")) {
         throw new Error("extension lifecycle operations must be functions");
       }
@@ -565,6 +629,9 @@ export class TrustedExtensionHost {
   register<TConfig, TMessage>(
     definition: TrustedExtensionDefinition<TConfig, TMessage>,
   ): TrustedExtensionNegotiation {
+    if (typeof definition !== "object" || definition === null || !trustedDefinitions.has(definition)) {
+      throw new Error("extension definition must be created by defineTrustedExtension in the trusted host realm");
+    }
     const candidate = captureExactObject(definition, DEFINITION_KEYS, "extension definition");
     if (candidate.apiVersion !== TRUSTED_EXTENSION_API_VERSION) {
       throw new Error(`unsupported extension API version: ${String(candidate.apiVersion)}`);

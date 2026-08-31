@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import {
   BUILTIN_RECORDED_SOURCES,
   ReferenceCountedPayloadLease,
@@ -86,8 +87,15 @@ describe("payload lease contract", () => {
 
   it("rejects stale epochs and invalidation", () => {
     const lease = new ReferenceCountedPayloadLease(epoch, 4);
-    expect(() => assertEpoch(lease, 2 as SourceEpoch)).toThrow(/active source epoch/);
+    let stale = "";
+    try { assertEpoch(lease, 2 as SourceEpoch); } catch (error) { stale = (error as Error).message; }
+    expect(stale).toMatch(/active source epoch/);
     lease.invalidate();
-    expect(() => assertEpoch(lease, epoch)).toThrow(/active source epoch/);
+    let invalidated = "";
+    try { assertEpoch(lease, epoch); } catch (error) { invalidated = (error as Error).message; }
+    expect(invalidated).toMatch(/active source epoch/);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "source-epoch-invalidation", facts: {
+      invalidated: invalidated.length > 0, staleRejected: stale.length > 0,
+    } });
   });
 });

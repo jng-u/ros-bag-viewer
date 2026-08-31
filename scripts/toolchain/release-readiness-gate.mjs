@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
@@ -15,9 +15,15 @@ import {
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const evidencePath = join(root, "docs/evidence/m5-release-readiness.json");
 const jsonCaps = Object.freeze({ evidence: 2 * 1024 * 1024, fixture: 256 * 1024, manifest: 16 * 1024 * 1024, package: 1024 * 1024, supplyChain: 16 * 1024 * 1024 });
+const repositoryFileMaxBytes = 16 * 1024 * 1024;
 
 function fail(message) {
   throw new Error(`release readiness gate: ${message}`);
+}
+
+function stablePlainData(value) {
+  return Array.isArray(value) ? value.map(stablePlainData) : value && typeof value === "object"
+    ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stablePlainData(value[key])])) : value;
 }
 
 function listFiles(directory) {
@@ -118,7 +124,10 @@ function validateRepositoryStops() {
   for (const path of listFiles(root)) {
     const repositoryPath = relative(root, path);
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-    const stopReason = repositoryStopReason(repositoryPath, readFileSync(path));
+    let bytes;
+    try { bytes = readBoundedBytes(path, repositoryFileMaxBytes, repositoryPath); }
+    catch (error) { fail(`oversized or unstable unallowlisted repository file ${repositoryPath}: ${error.message}`); }
+    const stopReason = repositoryStopReason(repositoryPath, bytes);
     if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
     const packageJson = readBoundedJson(path, jsonCaps.package, relative(root, path));
@@ -178,7 +187,7 @@ function validateProtocolSchemaV1() {
     const evidenceDigest = `sha256:${createHash("sha256").update(evidenceBytes).digest("hex")}`;
     if (row.evidenceDigest !== evidenceDigest) fail(`stale conformance evidence digest for ${row.id}`);
     const resultDigest = `sha256:${createHash("sha256")
-      .update(JSON.stringify([row.id, row.result, row.evidence, row.testName, evidenceDigest]))
+      .update(JSON.stringify([row.id, row.result, row.evidence, row.testName, evidenceDigest, stablePlainData(row.semanticEvent)]))
       .digest("hex")}`;
     if (row.resultDigest !== resultDigest) fail(`invalid conformance result digest for ${row.id}`);
   }

@@ -213,7 +213,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
       const subscriptions = [...active.subscriptions.values()];
       active.subscriptions.clear();
       for (const subscription of subscriptions) {
-        const response = await relay.handle({
+        const response = await relay.handleHostFrame({
           version: 1,
           operation: "unsubscribe",
           sessionId: "m3-session",
@@ -230,7 +230,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
     return {
       binding: { browserOrigin: credentials.browserOrigin, sessionId: "m3-session" },
       discoverTopics: async (): Promise<readonly LiveTopic[]> => {
-        const response = await relay.handle({
+        const response = await relay.handleHostFrame({
           version: 1,
           operation: "discover",
           sessionId: "m3-session",
@@ -255,7 +255,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
             const topic = liveTopics.find((candidate) => candidate.topic === topicId);
             if (!topic) throw new Error("live source requested a topic outside the relay catalog");
             const subscriptionId = `live-subscription-${this.#nextRequestSequence}`;
-            const response = await relay.handle({
+            const response = await relay.handleHostFrame({
               version: 1,
               operation: "subscribe",
               sessionId: "m3-session",
@@ -283,7 +283,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
             closed = true;
             for (const subscription of opened) {
               if (!active.subscriptions.delete(subscription.subscriptionId)) continue;
-              const response = await relay.handle({
+              const response = await relay.handleHostFrame({
                 version: 1,
                 operation: "unsubscribe",
                 sessionId: "m3-session",
@@ -385,7 +385,7 @@ export async function runSyntheticLoadProof(generation: RosGeneration): Promise<
   const fixture = createSyntheticFixture(generation);
   const connection = await fixture.connect(`${generation}-connection-1`);
   for (const [index, topic] of liveTopics.entries()) {
-    const response = await connection.handle(subscribeFrame(index, `subscription-${index}`, topic));
+    const response = await connection.handleHostFrame(subscribeFrame(index, `subscription-${index}`, topic));
     if (response.kind !== "ack") throw new Error(`failed to subscribe ${topic.topic}`);
   }
 

@@ -1,35 +1,43 @@
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { BoundedTimelineQueue, normalizeSchedulingTime, stableTimelineSort } from "../src/index.js";
 
 describe("timeline normalization", () => {
   it("selects valid record timestamps exactly", () => {
-    expect(normalizeSchedulingTime([
+    const observed = normalizeSchedulingTime([
       { source: "record", valueNanos: 10n },
       { source: "header", valueNanos: 12n },
-    ])).toEqual({ valueNanos: 10n, source: "record", diagnostics: [] });
+    ]);
+    expect(observed).toEqual({ valueNanos: 10n, source: "record", diagnostics: [] });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "record-time", facts: {
+      source: observed.source, valueNanos: observed.valueNanos.toString(), diagnostics: observed.diagnostics.length,
+    } });
   });
 
   it("selects valid header timestamps with diagnosed fallback", () => {
-    expect(
-      normalizeSchedulingTime([
+    const observed = normalizeSchedulingTime([
         { source: "record", valueNanos: -1n },
         { source: "header", valueNanos: 12n },
-      ]),
-    ).toEqual({
+      ]);
+    expect(observed).toEqual({
       valueNanos: 12n,
       source: "header",
       diagnostics: ["record timestamp is missing or invalid", "scheduling time fell back to header"],
     });
     expect(() => normalizeSchedulingTime([{ source: "record" }])).toThrow(/no valid scheduling timestamp/);
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "header-time", facts: {
+      source: observed.source, valueNanos: observed.valueNanos.toString(), diagnostics: observed.diagnostics.length,
+    } });
   });
 
   it("selects valid clock timestamps with diagnosed fallback", () => {
-    expect(normalizeSchedulingTime([
+    const observed = normalizeSchedulingTime([
       { source: "record", valueNanos: -1n },
       { source: "header" },
       { source: "clock", valueNanos: 42n },
-    ])).toEqual({
+    ]);
+    expect(observed).toEqual({
       valueNanos: 42n,
       source: "clock",
       diagnostics: [
@@ -38,6 +46,9 @@ describe("timeline normalization", () => {
         "scheduling time fell back to clock",
       ],
     });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "time-tf", result: "pass", code: "clock-time", facts: {
+      source: observed.source, valueNanos: observed.valueNanos.toString(), diagnostics: observed.diagnostics.length,
+    } });
   });
 
   it("sorts equal timestamps independently of arrival/chunk order", () => {

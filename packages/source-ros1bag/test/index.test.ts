@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import {
   BlobRangeSource,
   BoundedByteReader,
@@ -208,6 +209,9 @@ describe("ROS1 bag SourceBundle adapter", () => {
     expect(reader.snapshotTelemetry().readCalls).toBeGreaterThan(8);
     expect(reader.snapshotTelemetry().peakInFlightBytes).toBeLessThan(bytes.byteLength);
     expect(session.telemetry()).toMatchObject({ mode: "indexed", messagesRead: 1 });
+    emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "local-ros1-bag-indexed", facts: {
+      mode: session.mode, messages: messages.length, readCalls: reader.snapshotTelemetry().readCalls,
+    } });
   });
 
   it("exposes explicit sequential degraded behavior for an unfinalized bag", async () => {

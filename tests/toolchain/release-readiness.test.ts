@@ -203,7 +203,8 @@ describe("M5 release hardening", () => {
     for (const { command } of manifest.manifest.cases) {
       expect(Object.keys(command.env).sort()).toEqual([
         "CI", "LANG", "LC_ALL", "NODE_OPTIONS", "NO_COLOR", "PATH", "TZ",
-        "V1_CONFORMANCE_CASE_ID", "V1_CONFORMANCE_RECEIPT_PATH",
+        "V1_CONFORMANCE_PROBE_CASE_ID", "V1_CONFORMANCE_PRODUCTION_EVENT_PATH",
+        "V1_CONFORMANCE_PRODUCTION_RECEIPT_PATH",
       ]);
       expect(command.env).toMatchObject({ CI: "1", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_OPTIONS: "", TZ: "UTC" });
       expect(JSON.stringify(command.env)).not.toMatch(/must-not-leak|GITHUB_TOKEN|NPM_TOKEN/u);
@@ -217,7 +218,8 @@ describe("M5 release hardening", () => {
         value => { value.manifest.cases[0].normalizedAssertionDigest = 'sha256:' + '0'.repeat(64); },
         value => { value.manifest.cases[0].command.env.TZ = 'Asia/Seoul'; },
         value => { value.manifest.cases[0].semanticReceipt.productionReporterRawBase64 = Buffer.from('tampered').toString('base64'); },
-        value => { value.manifest.cases[0].semanticReceipt.observedResult = 'rejected'; },
+        value => { value.manifest.cases[0].semanticReceipt.semanticEventRawBase64 = Buffer.from('{}').toString('base64'); },
+        value => { value.manifest.cases[0].semanticEvent.result = 'rejected'; },
         value => { value.manifest.cases[0].productionCommand.env.TZ = 'Asia/Seoul'; },
         value => { value.manifest.cases[0].executionArtifacts[0].digest = 'sha256:' + '0'.repeat(64); },
       ];
