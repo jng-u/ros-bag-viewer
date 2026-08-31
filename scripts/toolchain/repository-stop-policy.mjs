@@ -37,9 +37,7 @@ function jsonContainsKubernetesResource(value) {
 
 function yamlContainsKubernetesResource(text) {
   return text.split(/^\s*(?:---|\.\.\.)\s*$/gmu).some((document) => {
-    const flowResource = document.includes("{") && [...document.matchAll(/\{([^{}]{0,65536})/gu)]
-      .some(([, object]) => /(?:^|,)\s*["']?apiVersion["']?\s*:/u.test(object) &&
-        /(?:^|,)\s*["']?kind["']?\s*:/u.test(object));
+    const flowResource = yamlFlowCollections(document).some(jsonContainsKubernetesResource);
     if (flowResource) return true;
     const containers = new Map();
     const sequences = new Map();
@@ -76,6 +74,79 @@ function yamlContainsKubernetesResource(text) {
     }
     return false;
   });
+}
+
+function yamlFlowCollections(text) {
+  if (text.length > 65536) return [];
+  const tokens = [];
+  for (let index = 0; index < text.length && tokens.length < 8192;) {
+    const character = text[index];
+    if (/\s/u.test(character)) { index += 1; continue; }
+    if (character === "#") {
+      index = text.indexOf("\n", index);
+      if (index < 0) break;
+      continue;
+    }
+    if ("{}[],:".includes(character)) { tokens.push(character); index += 1; continue; }
+    if (character === '"' || character === "'") {
+      const quote = character;
+      let value = character;
+      index += 1;
+      let escaped = false;
+      while (index < text.length) {
+        const next = text[index++];
+        value += next;
+        if (escaped) { escaped = false; continue; }
+        if (next === "\\") { escaped = true; continue; }
+        if (next === quote) break;
+      }
+      tokens.push(value);
+      continue;
+    }
+    let end = index;
+    while (end < text.length && !/[\s{}[\],:#]/u.test(text[end])) end += 1;
+    if (end === index) { index += 1; continue; }
+    tokens.push(text.slice(index, end));
+    index = end;
+  }
+
+  const parse = (start, depth = 0) => {
+    if (depth > 32) return undefined;
+    const opening = tokens[start];
+    if (opening !== "{" && opening !== "[") return undefined;
+    const result = opening === "{" ? {} : [];
+    let cursor = start + 1;
+    while (cursor < tokens.length) {
+      if (tokens[cursor] === (opening === "{" ? "}" : "]")) return { value: result, next: cursor + 1 };
+      if (opening === "{") {
+        const rawKey = tokens[cursor++];
+        if (!rawKey || "{}[],:".includes(rawKey) || tokens[cursor++] !== ":") return undefined;
+        const nested = parse(cursor, depth + 1);
+        const rawValue = nested ? nested.value : tokens[cursor];
+        if (rawValue === undefined || rawValue === "," || rawValue === "}" || rawValue === "]") return undefined;
+        cursor = nested ? nested.next : cursor + 1;
+        const key = decodeQuotedText(rawKey) ?? rawKey;
+        result[key] = nested ? rawValue : decodeQuotedText(rawValue) ?? rawValue;
+      } else {
+        const nested = parse(cursor, depth + 1);
+        const rawValue = nested ? nested.value : tokens[cursor];
+        if (rawValue === undefined || rawValue === "," || rawValue === "}" || rawValue === "]") return undefined;
+        cursor = nested ? nested.next : cursor + 1;
+        result.push(nested ? rawValue : decodeQuotedText(rawValue) ?? rawValue);
+      }
+      if (tokens[cursor] === ",") { cursor += 1; continue; }
+      if (tokens[cursor] !== (opening === "{" ? "}" : "]")) return undefined;
+    }
+    return undefined;
+  };
+
+  const collections = [];
+  for (let index = 0; index < tokens.length && collections.length < 256; index += 1) {
+    if (tokens[index] !== "{" && tokens[index] !== "[") continue;
+    const parsed = parse(index);
+    if (parsed) collections.push(parsed.value);
+  }
+  return collections;
 }
 
 function normalizedCredentialKey(key) { return key.normalize("NFKC").toLowerCase().replace(/[\s_-]/gu, ""); }
@@ -195,11 +266,27 @@ function replaceTypeScriptConstants(target, source) {
   for (const [name, values] of source) target.set(name, new Set(values));
 }
 
+function copyTypeScriptEnvironment(environment) {
+  return { constants: mergeTypeScriptConstants(environment.constants), loaders: new Set(environment.loaders) };
+}
+
+function mergeTypeScriptEnvironments(...environments) {
+  return {
+    constants: mergeTypeScriptConstants(...environments.map(({ constants }) => constants)),
+    loaders: new Set(environments.flatMap(({ loaders }) => [...loaders])),
+  };
+}
+
+function replaceTypeScriptEnvironment(target, source) {
+  replaceTypeScriptConstants(target.constants, source.constants);
+  target.loaders.clear();
+  for (const loader of source.loaders) target.loaders.add(loader);
+}
+
 function typescriptDeclaresInfrastructure(text, filename) {
   const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
-  const constants = new Map();
-  const loaderAliases = new Set();
+  const rootEnvironment = { constants: new Map(), loaders: new Set() };
   let found = false;
 
   const assign = (environment, name, expression, operator = ts.SyntaxKind.EqualsToken) => {
@@ -214,61 +301,90 @@ function typescriptDeclaresInfrastructure(text, filename) {
     else environment.set(name, values);
   };
 
-  const isLoaderAlias = (node) => {
+  const isLoaderAlias = (node, loaders) => {
     if (!node) return false;
-    if (ts.isIdentifier(node)) return node.text === "require" || loaderAliases.has(node.text);
-    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node) || node.parameters.length !== 1 ||
-      !ts.isIdentifier(node.parameters[0].name)) return false;
+    if (ts.isIdentifier(node)) return node.text === "require" || loaders.has(node.text);
+    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node) && !ts.isFunctionDeclaration(node) || node.parameters.length !== 1 ||
+      !ts.isIdentifier(node.parameters[0].name) || !node.body) return false;
     const parameter = node.parameters[0].name.text;
     const expression = ts.isBlock(node.body) ? node.body.statements.find(ts.isReturnStatement)?.expression : node.body;
     return Boolean(expression && ts.isCallExpression(expression) &&
-      (expression.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        ts.isIdentifier(expression.expression) && expression.expression.text === "require") &&
+      (expression.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(expression.expression) &&
+        (expression.expression.text === "require" || loaders.has(expression.expression.text))) &&
       ts.isIdentifier(expression.arguments[0]) && expression.arguments[0].text === parameter);
   };
 
-  const inspect = (node, environment = constants) => {
+  const inspectBlock = (node, environment) => {
+    const before = copyTypeScriptEnvironment(environment);
+    const declared = new Set();
+    for (const statement of node.statements) {
+      if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name)) declared.add(declaration.name.text);
+        }
+      } else if (ts.isFunctionDeclaration(statement) && statement.name) declared.add(statement.name.text);
+      inspect(statement, environment);
+    }
+    for (const name of declared) {
+      if (before.constants.has(name)) environment.constants.set(name, new Set(before.constants.get(name)));
+      else environment.constants.delete(name);
+      if (before.loaders.has(name)) environment.loaders.add(name);
+      else environment.loaders.delete(name);
+    }
+  };
+
+  const inspect = (node, environment = rootEnvironment) => {
     if (found) return;
     if (ts.isImportDeclaration(node)) {
-      if ([...typescriptStrings(node.moduleSpecifier, environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
+      if ([...typescriptStrings(node.moduleSpecifier, environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-      if ([...typescriptStrings(node.moduleSpecifier, environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
+      if ([...typescriptStrings(node.moduleSpecifier, environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       if (node.initializer) inspect(node.initializer, environment);
-      assign(environment, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
-      if (isLoaderAlias(node.initializer)) loaderAliases.add(node.name.text);
-      else loaderAliases.delete(node.name.text);
+      assign(environment.constants, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
+      if (isLoaderAlias(node.initializer, environment.loaders)) environment.loaders.add(node.name.text);
+      else environment.loaders.delete(node.name.text);
       return;
     } else if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) &&
       [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind)) {
       inspect(node.right, environment);
-      assign(environment, node.left.text, node.right, node.operatorToken.kind);
+      assign(environment.constants, node.left.text, node.right, node.operatorToken.kind);
       if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-        if (isLoaderAlias(node.right)) loaderAliases.add(node.left.text);
-        else loaderAliases.delete(node.left.text);
+        if (isLoaderAlias(node.right, environment.loaders)) environment.loaders.add(node.left.text);
+        else environment.loaders.delete(node.left.text);
       }
       return;
     } else if (ts.isIfStatement(node)) {
       inspect(node.expression, environment);
-      const before = mergeTypeScriptConstants(environment);
-      const whenTrue = mergeTypeScriptConstants(before);
-      const whenFalse = mergeTypeScriptConstants(before);
+      const before = copyTypeScriptEnvironment(environment);
+      const whenTrue = copyTypeScriptEnvironment(before);
+      const whenFalse = copyTypeScriptEnvironment(before);
       inspect(node.thenStatement, whenTrue);
       if (node.elseStatement) inspect(node.elseStatement, whenFalse);
-      replaceTypeScriptConstants(environment, mergeTypeScriptConstants(whenTrue, whenFalse));
+      replaceTypeScriptEnvironment(environment, mergeTypeScriptEnvironments(whenTrue, whenFalse));
+      return;
+    } else if (ts.isBlock(node)) {
+      inspectBlock(node, environment);
       return;
     } else if (ts.isCallExpression(node)) {
       const loader = node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        ts.isIdentifier(node.expression) && (node.expression.text === "require" || loaderAliases.has(node.expression.text));
+        ts.isIdentifier(node.expression) && (node.expression.text === "require" || environment.loaders.has(node.expression.text));
       if (loader) {
-        if ([...typescriptStrings(node.arguments[0], environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
+        if ([...typescriptStrings(node.arguments[0], environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
       }
     } else if (ts.isFunctionLike(node)) {
-      const localConstants = new Map(environment);
+      const localEnvironment = copyTypeScriptEnvironment(environment);
       for (const parameter of node.parameters) {
-        if (ts.isIdentifier(parameter.name)) localConstants.delete(parameter.name.text);
+        if (ts.isIdentifier(parameter.name)) {
+          localEnvironment.constants.delete(parameter.name.text);
+          localEnvironment.loaders.delete(parameter.name.text);
+        }
       }
-      if (node.body) inspect(node.body, localConstants);
+      if (node.body) inspect(node.body, localEnvironment);
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        if (isLoaderAlias(node, environment.loaders)) environment.loaders.add(node.name.text);
+        else environment.loaders.delete(node.name.text);
+      }
       return;
     }
     node.forEachChild((child) => inspect(child, environment));
@@ -319,50 +435,96 @@ function pythonStrings(expression, constants, depth = 0) {
 }
 
 function pythonDeclaresInfrastructure(text) {
-  const constants = new Map();
-  const importlibAliases = new Set(["importlib"]);
-  const importModuleAliases = new Set();
-  const loaderAliases = new Set(["__import__"]);
+  let state = {
+    constants: new Map(), importlibAliases: new Set(["importlib"]),
+    importModuleAliases: new Set(), loaderAliases: new Set(["__import__"]),
+  };
+  const copyState = (source) => ({
+    constants: mergeTypeScriptConstants(source.constants), importlibAliases: new Set(source.importlibAliases),
+    importModuleAliases: new Set(source.importModuleAliases), loaderAliases: new Set(source.loaderAliases),
+  });
+  const mergeStates = (...states) => ({
+    constants: mergeTypeScriptConstants(...states.map(({ constants }) => constants)),
+    importlibAliases: new Set(states.flatMap(({ importlibAliases }) => [...importlibAliases])),
+    importModuleAliases: new Set(states.flatMap(({ importModuleAliases }) => [...importModuleAliases])),
+    loaderAliases: new Set(states.flatMap(({ loaderAliases }) => [...loaderAliases])),
+  });
+  const isLoaderExpression = (expression) => {
+    const loader = expression.trim();
+    if (state.loaderAliases.has(loader) || state.importModuleAliases.has(loader) ||
+      [...state.importlibAliases].some((alias) => loader === `${alias}.import_module`)) return true;
+    const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_.]\w*(?:\.\w+)*)\s*\(\s*\1\s*\)$/u.exec(loader);
+    return Boolean(lambda && isLoaderExpression(lambda[2]));
+  };
   const lines = text.split(/\r?\n/u);
-  const conditionals = [];
+  const contexts = [];
+  const closeContext = () => {
+    const context = contexts.pop();
+    if (context.type === "function") {
+      state = context.before;
+      if (context.wrapper) state.loaderAliases.add(context.name);
+    } else {
+      context.branches.push(copyState(state));
+      if (!context.hasElse) context.branches.push(context.before);
+      state = mergeStates(...context.branches);
+    }
+  };
   for (const line of lines) {
     const indentation = /^\s*/u.exec(line)[0].length;
-    while (conditionals.length > 0 && indentation <= conditionals.at(-1).indentation && !/^\s*(?:elif|else)\b/u.test(line)) {
-      const conditional = conditionals.pop();
-      replaceTypeScriptConstants(constants, mergeTypeScriptConstants(conditional.before, constants));
+    const branch = /^\s*(elif\b.*|else)\s*:\s*(?:#.*)?$/u.exec(line);
+    while (contexts.length > 0 && indentation <= contexts.at(-1).indentation &&
+      !(branch && contexts.at(-1).type === "conditional" && indentation === contexts.at(-1).indentation)) {
+      closeContext();
     }
-    if (/^\s*(?:if|elif)\b.*:\s*(?:#.*)?$/u.test(line)) {
-      conditionals.push({ indentation, before: mergeTypeScriptConstants(constants) });
+    if (branch && contexts.at(-1)?.type === "conditional" && indentation === contexts.at(-1).indentation) {
+      const conditional = contexts.at(-1);
+      conditional.branches.push(copyState(state));
+      state = copyState(conditional.before);
+      if (branch[1] === "else") conditional.hasElse = true;
+      continue;
+    }
+    if (/^\s*if\b.*:\s*(?:#.*)?$/u.test(line)) {
+      contexts.push({ type: "conditional", indentation, before: copyState(state), branches: [], hasElse: false });
+      continue;
+    }
+    const definition = /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*)[^)]*\)\s*:\s*(?:#.*)?$/u.exec(line);
+    if (definition) {
+      contexts.push({ type: "function", indentation, before: copyState(state), name: definition[1], parameter: definition[2], wrapper: false });
+      state = copyState(state);
+      state.constants.delete(definition[2]);
+      state.loaderAliases.delete(definition[2]);
       continue;
     }
     const importlib = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/u.exec(line);
-    if (importlib) importlibAliases.add(importlib[1] ?? "importlib");
+    if (importlib) state.importlibAliases.add(importlib[1] ?? "importlib");
     const importModule = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(line);
     if (importModule) {
-      importModuleAliases.add(importModule[1] ?? "import_module");
-      loaderAliases.add(importModule[1] ?? "import_module");
+      state.importModuleAliases.add(importModule[1] ?? "import_module");
+      state.loaderAliases.add(importModule[1] ?? "import_module");
     }
     const directImport = /^\s*(?:from|import)\s+(aws_cdk|cdktf|pulumi(?:_[A-Za-z0-9_]+)?)(?:\b|\.)/u.exec(line);
     if (directImport) return true;
     const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/u.exec(line);
     if (assignment) {
-      const values = pythonStrings(assignment[2], constants);
-      if (values.size > 0) constants.set(assignment[1], values);
-      else constants.delete(assignment[1]);
-      const loader = assignment[2].trim();
-      if (loaderAliases.has(loader) || importModuleAliases.has(loader) ||
-        [...importlibAliases].some((alias) => loader === `${alias}.import_module`)) loaderAliases.add(assignment[1]);
-      else loaderAliases.delete(assignment[1]);
+      const values = pythonStrings(assignment[2], state.constants);
+      if (values.size > 0) state.constants.set(assignment[1], values);
+      else state.constants.delete(assignment[1]);
+      if (isLoaderExpression(assignment[2])) state.loaderAliases.add(assignment[1]);
+      else state.loaderAliases.delete(assignment[1]);
     }
-    const loaders = [...loaderAliases, ...importModuleAliases, ...[...importlibAliases].map((alias) => `${alias}.import_module`)]
+    const returned = /^\s*return\s+([A-Za-z_.]\w*(?:\.\w+)*)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
+    const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");
+    if (returned && activeFunction && returned[2] === activeFunction.parameter && isLoaderExpression(returned[1])) activeFunction.wrapper = true;
+    const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)]
       .map((loader) => loader.replace(".", "\\."))
       .join("|");
     const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
     for (const match of line.matchAll(calls)) {
-      const values = pythonStrings(match[1].split(",", 1)[0], constants);
+      const values = pythonStrings(match[1].split(",", 1)[0], state.constants);
       if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
     }
   }
+  while (contexts.length > 0) closeContext();
   return false;
 }
 
