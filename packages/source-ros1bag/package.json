@@ -1,0 +1,11 @@
+{
+  "name": "@ros-web-viewer/source-ros1bag",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test"
+  }
+}
