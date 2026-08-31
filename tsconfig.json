@@ -1,1 +1,20 @@
-{"files":[],"references":[{"path":"./packages/core-model"},{"path":"./packages/worker-runtime"},{"path":"./packages/source-mcap"},{"path":"./packages/source-ros1bag"},{"path":"./packages/source-ros2-sqlite"},{"path":"./packages/timeline"},{"path":"./packages/tf"},{"path":"./packages/render-core"},{"path":"./packages/displays-core"},{"path":"./packages/m1-integration"},{"path":"./apps/web"},{"path":"./apps/relay"}]}
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core-model" },
+    { "path": "./packages/worker-runtime" },
+    { "path": "./packages/source-mcap" },
+    { "path": "./packages/source-ros1bag" },
+    { "path": "./packages/source-ros2-sqlite" },
+    { "path": "./packages/source-live" },
+    { "path": "./packages/protocol" },
+    { "path": "./packages/edge-runtime" },
+    { "path": "./packages/timeline" },
+    { "path": "./packages/tf" },
+    { "path": "./packages/render-core" },
+    { "path": "./packages/displays-core" },
+    { "path": "./packages/m1-integration" },
+    { "path": "./apps/web" },
+    { "path": "./apps/relay" }
+  ]
+}

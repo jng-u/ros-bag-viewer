@@ -16,7 +16,13 @@ import {
   type EdgeReply,
   type RelayEdgeIdentity,
 } from "../../packages/edge-runtime/src/index.js";
-import { createSyntheticFixture, liveTopics, runSyntheticLoadProof } from "./proof-harness.js";
+import { BoundedLiveSource } from "../../packages/source-live/src/index.js";
+import {
+  SyntheticLiveRelayTransport,
+  createSyntheticFixture,
+  liveTopics,
+  runSyntheticLoadProof,
+} from "./proof-harness.js";
 
 class NoopPort implements EdgeReadPort {
   readonly calls: string[] = [];
@@ -268,6 +274,46 @@ describe("M3 negative protocol and boundary proof", () => {
 });
 
 describe("M3 deterministic synthetic load evidence", () => {
+  it("feeds strict relay events into the bounded live source and advances reconnect epochs", async () => {
+    const fixture = createSyntheticFixture("ros2");
+    const transport = new SyntheticLiveRelayTransport(fixture);
+    const source = new BoundedLiveSource(
+      transport,
+      { browserOrigin: "https://viewer.example", sessionToken: "browser-secret" },
+      {
+        maxTopicsPerSubscription: 2,
+        maxMessageBytes: 2_048,
+        maxMessagesPerSecond: 100,
+        maxQueueMessages: 4,
+        maxQueueBytes: 4_096,
+      },
+    );
+
+    expect(await source.connect()).toMatchObject([
+      { id: "/camera/image", name: "/camera/image", schema: { typeName: "sensor_msgs/msg/Image", encoding: "cdr" } },
+      { id: "/points", name: "/points", schema: { typeName: "sensor_msgs/msg/PointCloud2", encoding: "cdr" } },
+    ]);
+    await source.subscribe(["/points"]);
+    fixture.setNow(10_001);
+    fixture.port.emit("/points", Uint8Array.of(1, 2, 3));
+    expect(transport.flushFromEdge()).toBe(1);
+    expect(source.drain()).toMatchObject([{
+      version: 1,
+      sourceEpoch: 1,
+      topicId: "/points",
+      topicName: "/points",
+      sequence: 0n,
+      schema: { typeName: "sensor_msgs/msg/PointCloud2", encoding: "cdr" },
+      payload: Uint8Array.of(1, 2, 3),
+    }]);
+    expect(source.telemetry).toMatchObject({ acceptedMessages: 1, deliveredMessages: 1, sourceEpoch: 1 });
+
+    expect(await source.reconnect()).toHaveLength(2);
+    expect(source.telemetry).toMatchObject({ sourceEpoch: 2, reconnects: 1 });
+    await source.close();
+    await fixture.edge.close();
+  });
+
   it.each(["ros1", "ros2"] as const)("keeps %s point-cloud/image-like load bounded and reconnects by epoch", async (generation) => {
     const proof = await runSyntheticLoadProof(generation);
     expect(proof.attemptedFrames).toBe(1_000);

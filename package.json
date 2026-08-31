@@ -10,7 +10,7 @@
     "test:toolchain": "vitest run tests/toolchain/smoke.test.ts",
     "test:unit": "vitest run --passWithNoTests",
     "test:integration": "vitest run tests/m1/vertical-slice.test.ts packages/m2-recorded-gate/test/index.test.ts",
-    "test:security": "vitest run tests/m0/baseline.test.ts -t 'approval evidence|paid-infrastructure'",
+    "test:security": "vitest run tests/m0/baseline.test.ts -t 'approval evidence|paid-infrastructure' && vitest run tests/m3-live/security-gate.test.ts",
     "test:e2e": "vitest run tests/m1/vertical-slice.test.ts packages/m2-recorded-gate/test/index.test.ts",
     "test:a11y": "vitest run tests/m0/baseline.test.ts -t 'accessibility'",
     "test:ux": "vitest run tests/m0/baseline.test.ts -t 'desktop UX baseline'",
@@ -20,6 +20,8 @@
     "check:m0": "vitest run tests/m0/baseline.test.ts",
     "check:m1": "vitest run tests/m1",
     "check:m2": "vitest run packages/m2-recorded-gate/test/index.test.ts packages/source-ros1bag/test/index.test.ts packages/source-ros2-sqlite/test/index.test.ts packages/displays-core/test/index.test.ts",
+    "check:m3": "vitest run tests/m3-live",
+    "evidence:m3": "UPDATE_M3_EVIDENCE=1 vitest run tests/m3-live/generate-evidence.test.ts",
     "audit:dependencies": "corepack pnpm audit --audit-level high",
     "report:licenses": "node scripts/toolchain/licenses-report.mjs",
     "sbom": "node scripts/toolchain/sbom-report.mjs"

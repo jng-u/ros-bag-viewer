@@ -40,6 +40,7 @@ describe("M3 evidence generator", () => {
           dropsAndBackpressureVisible: true,
           reconnectEpochsIncrease: true,
           telemetryIsBoundedAndRedacted: true,
+          boundedLiveSourceConsumesRelayFrames: true,
         },
         limitations: [
           "All protocol, load, latency, and reachability results are in-process deterministic synthetic contract evidence.",

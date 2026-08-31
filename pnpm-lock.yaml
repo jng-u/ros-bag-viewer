@@ -33,7 +33,11 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1))
 
-  apps/relay: {}
+  apps/relay:
+    dependencies:
+      '@ros-web-viewer/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
 
   apps/web:
     dependencies:
@@ -48,6 +52,8 @@ importers:
 
   packages/displays-core: {}
 
+  packages/edge-runtime: {}
+
   packages/m1-integration:
     dependencies:
       '@ros-web-viewer/source-mcap':
@@ -57,7 +63,11 @@ importers:
         specifier: workspace:*
         version: link:../worker-runtime
 
+  packages/protocol: {}
+
   packages/render-core: {}
+
+  packages/source-live: {}
 
   packages/source-mcap:
     dependencies:
