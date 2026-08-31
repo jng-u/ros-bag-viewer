@@ -54,7 +54,9 @@ The topic browser and inspector may collapse to labeled rails, but the timeline 
 
 ### Share a session
 
-The share entry summarizes what will be shared and never implies upload has occurred. Before the hosted milestone it is visibly unavailable with explanatory copy; it must not collect credentials or choose infrastructure.
+The local reference UI can open an HTTPS hosted link whose opaque capability is carried only in its fragment, or accept the opaque capability directly. It never renders or persists that capability, a grant, storage credential, or object key. The opened source enters the same topic/display/timeline model as a local recording and presents only bounded aggregate range, byte, denial, and active-reader counts.
+
+Loading names manifest and immutable-source validation. Expired, revoked, deleted, retention-expired, invalid, and unavailable sessions receive distinct accessible recovery copy without echoing backend diagnostics. Creation/upload remains visibly unavailable in the reference shell, so the UI never implies an upload occurred. Enterprise catalog, search, administration, RBAC, collaboration, and infrastructure-selection controls are excluded.
 
 ### Connect live
 

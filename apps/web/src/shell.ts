@@ -8,7 +8,7 @@ export type CompatibilityTier =
 
 export type RecordedSourceFormat = "mcap" | "ros1-bag" | "ros2-sqlite";
 
-export type SourceMode = "recorded" | "live";
+export type SourceMode = "recorded" | "hosted" | "live";
 
 export type LiveConnectionState = "disconnected" | "connecting" | "connected" | "degraded" | "reconnecting";
 
@@ -69,6 +69,29 @@ export interface LiveConnectionSelection {
   readonly sessionToken: string;
 }
 
+export interface HostedSessionSelection {
+  readonly link: string;
+}
+
+export type HostedSessionFailureCode =
+  | "deleted"
+  | "expired"
+  | "invalid"
+  | "retention-expired"
+  | "revoked"
+  | "unavailable";
+
+export interface HostedObservabilitySummary {
+  readonly rangeRequests: number;
+  readonly transferredBytes: number;
+  readonly deniedRequests: number;
+  readonly activeReaders: number;
+}
+
+export interface OpenHostedResult extends OpenLocalResult {
+  readonly observability: HostedObservabilitySummary;
+}
+
 export interface LiveTelemetrySummary {
   readonly state: LiveConnectionState;
   readonly sourceEpoch: number;
@@ -97,6 +120,7 @@ export interface LivePollResult {
 export interface DesktopShellPorts {
   readonly openLocalMcap?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
   readonly openLocalRecording?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
+  readonly openHostedSession?: (selection: HostedSessionSelection) => Promise<OpenHostedResult>;
   readonly seek: (timeNanos: bigint) => Promise<SeekResult>;
   readonly connectLive?: (selection: LiveConnectionSelection) => Promise<OpenLiveResult>;
   readonly subscribeLive?: (topicIds: readonly string[]) => Promise<void>;
@@ -146,6 +170,7 @@ export interface DesktopShellState {
   readonly indexState: "none" | "indexed" | "sequential";
   readonly liveState: LiveConnectionState;
   readonly liveTelemetry?: LiveTelemetrySummary;
+  readonly hostedObservability?: HostedObservabilitySummary;
   readonly focusedRegion: ShellRegion;
   readonly blockingError?: string;
   readonly notice?: string;
@@ -208,6 +233,7 @@ export class DesktopShellController {
       sourceMode: "recorded",
       liveState: "disconnected",
       liveTelemetry: undefined,
+      hostedObservability: undefined,
       sourceLabel: selection.name,
       blockingError: undefined,
       notice: `Opening ${selection.name}; indexing and resolving schemas.`,
@@ -247,6 +273,56 @@ export class DesktopShellController {
     }
   }
 
+  async openHosted(selection: HostedSessionSelection): Promise<void> {
+    if (!this.ports.openHostedSession) throw new Error("no hosted-source runtime is registered");
+    this.#state = {
+      ...this.#state,
+      phase: "loading",
+      sourceMode: "hosted",
+      sourceFormat: undefined,
+      sourceLabel: "Hosted recording",
+      sourceHash: undefined,
+      sourceSelection: undefined,
+      liveState: "disconnected",
+      liveTelemetry: undefined,
+      hostedObservability: undefined,
+      topics: [],
+      displays: [],
+      activeDisplayId: undefined,
+      currentTimeNanos: 0n,
+      durationNanos: 0n,
+      indexState: "none",
+      blockingError: undefined,
+      notice: "Opening an opaque hosted session; validating the signed manifest and immutable source.",
+    };
+
+    try {
+      const result = await this.ports.openHostedSession(selection);
+      this.#state = {
+        ...this.#state,
+        phase: result.indexState === "sequential" ? "degraded" : "ready",
+        sourceLabel: "Hosted recording",
+        sourceHash: result.sourceHash,
+        durationNanos: result.durationNanos,
+        epoch: result.epoch,
+        indexState: result.indexState,
+        topics: result.topics,
+        hostedObservability: result.observability,
+        notice:
+          result.diagnostic ??
+          `${result.topics.length} hosted topics discovered. Access is read-only and capability-scoped.`,
+      };
+    } catch (error) {
+      const code = hostedFailureCode(error);
+      this.#state = {
+        ...this.#state,
+        phase: "error",
+        blockingError: hostedFailureMessage(code),
+        notice: undefined,
+      };
+    }
+  }
+
   retryOpen(): Promise<void> {
     const selection = this.#state.sourceSelection;
     if (!selection) throw new Error("no local source is available to retry");
@@ -265,6 +341,7 @@ export class DesktopShellController {
       sourceSelection: undefined,
       liveState: "connecting",
       liveTelemetry: undefined,
+      hostedObservability: undefined,
       topics: [],
       displays: [],
       activeDisplayId: undefined,
@@ -493,6 +570,35 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function hostedFailureCode(error: unknown): HostedSessionFailureCode {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { readonly code?: unknown }).code;
+    if (
+      code === "deleted" ||
+      code === "expired" ||
+      code === "invalid" ||
+      code === "retention-expired" ||
+      code === "revoked" ||
+      code === "unavailable"
+    ) {
+      return code;
+    }
+  }
+  return "unavailable";
+}
+
+function hostedFailureMessage(code: HostedSessionFailureCode): string {
+  const messages: Record<HostedSessionFailureCode, string> = {
+    deleted: "This hosted session was deleted. Ask the session owner for a new source.",
+    expired: "This hosted session expired. Ask the session owner for a new opaque link.",
+    invalid: "This hosted link is invalid or was altered. Check the complete link and try again.",
+    "retention-expired": "This hosted session is no longer retained. Ask the session owner to share it again.",
+    revoked: "This hosted session was revoked. Ask the session owner for a new opaque link.",
+    unavailable: "The hosted session is unavailable. Retry later or open another source.",
+  };
+  return messages[code];
+}
+
 function displayName(kind: DisplayKind): string {
   if (kind === "point-cloud") return "Point cloud";
   return kind.charAt(0).toUpperCase() + kind.slice(1);
@@ -532,17 +638,25 @@ export function renderDesktopShell(controller: DesktopShellController): string {
   const inspector = activeDisplay
     ? `<form aria-label="Display configuration"><label>Fixed frame<input name="fixed-frame" value="${escapeHtml(activeDisplay.configuration.fixedFrame)}" aria-describedby="display-config-help"></label><label>Color field<input name="color" value="${escapeHtml(activeDisplay.configuration.color)}"></label><label>Scale<input name="scale" type="number" min="0.01" step="0.01" value="${activeDisplay.configuration.scale}"></label><p id="display-config-help">Invalid edits preserve the last valid rendering.</p></form>`
     : `<p>Select a display to inspect frame, color, scale, schema, and diagnostics.</p>`;
-  const modeSummary = state.sourceMode === "live" ? "secure live · read-only" : `local ${state.sourceFormat ?? "recording"}`;
+  const modeSummary =
+    state.sourceMode === "live"
+      ? "secure live · read-only"
+      : state.sourceMode === "hosted"
+        ? "hosted · read-only"
+        : `local ${state.sourceFormat ?? "recording"}`;
   const liveTelemetry = state.liveTelemetry
     ? `<span>Queue: ${state.liveTelemetry.queuedMessages} messages / ${state.liveTelemetry.queuedBytes} bytes</span><span>Dropped: ${state.liveTelemetry.droppedMessages}</span>`
+    : "";
+  const hostedObservability = state.hostedObservability
+    ? `<span>Hosted reads: ${state.hostedObservability.rangeRequests} ranges / ${state.hostedObservability.transferredBytes} bytes</span><span>Denied: ${state.hostedObservability.deniedRequests}</span><span>Active readers: ${state.hostedObservability.activeReaders}</span>`
     : "";
   const timeline =
     state.sourceMode === "live"
       ? `<output>Latest source time: ${state.currentTimeNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: source / receipt</span>${liveTelemetry}`
-      : `<button type="button" aria-label="Play recording">Play</button><button type="button" aria-label="Step backward">−1</button><input type="range" min="0" max="${state.durationNanos}" value="${state.currentTimeNanos}" aria-label="Seek recording"><button type="button" aria-label="Step forward">+1</button><output>${state.currentTimeNanos} / ${state.durationNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: record</span><span>Index: ${state.indexState}</span>`;
+      : `<button type="button" aria-label="Play recording">Play</button><button type="button" aria-label="Step backward">−1</button><input type="range" min="0" max="${state.durationNanos}" value="${state.currentTimeNanos}" aria-label="Seek recording"><button type="button" aria-label="Step forward">+1</button><output>${state.currentTimeNanos} / ${state.durationNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: record</span><span>Index: ${state.indexState}</span>${hostedObservability}`;
 
   return `<div class="desktop-shell" data-phase="${state.phase}" data-focused-region="${state.focusedRegion}" aria-label="Read-only ROS data desktop viewer">
-  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No source")}</strong><span>Mode: ${modeSummary}</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local recording</button><span id="source-help">Recording bytes remain local.</span><button type="button" data-action="connect-live" aria-describedby="live-help">Connect secure live (read-only)</button><span id="live-help">Uses an authenticated browser session; topic access is explicit and bounded.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Unavailable; no upload occurs.</span></header>
+  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No source")}</strong><span>Mode: ${modeSummary}</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local recording</button><span id="source-help">Recording bytes remain local.</span><button type="button" data-action="open-hosted" aria-describedby="hosted-help">Open hosted link</button><span id="hosted-help">Uses an opaque capability; storage credentials and object keys stay hidden.</span><button type="button" data-action="connect-live" aria-describedby="live-help">Connect secure live (read-only)</button><span id="live-help">Uses an authenticated browser session; topic access is explicit and bounded.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Creation is unavailable in this local reference UI; no upload occurs.</span></header>
   ${sessionError}
   <div class="shell-notice" role="status" aria-live="polite">${escapeHtml(state.notice ?? "")}</div>
   <nav class="topic-browser" aria-label="Topic browser"><h2>Topics</h2><label for="topic-search">Search topics</label><input id="topic-search" type="search" value="${escapeHtml(state.topicFilter)}"><ul role="tree">${topics}</ul></nav>

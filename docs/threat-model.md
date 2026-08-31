@@ -43,7 +43,7 @@ Parsing/decompression run in terminate-able workers under compressed/expanded by
 
 ### Hosted disclosure and revocation
 
-Manifests contain opaque entry IDs and immutable versions, not reusable credentials or long-lived URLs. Grants cover one object/version and bounded range. Revocation blocks new grants immediately; issued grants have a configured measured residual lifetime. Capabilities are high-entropy, expiring, non-enumerable, and absent from logs/durable storage.
+Signed manifests contain opaque entry IDs, immutable versions, sizes, hashes, and relations, not reusable credentials or long-lived URLs. Signature, version, and hash tampering fail before reads. Grants cover one session/object/version and bounded range. Revocation blocks new grants immediately; issued grants have a configured measured residual lifetime. Capabilities are high-entropy, expiring, non-enumerable, and absent from logs/durable storage. Deletion and retention expiry deny both manifest resolution and subsequent grant issuance.
 
 ### Resource and supply-chain exhaustion
 
@@ -51,10 +51,10 @@ Limit topic count, message size/rate, queue bytes, schema work, decompression, r
 
 ## Verification matrix
 
-Evidence must cover denied Origins/unauthenticated discovery, arbitrary writes, allowlist bypass, malformed/replayed frames, separate edge identity, failed direct-edge reachability, cross-session object access, grant expiry/revocation, malicious schema packs, traversal, corrupt inputs, decompression bombs, overload/reconnect recovery, and redaction.
+Evidence must cover denied Origins/unauthenticated discovery, arbitrary writes, allowlist bypass, malformed/replayed frames, separate edge identity, failed direct-edge reachability, capability enumeration, tampered manifests, cross-session/object/version/range access, grant expiry/revocation and residual lifetime, deletion/retention sweep, malicious schema packs, traversal, corrupt inputs, decompression bombs, overload/reconnect recovery, and token/object/payload redaction.
 
 Pass means fail-closed behavior, bounded resources, no ROS write reaching the edge, no browser route to edge/ROS, no cross-session disclosure, and sanitized actionable diagnostics.
 
 ## Residual and deferred decisions
 
-M3 selects a versioned subscribe-only contract and local reference relay/edge behavior for deterministic validation. Authentication provider, session issuance, network and TLS implementation, relay hosting, edge deployment, credential rotation, storage provider, grant TTL, renderer helper, and binary transport remain unselected. The machine-readable [M3 evidence](evidence/m3-live.json) is synthetic and explicitly records that no socket, container, browser, ROS graph, public network, or production identity provider was exercised. Production requires configuration review, deployed network-isolation evidence, penetration testing, dependency evidence, incident/rotation procedures, and authorization for credentials or paid infrastructure.
+M3 selects a versioned subscribe-only contract and local reference relay/edge behavior for deterministic validation. M4 selects only local/in-memory hosted capability, signed-manifest, short-lived exact-range grant, revocation, deletion, retention, and redacted telemetry behavior. Authentication and storage providers, network and TLS implementation, relay hosting, edge deployment, credential rotation, production grant lifetime, renderer helper, and binary transport remain unselected. The machine-readable M3/M4 evidence is synthetic unless it explicitly records otherwise. Production requires configuration review, deployed network/storage-isolation and retention evidence, penetration testing, dependency evidence, incident/rotation procedures, and authorization for credentials or infrastructure.

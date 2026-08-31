@@ -86,3 +86,11 @@ Seek, reconnect, backward clock jump, or source replacement atomically invalidat
 Scheduling time, TF query time, and latency measurement time are distinct typed policies; [ADR-0001](adr/0001-time-tf-semantics.md) is normative. Reads, decompression, queues, caches, schema resolution, payload retention, and GPU resources have byte/item/time limits. Unsupported, degraded, dropped, invalid-time, missing-schema, and TF-error states are explicit and observable without logging payload values, credentials, object keys, or share tokens.
 
 M1 remains blocked until SourceBundle, schema, payload, display, time/TF, compatibility, corpus-license, and threat-boundary documents are reviewed as one baseline. Later changes require contract tests and an ADR amendment; a successful demo cannot override these gates.
+
+## G005 M4 hosted-sharing reference amendment
+
+The hosted boundary serializes and signs only manifest metadata: opaque entry identity, normalized path, size, immutable object version, hash, and relations. Runtime `GrantedRangeSource` functions and grant credentials are never serialized into the manifest. A hosted session verifies the manifest signature plus every declared size/version/hash relation before constructing the same normalized `SourceBundle` consumed by local adapters.
+
+Capability resolution and range-grant issuance remain provider-neutral. Each cancellable read obtains a short-lived grant for exactly one session/object/version/range tuple, validates response status and exact length, and advances the normal source epoch on open, seek, replacement, or close. The web shell retains no capability in public state or rendered markup; it receives normalized topics/timeline plus bounded aggregate range/byte/denial counters.
+
+This amendment defines a local/in-memory reference implementation, not a network or object-storage architecture selection. External authentication, TLS, storage durability, multi-region behavior, and operational deletion/retention proof remain production-promotion work.

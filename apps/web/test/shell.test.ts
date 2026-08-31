@@ -69,6 +69,8 @@ describe("minimum desktop shell", () => {
     }
     expect(html).toContain("Choose a local MCAP, ROS1 bag, or ROS2 SQLite recording");
     expect(html).toContain("Recording bytes remain local");
+    expect(html).toContain("Open hosted link");
+    expect(html).toContain("opaque capability");
     expect(html).toContain("Share</button>");
     expect(html).toContain("disabled aria-describedby=\"share-help\"");
     expect(html).toContain("Connect secure live (read-only)");
