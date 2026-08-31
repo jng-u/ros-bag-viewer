@@ -88,7 +88,7 @@ describe("TrustedExtensionHost conformance", () => {
     const hidden = harness().definition as TrustedExtensionDefinition & Record<string, unknown>;
     Object.defineProperty(hidden, "publish", { value: () => undefined });
     expect(() => host.register(hidden)).toThrow(/unsupported operations/);
-    expect(() => host.register(Object.assign(Object.create({ publish() {} }), harness().definition))).toThrow(/plain objects/);
+    expect(() => host.register(Object.assign(Object.create({ publish() {} }), harness().definition))).toThrow(/plain object/);
   });
 
   it("exposes only the frozen bounded host surface and validates lifecycle operations exactly", () => {
@@ -182,7 +182,7 @@ describe("TrustedExtensionHost conformance", () => {
 
   it("delivers bounded source-detached snapshots rather than retaining caller-owned message values", () => {
     let received: { readonly nested: { value: number } } | undefined;
-    const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 128 } });
+    const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 256 } });
     host.register({
       apiVersion: 1,
       id: "snapshot-probe",
@@ -370,6 +370,66 @@ describe("TrustedExtensionHost conformance", () => {
     expect(() => target.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: deep })).toThrow(/depth limit/);
     expect(target.state).toBe("attached");
   });
+
+  it("captures exact descriptor-safe contracts and canonicalizes the complete message once", () => {
+    const definitionGetter = vi.fn(() => "getter-id");
+    const unsafeDefinition = { ...harness().definition } as Record<string, unknown>;
+    Object.defineProperty(unsafeDefinition, "id", { enumerable: true, get: definitionGetter });
+    const definitionHost = new TrustedExtensionHost();
+    expect(() => definitionHost.register(unsafeDefinition as unknown as TrustedExtensionDefinition)).toThrow(/data field/);
+    expect(definitionGetter).not.toHaveBeenCalled();
+    expect(definitionHost.registeredExtensionIds()).toEqual([]);
+
+    const capabilityGetter = vi.fn(() => "source-messages");
+    const capabilities: unknown[] = [];
+    Object.defineProperty(capabilities, "0", { enumerable: true, configurable: true, get: capabilityGetter });
+    capabilities.length = 1;
+    expect(() => definitionHost.register({ ...harness().definition, id: "unsafe-capability", requiredCapabilities: capabilities as TrustedExtensionCapability[] }))
+      .toThrow(/data field/);
+    expect(capabilityGetter).not.toHaveBeenCalled();
+
+    let lifecycleObject: TrustedExtensionLifecycle | undefined;
+    let originalUpdates = 0;
+    const lifecycleHost = new TrustedExtensionHost();
+    lifecycleHost.register({
+      apiVersion: 1,
+      id: "captured-lifecycle",
+      requiredCapabilities: ["source-messages"],
+      create: () => {
+        lifecycleObject = lifecycle({ update: () => { originalUpdates += 1; } });
+        return lifecycleObject;
+      },
+    });
+    const captured = lifecycleHost.instantiate("captured-lifecycle", "captured-instance");
+    lifecycleObject!.update = () => { throw new Error("mutated lifecycle"); };
+    captured.configure({}); captured.attachSource(1);
+    captured.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: {} });
+    expect(originalUpdates).toBe(1);
+
+    const envelopeGetter = vi.fn(() => 1);
+    const envelope = { topic: "/x", schemaName: "X", value: {} } as Record<string, unknown>;
+    Object.defineProperty(envelope, "sourceEpoch", { enumerable: true, get: envelopeGetter });
+    expect(() => captured.update(envelope as unknown as Parameters<typeof captured.update>[0])).toThrow(/data field/);
+    expect(envelopeGetter).not.toHaveBeenCalled();
+
+    const arrayGetter = vi.fn(() => "large".repeat(100_000));
+    const unsafeArray: unknown[] = [];
+    Object.defineProperty(unsafeArray, "0", { enumerable: true, configurable: true, get: arrayGetter });
+    unsafeArray.length = 1;
+    expect(() => captured.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: unsafeArray })).toThrow(/data field/);
+    expect(arrayGetter).not.toHaveBeenCalled();
+
+    if (typeof SharedArrayBuffer !== "undefined") {
+      expect(() => captured.update({
+        sourceEpoch: 1, topic: "/x", schemaName: "X", value: new Uint8Array(new SharedArrayBuffer(8)),
+      })).toThrow(/SharedArrayBuffer/);
+    }
+
+    const boundedHost = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 128 } });
+    boundedHost.register(harness().definition);
+    const bounded = boundedHost.instantiate("harness", "envelope-budget"); bounded.configure({}); bounded.attachSource(1);
+    expect(() => bounded.update({ sourceEpoch: 1, topic: `/${"x".repeat(256)}`, schemaName: "X", value: null })).toThrow(/byte budget/);
+  });
 });
 
 describe("out-of-core range summary example", () => {
@@ -407,6 +467,7 @@ describe("out-of-core range summary example", () => {
         optionalDependencies?: Record<string, string>;
         peerDependencies?: Record<string, string>;
         bundledDependencies?: string[];
+        bundleDependencies?: string[] | boolean;
       };
       expect(manifest.private, directory.name).toBe(true);
       expect(Object.keys(manifest.dependencies ?? {}), directory.name).toEqual(["@ros-web-viewer/extension-api"]);
@@ -414,19 +475,32 @@ describe("out-of-core range summary example", () => {
       expect(Object.keys(manifest.optionalDependencies ?? {}), directory.name).toEqual([]);
       expect(Object.keys(manifest.peerDependencies ?? {}), directory.name).toEqual([]);
       expect(manifest.bundledDependencies ?? [], directory.name).toEqual([]);
-      const sourceDirectory = new URL(`${directory.name}/src/`, examples);
-      const pending = [sourceDirectory];
+      expect(manifest.bundleDependencies ?? [], directory.name).toEqual([]);
+      const pending = [new URL(`${directory.name}/`, examples)];
       while (pending.length > 0) {
         const current = pending.pop()!;
         for (const entry of readdirSync(current, { withFileTypes: true })) {
           const path = new URL(entry.name, current);
           if (entry.isDirectory()) { pending.push(new URL(`${entry.name}/`, current)); continue; }
-          if (!entry.name.endsWith(".ts")) continue;
+          expect(entry.name, `${directory.name}/${entry.name}`).not.toMatch(/\.(?:node|wasm)$/u);
+          if (/\.(?:jsonc?|ya?ml|toml)$/u.test(entry.name) && entry.name !== "package.json") {
+            const config = readFileSync(path, "utf8");
+            expect(config, `${directory.name}/${entry.name}`).not.toMatch(
+              /@ros-web-viewer\/(?!extension-api(?:["'/]|$))|\b(?:eval|Function|Worker|WebSocket|SharedArrayBuffer)\b/u,
+            );
+            continue;
+          }
+          if (entry.name.endsWith(".d.ts")) continue;
+          if (!/\.(?:[cm]?[jt]sx?)$/u.test(entry.name)) continue;
           const source = readFileSync(path, "utf8");
-          expect(source, `${directory.name}/${entry.name}`).not.toMatch(
-            /@ros-web-viewer\/(?:displays-core|render-core|worker-runtime|source-|hosted-core|protocol)/,
+          const imports = [...source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^"']*?\sfrom\s*)?["']([^"']+)["']/gu)]
+            .map((match) => match[1]);
+          expect(imports, `${directory.name}/${entry.name}`).toEqual(
+            imports.map(() => "@ros-web-viewer/extension-api"),
           );
-          expect(source, `${directory.name}/${entry.name}`).not.toMatch(/\b(?:eval|Function)\s*\(|\bimport\s*\(/);
+          expect(source, `${directory.name}/${entry.name}`).not.toMatch(
+            /\b(?:eval|Function)\s*\(|\bimport\s*\(|\brequire(?:\.resolve)?\s*\(|\b(?:Worker|WebSocket|localStorage|sessionStorage|indexedDB|fetch|document|window|navigator|WebGL2RenderingContext|OffscreenCanvas|SharedArrayBuffer|process|Deno|Bun)\b|\b(?:publish|callService|sendAction|setParameter|rawCommand)\b/u,
+          );
         }
       }
     }

@@ -122,19 +122,43 @@ function assertPositiveLimit(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive safe integer`);
 }
 
-function ownKeys(value: object): readonly string[] {
+function captureExactObject(value: unknown, allowed: readonly string[], label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${label} must be a plain object`);
   const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) throw new Error("extension contracts must be plain objects");
+  if (prototype !== Object.prototype && prototype !== null) throw new Error(`${label} must be a plain object`);
   const keys = Reflect.ownKeys(value);
-  if (keys.some((key) => typeof key !== "string")) throw new Error("extension contracts must not contain symbol operations");
-  return (keys as string[]).sort();
-}
-
-function assertExactKeys(value: object, allowed: readonly string[], label: string): void {
-  const actual = ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new Error(`${label} must not contain symbol fields`);
+  const actual = (keys as string[]).sort();
   if (actual.length !== allowed.length || actual.some((key, index) => key !== allowed[index])) {
     throw new Error(`${label} contains missing or unsupported operations: ${actual.join(", ")}`);
   }
+  const snapshot: Record<string, unknown> = {};
+  for (const key of allowed) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!descriptor.enumerable || !("value" in descriptor)) throw new Error(`${label}.${key} must be an enumerable data field`);
+    Object.defineProperty(snapshot, key, { value: descriptor.value, enumerable: true });
+  }
+  return Object.freeze(snapshot);
+}
+
+function captureExactArray<T>(value: unknown, label: string, maxLength = 100_000): readonly T[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new Error(`${label} must be an ordinary array`);
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new Error(`${label} must not contain symbol fields`);
+  const length = value.length;
+  if (length > maxLength) throw new Error(`${label} exceeds the item limit`);
+  const expected = ["length", ...Array.from({ length }, (_, index) => String(index))].sort();
+  const actual = (keys as string[]).sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw new Error(`${label} must be dense and unaugmented`);
+  }
+  const snapshot: T[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index))!;
+    if (!descriptor.enumerable || !("value" in descriptor)) throw new Error(`${label}[${index}] must be an enumerable data field`);
+    snapshot.push(descriptor.value as T);
+  }
+  return Object.freeze(snapshot);
 }
 
 function assertEpoch(epoch: number): void {
@@ -147,45 +171,63 @@ function errorMessage(error: unknown): string {
 
 const textEncoder = new TextEncoder();
 
-function snapshotBytes(value: unknown): number {
-  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
-  const seen = new Set<object>();
-  let bytes = 0;
-  let items = 0;
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (++items > 100_000) throw new Error("extension message snapshot item limit exceeded");
-    if (current.depth > 64) throw new Error("extension message snapshot depth limit exceeded");
-    const item = current.value;
-    if (item === null || item === undefined) continue;
-    if (typeof item === "boolean") { bytes += 1; continue; }
-    if (typeof item === "number" || typeof item === "bigint") { bytes += 8; continue; }
-    if (typeof item === "string") { bytes += textEncoder.encode(item).byteLength; continue; }
-    if (typeof item !== "object") throw new Error("extension message snapshot contains an unsupported value");
-    if (seen.has(item)) throw new Error("extension message snapshot must not contain cycles or repeated object references");
-    seen.add(item);
-    if (item instanceof ArrayBuffer) { bytes += 16 + item.byteLength; continue; }
-    if (ArrayBuffer.isView(item)) { bytes += 16 + item.buffer.byteLength; continue; }
-    const prototype = Object.getPrototypeOf(item);
-    if (Array.isArray(item)) {
-      if (Reflect.ownKeys(item).some((key) => key !== "length" && (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key)))) {
-        throw new Error("extension message arrays must not contain augmented fields");
-      }
-      bytes += 16 + item.length * 8;
-      for (const nested of item) stack.push({ value: nested, depth: current.depth + 1 });
-      continue;
-    }
-    if (prototype !== Object.prototype && prototype !== null) throw new Error("extension message snapshot must contain only plain data");
-    const descriptors = Object.getOwnPropertyDescriptors(item);
-    for (const [key, descriptor] of Object.entries(descriptors)) {
-      if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("extension message snapshot must contain plain enumerable data");
-      bytes += 8 + textEncoder.encode(key).byteLength;
-      stack.push({ value: descriptor.value, depth: current.depth + 1 });
-    }
-    if (Reflect.ownKeys(item).some((key) => typeof key !== "string")) throw new Error("extension message snapshot must not contain symbols");
-    bytes += 16;
+interface SnapshotBudget {
+  bytes: number;
+  items: number;
+  readonly maxBytes: number;
+}
+
+function chargeSnapshot(budget: SnapshotBudget, bytes: number): void {
+  budget.bytes += bytes;
+  if (budget.bytes > budget.maxBytes) throw new Error("extension message snapshot byte budget exceeded");
+}
+
+function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, seen = new Set<object>()): unknown {
+  if (++budget.items > 100_000) throw new Error("extension message snapshot item limit exceeded");
+  if (depth > 64) throw new Error("extension message snapshot depth limit exceeded");
+  if (value === null || value === undefined) return value;
+  if (typeof value === "boolean") { chargeSnapshot(budget, 1); return value; }
+  if (typeof value === "number" || typeof value === "bigint") { chargeSnapshot(budget, 8); return value; }
+  if (typeof value === "string") { chargeSnapshot(budget, textEncoder.encode(value).byteLength); return value; }
+  if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
+  if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated references");
+  seen.add(value);
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
+    throw new Error("extension message snapshot must not contain SharedArrayBuffer data");
   }
-  return bytes;
+  if (value instanceof ArrayBuffer) {
+    chargeSnapshot(budget, 16 + value.byteLength);
+    return value.slice(0);
+  }
+  if (ArrayBuffer.isView(value)) {
+    if (typeof SharedArrayBuffer !== "undefined" && value.buffer instanceof SharedArrayBuffer) {
+      throw new Error("extension message snapshot must not contain SharedArrayBuffer views");
+    }
+    chargeSnapshot(budget, 16 + value.buffer.byteLength);
+    return structuredClone(value);
+  }
+  if (Array.isArray(value)) {
+    const items = captureExactArray<unknown>(value, "extension message array");
+    chargeSnapshot(budget, 16 + items.length * 8);
+    return items.map((item) => canonicalSnapshot(item, budget, depth + 1, seen));
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error("extension message snapshot must contain only plain data");
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new Error("extension message snapshot must not contain symbols");
+  const output: Record<string, unknown> = Object.create(prototype === null ? null : Object.prototype) as Record<string, unknown>;
+  chargeSnapshot(budget, 16);
+  for (const key of (keys as string[]).sort()) {
+    if (key === "__proto__") throw new Error("extension message snapshot must not contain __proto__ fields");
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("extension message snapshot must contain plain enumerable data");
+    chargeSnapshot(budget, 8 + textEncoder.encode(key).byteLength);
+    Object.defineProperty(output, key, {
+      value: canonicalSnapshot(descriptor.value, budget, depth + 1, seen),
+      enumerable: true,
+    });
+  }
+  return output;
 }
 
 function freezeSnapshot<T>(value: T): T {
@@ -194,7 +236,7 @@ function freezeSnapshot<T>(value: T): T {
   const seen = new Set<object>();
   while (pending.length > 0) {
     const item = pending.pop()!;
-    if (seen.has(item) || ArrayBuffer.isView(item)) continue;
+    if (seen.has(item) || ArrayBuffer.isView(item) || item instanceof ArrayBuffer) continue;
     seen.add(item); stack.push(item);
     for (const nested of Object.values(item)) if (typeof nested === "object" && nested !== null) pending.push(nested);
   }
@@ -203,12 +245,7 @@ function freezeSnapshot<T>(value: T): T {
 }
 
 function boundedSnapshot<T>(value: T, maxBytes: number): T {
-  if (snapshotBytes(value) > maxBytes) throw new Error("extension message snapshot byte budget exceeded");
-  try {
-    return freezeSnapshot(structuredClone(value));
-  } catch (error) {
-    throw new Error(`extension message snapshot is not cloneable: ${errorMessage(error)}`, { cause: error });
-  }
+  return freezeSnapshot(canonicalSnapshot(value, { bytes: 0, items: 0, maxBytes }) as T);
 }
 
 class ResourceHandle implements TrustedResourceHandle {
@@ -298,13 +335,11 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
       },
     });
     try {
-      const implementation = create(context);
-      if (implementation === null || typeof implementation !== "object") throw new Error("extension create must return a lifecycle");
-      assertExactKeys(implementation, LIFECYCLE_KEYS, "extension lifecycle");
-      if (LIFECYCLE_KEYS.some((key) => typeof Reflect.get(implementation, key) !== "function")) {
+      const implementation = captureExactObject(create(context), LIFECYCLE_KEYS, "extension lifecycle");
+      if (LIFECYCLE_KEYS.some((key) => typeof implementation[key] !== "function")) {
         throw new Error("extension lifecycle operations must be functions");
       }
-      this.#implementation = implementation;
+      this.#implementation = implementation as unknown as TrustedExtensionLifecycle<TConfig, TMessage>;
     } catch (error) {
       this.#disposeResources();
       throw error;
@@ -320,7 +355,8 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   configure(config: TConfig): void {
     this.#assertNotReentrant();
     this.#expectState(["instantiated", "configured", "error"], "configure");
-    try { this.#invoke(() => this.#implementation.configure(config)); }
+    const snapshot = boundedSnapshot(config, this.limits.maxMessageSnapshotBytes);
+    try { this.#invoke(() => this.#implementation.configure(snapshot)); }
     catch (error) { this.#configured = false; throw error; }
     this.#configured = true;
     this.#transition("configured");
@@ -345,14 +381,12 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
     if (!this.negotiation.grantedCapabilities.includes("source-messages")) {
       throw new Error("source-messages capability was not granted");
     }
-    assertEpoch(message.sourceEpoch);
-    if (message.sourceEpoch !== this.#sourceEpoch) throw new Error("stale source epoch");
-    const snapshot = Object.freeze({
-      sourceEpoch: message.sourceEpoch,
-      topic: message.topic,
-      schemaName: message.schemaName,
-      value: boundedSnapshot(message.value, this.limits.maxMessageSnapshotBytes),
-    });
+    const envelope = captureExactObject(message, ["schemaName", "sourceEpoch", "topic", "value"], "extension message");
+    const snapshot = boundedSnapshot(envelope, this.limits.maxMessageSnapshotBytes) as unknown as TrustedExtensionMessage<TMessage>;
+    assertEpoch(snapshot.sourceEpoch);
+    if (snapshot.sourceEpoch !== this.#sourceEpoch) throw new Error("stale source epoch");
+    if (typeof snapshot.topic !== "string" || snapshot.topic.length === 0) throw new Error("extension message topic is invalid");
+    if (typeof snapshot.schemaName !== "string" || snapshot.schemaName.length === 0) throw new Error("extension message schemaName is invalid");
     this.#invoke(() => this.#implementation.update(snapshot));
     this.#transition("rendering");
   }
@@ -474,7 +508,11 @@ export class TrustedExtensionHost {
     readonly allowedCapabilities?: readonly TrustedExtensionCapability[];
     readonly limits?: Partial<TrustedExtensionLimits>;
   }) {
-    const allowed = options?.allowedCapabilities ?? [...CAPABILITIES];
+    const allowed = captureExactArray<TrustedExtensionCapability>(
+      options?.allowedCapabilities ?? [...CAPABILITIES],
+      "allowedCapabilities",
+      TRUSTED_EXTENSION_CAPABILITIES.length,
+    );
     if (new Set(allowed).size !== allowed.length || allowed.some((capability) => !CAPABILITIES.has(capability))) {
       throw new Error("host capabilities contain duplicates or unsupported values");
     }
@@ -486,32 +524,35 @@ export class TrustedExtensionHost {
   register<TConfig, TMessage>(
     definition: TrustedExtensionDefinition<TConfig, TMessage>,
   ): TrustedExtensionNegotiation {
-    if (definition === null || typeof definition !== "object") throw new Error("extension definition is required");
-    assertExactKeys(definition, DEFINITION_KEYS, "extension definition");
-    if (definition.apiVersion !== TRUSTED_EXTENSION_API_VERSION) {
-      throw new Error(`unsupported extension API version: ${String(definition.apiVersion)}`);
+    const candidate = captureExactObject(definition, DEFINITION_KEYS, "extension definition");
+    if (candidate.apiVersion !== TRUSTED_EXTENSION_API_VERSION) {
+      throw new Error(`unsupported extension API version: ${String(candidate.apiVersion)}`);
     }
-    if (!IDENTIFIER.test(definition.id)) throw new Error("extension id must be a normalized private identifier");
-    if (this.#definitions.has(definition.id)) throw new Error(`extension is already registered: ${definition.id}`);
+    if (typeof candidate.id !== "string" || !IDENTIFIER.test(candidate.id)) throw new Error("extension id must be a normalized private identifier");
+    if (this.#definitions.has(candidate.id)) throw new Error(`extension is already registered: ${candidate.id}`);
     if (this.#definitions.size >= this.#limits.maxExtensions) throw new Error("extension registration limit exceeded");
-    if (!Array.isArray(definition.requiredCapabilities)) throw new Error("requiredCapabilities must be an array");
-    const unique = new Set(definition.requiredCapabilities);
-    if (unique.size !== definition.requiredCapabilities.length) throw new Error("extension capabilities must be unique");
+    const requiredCapabilities = captureExactArray<TrustedExtensionCapability>(
+      candidate.requiredCapabilities,
+      "requiredCapabilities",
+      TRUSTED_EXTENSION_CAPABILITIES.length,
+    );
+    const unique = new Set(requiredCapabilities);
+    if (unique.size !== requiredCapabilities.length) throw new Error("extension capabilities must be unique");
     for (const capability of unique) {
       if (!CAPABILITIES.has(capability)) throw new Error(`unsupported extension capability: ${String(capability)}`);
       if (!this.#allowedCapabilities.has(capability)) throw new Error(`extension capability denied: ${capability}`);
     }
-    if (typeof definition.create !== "function") throw new Error("extension create must be a function");
+    if (typeof candidate.create !== "function") throw new Error("extension create must be a function");
     const snapshot = Object.freeze({
       apiVersion: TRUSTED_EXTENSION_API_VERSION,
-      id: definition.id,
+      id: candidate.id,
       requiredCapabilities: Object.freeze([...unique].sort()),
-      create: definition.create,
+      create: candidate.create,
     });
-    this.#definitions.set(definition.id, snapshot as TrustedExtensionDefinition<unknown, unknown>);
+    this.#definitions.set(candidate.id, snapshot as TrustedExtensionDefinition<unknown, unknown>);
     return Object.freeze({
       apiVersion: TRUSTED_EXTENSION_API_VERSION,
-      extensionId: definition.id,
+      extensionId: candidate.id,
       grantedCapabilities: Object.freeze([...unique].sort()),
     });
   }

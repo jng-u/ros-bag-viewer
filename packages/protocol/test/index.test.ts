@@ -1,13 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BROWSER_OPERATIONS,
+  DEFAULT_PROTOCOL_LIMITS,
   EDGE_OPERATIONS,
   LIVE_PROTOCOL_VERSION,
   ProtocolViolation,
   parseBrowserFrame,
   parseBrowserFrameJson,
   validateEdgePlan,
+  validateTopicDescriptor,
 } from "../src/index.js";
 
 const base = {
@@ -40,12 +42,36 @@ describe("secure live protocol", () => {
       maxMessageBytes: 1_000_000,
     } as const;
     expect(parseBrowserFrame(valid)).toEqual(valid);
+    const canonical = parseBrowserFrame(valid);
+    expect(canonical).not.toBe(valid);
+    expect(Object.isFrozen(canonical)).toBe(true);
 
     expect(() => parseBrowserFrame({ ...valid, topic: "/camera/*" })).toThrow(/without wildcards/);
     expect(() => parseBrowserFrame({ ...valid, type: "not-a-type" })).toThrow(/exact ROS type/);
     expect(() => parseBrowserFrame({ ...valid, publish: { data: "arbitrary" } })).toThrow(/unexpected fields/);
-    expect(() => parseBrowserFrame({ ...valid, maxRateHz: Number.POSITIVE_INFINITY })).toThrow(/allowed range/);
+    expect(() => parseBrowserFrame({ ...valid, maxRateHz: Number.POSITIVE_INFINITY })).toThrow(/allowed range|non-finite/);
     expect(() => parseBrowserFrame({ ...valid, maxMessageBytes: 16 * 1024 * 1024 + 1 })).toThrow(/allowed range/);
+  });
+
+  it("rejects accessors before execution and returns only host-owned canonical records", () => {
+    const accessor = { ...base, operation: "health" } as Record<string, unknown>;
+    const getter = vi.fn(() => 1);
+    Object.defineProperty(accessor, "version", { enumerable: true, get: getter });
+    expect(() => parseBrowserFrame(accessor)).toThrow(/hidden or accessor/);
+    expect(getter).not.toHaveBeenCalled();
+
+    const limits = { ...DEFAULT_PROTOCOL_LIMITS } as Record<string, unknown>;
+    Object.defineProperty(limits, "maxFrameBytes", { enumerable: true, get: getter });
+    expect(() => parseBrowserFrame({ ...base, operation: "health" }, limits as unknown as typeof DEFAULT_PROTOCOL_LIMITS))
+      .toThrow(/hidden or accessor/);
+    expect(getter).not.toHaveBeenCalled();
+
+    const descriptor = validateTopicDescriptor({
+      topic: "/x", type: "std_msgs/msg/String", maxRateHz: 1, maxMessageBytes: 1,
+      schemaHash: `sha256:${"a".repeat(64)}`,
+    });
+    expect(Object.isFrozen(descriptor)).toBe(true);
+    expect(() => validateTopicDescriptor({ ...descriptor, schemaHash: "SHA256:bad" })).toThrow(/schemaHash/);
   });
 
   it("rejects duplicate JSON keys, protocol confusion, and oversized frames before dispatch", () => {

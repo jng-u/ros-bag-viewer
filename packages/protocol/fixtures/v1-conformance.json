@@ -4,58 +4,291 @@
   "schemaVersion": 1,
   "freezeCandidate": true,
   "truthScope": "deterministic local, in-process, and synthetic evidence; not browser, OS, ROS, network, or production certification",
-  "browserOperations": ["discover", "subscribe", "unsubscribe", "health"],
-  "edgeOperations": ["discover", "subscribe", "unsubscribe"],
-  "extensionOperations": ["attachSource", "configure", "dispose", "handleError", "render", "suspend", "update"],
+  "browserOperations": [
+    "discover",
+    "subscribe",
+    "unsubscribe",
+    "health"
+  ],
+  "edgeOperations": [
+    "discover",
+    "subscribe",
+    "unsubscribe"
+  ],
+  "extensionOperations": [
+    "attachSource",
+    "configure",
+    "dispose",
+    "handleError",
+    "render",
+    "suspend",
+    "update"
+  ],
   "extensionCapabilities": [
     "bounded-resources",
     "diagnostics",
     "source-messages"
   ],
   "sources": [
-    { "id": "local-mcap", "result": "pass", "evidence": "packages/source-mcap/test/index.test.ts" },
-    { "id": "local-ros1-bag", "result": "pass", "evidence": "packages/source-ros1bag/test/index.test.ts" },
-    { "id": "local-ros2-sqlite", "result": "pass", "evidence": "packages/source-ros2-sqlite/test/index.test.ts" },
-    { "id": "hosted-source-bundle", "result": "pass", "evidence": "packages/source-hosted/test/index.test.ts" },
-    { "id": "ros1-live", "result": "pass", "evidence": "tests/m3-live/security-gate.test.ts" },
-    { "id": "ros2-live", "result": "pass", "evidence": "tests/m3-live/security-gate.test.ts" }
+    {
+      "id": "local-mcap",
+      "result": "pass",
+      "evidence": "packages/source-mcap/test/index.test.ts",
+      "resultDigest": "sha256:8ee62496d6121e24d8f8ac9922bc0933a245ebc97a10bee77e64a75bbc16df23",
+      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5"
+    },
+    {
+      "id": "local-ros1-bag",
+      "result": "pass",
+      "evidence": "packages/source-ros1bag/test/index.test.ts",
+      "resultDigest": "sha256:c3d3846b817ce0a15956c15b93ac417dc63a6102735b3475489de77d443c134c",
+      "evidenceDigest": "sha256:b6f38cf62f43b9be44dcff3719e015f06c48908be5faa36f47ab9cb184a862d4"
+    },
+    {
+      "id": "local-ros2-sqlite",
+      "result": "pass",
+      "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
+      "resultDigest": "sha256:9df816810e2ce69e87865369e412c7ec2cc8e3889bdbbc5ef93e02b997a1ecd9",
+      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86"
+    },
+    {
+      "id": "hosted-source-bundle",
+      "result": "pass",
+      "evidence": "packages/source-hosted/test/index.test.ts",
+      "resultDigest": "sha256:be4eaa1c1da0c1a797e132fb5126fb9691e87610a43ece961dc0f50b60f96d2d",
+      "evidenceDigest": "sha256:65108dec5d272197d299c1dc963586e1cf40157982f9095ef98e97ebb319dcd2"
+    },
+    {
+      "id": "ros1-live",
+      "result": "pass",
+      "evidence": "tests/m3-live/security-gate.test.ts",
+      "resultDigest": "sha256:fa5697f89ad06039c72b2ca97db12ada2ddd9081c29575970f7adbd9259fe66b",
+      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70"
+    },
+    {
+      "id": "ros2-live",
+      "result": "pass",
+      "evidence": "tests/m3-live/security-gate.test.ts",
+      "resultDigest": "sha256:83698ff1d30a8f61759e956d6bcd30770f0d6db46a85f2836e6ca70bd7730215",
+      "evidenceDigest": "sha256:6a8dfc204cb5c51aa1ec5c8611b6c3a86641ecee795a98e9668825b372c47a70"
+    }
   ],
   "schemas": [
-    { "id": "schema-present", "result": "pass", "evidence": "packages/source-mcap/test/index.test.ts" },
-    { "id": "schema-resolvable", "result": "pass", "evidence": "packages/source-ros2-sqlite/test/index.test.ts" },
-    { "id": "opaque", "result": "pass", "evidence": "packages/displays-core/test/index.test.ts" }
+    {
+      "id": "schema-present",
+      "result": "pass",
+      "evidence": "packages/source-mcap/test/index.test.ts",
+      "resultDigest": "sha256:3e4eb6a138984ce2d69a498cd0d7119f303388fc7fc4572425257db1b85db027",
+      "evidenceDigest": "sha256:2a4858d6f6a32b845306d66e7c5bfd2dd7dba685c551f8659c3fd54d4815f9f5"
+    },
+    {
+      "id": "schema-resolvable",
+      "result": "pass",
+      "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
+      "resultDigest": "sha256:1eafa4de6c996c26b9892c4ce2af01d973a2c7aa7f878ab98ccfdca91811ac76",
+      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86"
+    },
+    {
+      "id": "opaque",
+      "result": "pass",
+      "evidence": "packages/displays-core/test/index.test.ts",
+      "resultDigest": "sha256:5a53888fb19ab0a8d2f6fa4a98f42820d9c69773d4803728ebd520744e37daa9",
+      "evidenceDigest": "sha256:58e0f0f6f9585cb4da19659a579f2776d299987dfece87c024e502df29a16121"
+    }
   ],
   "timeTf": [
-    { "id": "record-time", "result": "pass", "evidence": "packages/timeline/test/index.test.ts" },
-    { "id": "header-time", "result": "pass", "evidence": "packages/timeline/test/index.test.ts" },
-    { "id": "receipt-time", "result": "pass", "evidence": "packages/source-live/test/index.test.ts" },
-    { "id": "clock-time", "result": "pass", "evidence": "packages/timeline/test/index.test.ts" },
-    { "id": "source-epoch-invalidation", "result": "pass", "evidence": "packages/core-model/test/index.test.ts" },
-    { "id": "tf-interpolation", "result": "pass", "evidence": "packages/tf/test/index.test.ts" },
-    { "id": "tf-missing", "result": "pass", "evidence": "packages/tf/test/index.test.ts" },
-    { "id": "tf-extrapolation", "result": "pass", "evidence": "packages/tf/test/index.test.ts" }
+    {
+      "id": "record-time",
+      "result": "pass",
+      "evidence": "packages/timeline/test/index.test.ts",
+      "resultDigest": "sha256:62518224f7496f6f0496db61e95c8e45c573179c8f489e505ae149e58f1298ca",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+    },
+    {
+      "id": "header-time",
+      "result": "pass",
+      "evidence": "packages/timeline/test/index.test.ts",
+      "resultDigest": "sha256:bfc8251ed4688747cd8672b1d136593975690fa0e299ebce22f760e49b6dd663",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+    },
+    {
+      "id": "receipt-time",
+      "result": "pass",
+      "evidence": "packages/source-live/test/index.test.ts",
+      "resultDigest": "sha256:6c1c313e97203631917fcbc0e4c628775794fe826d718be9b3b7ee4c6b16bdfd",
+      "evidenceDigest": "sha256:532c216f2b291ddf2833ab55e184131a4d17260110aa119174025313100de5da"
+    },
+    {
+      "id": "clock-time",
+      "result": "pass",
+      "evidence": "packages/timeline/test/index.test.ts",
+      "resultDigest": "sha256:64fb0ed0983ac28ae5880864ddac432d96c0eb6dd9ebb0b95b1c19d2414b6e16",
+      "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02"
+    },
+    {
+      "id": "source-epoch-invalidation",
+      "result": "pass",
+      "evidence": "packages/core-model/test/index.test.ts",
+      "resultDigest": "sha256:6cf34c3d759af17d4308a37d2ea90674177315a5f7f30267005e171b4b3a2a07",
+      "evidenceDigest": "sha256:dfc368ee020b523cdc9928bc3aab8aa4470ef124dab081a67c235788aca88c64"
+    },
+    {
+      "id": "tf-interpolation",
+      "result": "pass",
+      "evidence": "packages/tf/test/index.test.ts",
+      "resultDigest": "sha256:7f0af3811274ae31bf4cea766f155e7de6ee15e889a2025167e86305a7bb2a64",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+    },
+    {
+      "id": "tf-missing",
+      "result": "pass",
+      "evidence": "packages/tf/test/index.test.ts",
+      "resultDigest": "sha256:9b7f2b249286ee01961dfb0cd9c16d75df2211a299e3cd302c202f10bb37360b",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+    },
+    {
+      "id": "tf-extrapolation",
+      "result": "pass",
+      "evidence": "packages/tf/test/index.test.ts",
+      "resultDigest": "sha256:bfa475ce95534861800b10cb440fc6038df3d497b3feb787e8c02d4c6e5e0508",
+      "evidenceDigest": "sha256:689b859c704a53715ececae77cd289505206f16713a372ceab22921f3e2bbe5d"
+    }
   ],
   "displayExtensionLifecycle": [
-    { "id": "register", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "instantiate", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "configure", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "attach", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "update", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "render", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "suspend", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "error", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" },
-    { "id": "dispose", "result": "pass", "evidence": "packages/extension-api/test/index.test.ts" }
+    {
+      "id": "register",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:b263aa3e2b4f348a6b4f88660f5fe97c3cdbcf8380a60bacb83b2387e9a949e3",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "instantiate",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:7ce75e429a1e8e919e26b611aa5e6e54348a05eebcd2df937f1f58c16211c7e8",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "configure",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:181d8221f0429ec488b9ef44ae02cf23ba9fd9debf18f56569d4d21cf62a83cd",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "attach",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:f11a32dfae8569e02ebec927effe32699b7a7923722012f24772b7b4f1cc9a33",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "update",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:d7ae330b6b87a43e59662221f37fd77fbcce9473805ac93043f081734541921c",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "render",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:9683372a4279ce0b21920e60d1767a9c6e87f4a76a9ac7e5e75bd2f31c36ffa8",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "suspend",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:8b82d735baa40f3a2d718cfe7f73ee2e4f342f362d5a81e8c19327b0687d2478",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "error",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:880a50e368f3f615a4127f65bc10457b155499ce10affc855b7d83e01bb93af5",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    },
+    {
+      "id": "dispose",
+      "result": "pass",
+      "evidence": "packages/extension-api/test/index.test.ts",
+      "resultDigest": "sha256:11fc263bf15bfb70b004c78cf0bd7eb910be80a4a031f81323e857b270227d1b",
+      "evidenceDigest": "sha256:692dac328f204d8658dac61f1acaef31b2627255a1fa19d3954d47ac30bd8a90"
+    }
   ],
   "rejections": [
-    { "id": "unknown-version", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "extra-key", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "operation-widening", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "capability-escalation", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "schema-conflict", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "schema-oversize", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "schema-depth", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "lifetime-use-after-release", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "lifetime-double-release", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" },
-    { "id": "lifetime-stale-epoch", "result": "rejected", "evidence": "packages/protocol/test/conformance-v1.test.ts" }
+    {
+      "id": "unknown-version",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:2bdb503f0c8c87ab9e6f817d1b2de7d1ed077c65356bca700457c886a7775989",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "extra-key",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:cf6f38b168d02ff52656301e2b416c077ad6573ca7c84e9b898ad36e7f037a48",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "operation-widening",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:4e39ca7009587f9ff08e448ba0603c7139b329192fe5fcaab9a1211f60a35070",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "capability-escalation",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:27acec58891c414fa3977d616ba0d71c89941df1b27bfefbeae9d525618fdbf2",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "schema-conflict",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:9901ab829c9820ec2a12aacbc566cfa972e6b27497cf1c20eb085b0707d9858c",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "schema-oversize",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:853e7c2f129bfb142a5102dfa2aa45099902d592589af92288724c4b8c4ce18e",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "schema-depth",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:8426ecd002aba971d00803118cdcce39ec56f6dae190e290b9ec9513183db628",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "lifetime-use-after-release",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:4cbd51eb0fbbb6eb7c07ec136a35c0131bd370f8afe31d1662792adc38b3373c",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "lifetime-double-release",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:e1fd3d432bce0e000cf7aed04442bbff0681325d62d667f884f48fcd1cd738ba",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    },
+    {
+      "id": "lifetime-stale-epoch",
+      "result": "rejected",
+      "evidence": "packages/protocol/test/conformance-v1.test.ts",
+      "resultDigest": "sha256:532d52b48308db3246547c45818b870df4b447a3e4edf6bcad23a9e815eb87d6",
+      "evidenceDigest": "sha256:474d66290e64d7380eef1c04038cca0bb308da5fa4e9e886d3a14f7f73e97282"
+    }
   ]
 }

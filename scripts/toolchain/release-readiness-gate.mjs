@@ -1,7 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
+
+import { repositoryStopReason } from "./repository-stop-policy.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const evidencePath = join(root, "docs/evidence/m5-release-readiness.json");
@@ -101,13 +104,10 @@ function validateEvidence(evidence) {
 }
 
 function validateRepositoryStops() {
-  const rootNames = readdirSync(root).map((entry) => entry.toLowerCase());
-  if (rootNames.some((name) => /^licen[cs]e(?:\.|$)/.test(name))) fail("public license selection is unauthorized");
-
-  const forbiddenFiles = new Set([".env", ".env.local", "pulumi.yaml", "serverless.yml", "serverless.yaml", "terraform.tfstate"]);
   for (const path of listFiles(root)) {
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-    if (forbiddenFiles.has(name) || name.endsWith(".tf")) fail(`unauthorized credential/infrastructure file ${relative(root, path)}`);
+    const stopReason = repositoryStopReason(name);
+    if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${relative(root, path)}`);
     if (name !== "package.json") continue;
     const packageJson = JSON.parse(readFileSync(path, "utf8"));
     if (packageJson.private !== true) fail(`${relative(root, path)} must remain private`);
@@ -157,14 +157,21 @@ function checkReproducibility() {
 }
 
 function validateProtocolSchemaV1() {
-  run("corepack", [
-    "pnpm",
-    "vitest",
-    "run",
-    "packages/protocol/test/index.test.ts",
-    "packages/protocol/test/conformance-v1.test.ts",
-    "packages/extension-api/test/index.test.ts",
-  ]);
+  const fixture = JSON.parse(readFileSync(join(root, "packages/protocol/fixtures/v1-conformance.json"), "utf8"));
+  const rows = ["sources", "schemas", "timeTf", "displayExtensionLifecycle", "rejections"]
+    .flatMap((key) => fixture[key]);
+  const evidenceFiles = new Set();
+  for (const row of rows) {
+    const evidenceBytes = readFileSync(join(root, row.evidence));
+    const evidenceDigest = `sha256:${createHash("sha256").update(evidenceBytes).digest("hex")}`;
+    if (row.evidenceDigest !== evidenceDigest) fail(`stale conformance evidence digest for ${row.id}`);
+    const resultDigest = `sha256:${createHash("sha256")
+      .update(JSON.stringify([row.id, row.result, row.evidence, evidenceDigest]))
+      .digest("hex")}`;
+    if (row.resultDigest !== resultDigest) fail(`invalid conformance result digest for ${row.id}`);
+    evidenceFiles.add(row.evidence);
+  }
+  run("corepack", ["pnpm", "vitest", "run", ...evidenceFiles]);
 }
 
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));

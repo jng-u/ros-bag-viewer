@@ -27,7 +27,7 @@
     "release:readiness": "node scripts/toolchain/release-readiness-gate.mjs",
     "release:readiness:full": "node scripts/toolchain/release-readiness-gate.mjs --check-reproducibility --check-clean-tree",
     "evidence:semantic": "corepack pnpm --filter @ros-web-viewer/web evidence:semantic",
-    "evidence:m3": "UPDATE_M3_EVIDENCE=1 vitest run tests/m3-live/generate-evidence.test.ts",
+    "evidence:m3": "UPDATE_M3_EVIDENCE=1 vitest run --config tests/m3-live/vitest.config.ts tests/m3-live/generate-evidence.test.ts",
     "audit:dependencies": "corepack pnpm audit --audit-level high",
     "report:licenses": "node scripts/toolchain/licenses-report.mjs",
     "sbom": "node scripts/toolchain/sbom-report.mjs"

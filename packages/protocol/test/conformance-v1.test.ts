@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ReferenceCountedPayloadLease, type SourceEpoch } from "../../core-model/src/index.js";
 import {
@@ -17,6 +18,7 @@ import {
   parseV1ConformanceFixture,
   validateV1SchemaAdmission,
 } from "../src/index.js";
+import { sha256 } from "../src/canonical.js";
 
 const fixturePath = new URL("../fixtures/v1-conformance.json", import.meta.url);
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as unknown;
@@ -64,6 +66,8 @@ describe("protocol/schema v1 conformance freeze", () => {
       ...frozen.rejections,
     ]) {
       expect(existsSync(resolve(entry.evidence)), entry.evidence).toBe(true);
+      expect(`sha256:${createHash("sha256").update(readFileSync(resolve(entry.evidence))).digest("hex")}`, entry.evidence)
+        .toBe(entry.evidenceDigest);
     }
   });
 
@@ -83,6 +87,37 @@ describe("protocol/schema v1 conformance freeze", () => {
     const symbol = cloneFixture();
     Object.defineProperty(symbol, Symbol("hidden"), { value: true, enumerable: true });
     expect(() => freezeV1Conformance(symbol)).toThrow(/symbols/);
+    const arrayAccessor = cloneFixture();
+    const getter = vi.fn(() => (arrayAccessor.sources as unknown[])[0]);
+    Object.defineProperty(arrayAccessor.sources, "0", { enumerable: true, get: getter });
+    expect(() => parseV1ConformanceFixture(arrayAccessor)).toThrow(/accessor/);
+    expect(getter).not.toHaveBeenCalled();
+    const proto = validSchemaAdmission();
+    const malicious = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(malicious, "__proto__", { value: { polluted: true }, enumerable: true });
+    proto.providers = [{ providerId: "x", providerVersion: "1", schema: malicious }];
+    expect(() => validateV1SchemaAdmission(proto)).toThrow(/__proto__/);
+  });
+
+  it("derives canonical SHA-256 schema and exact case-result digests", () => {
+    expect(sha256("abc")).toBe("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    const first = validateV1SchemaAdmission(validSchemaAdmission());
+    const reordered = validSchemaAdmission();
+    reordered.providers = [{
+      schema: { fields: [{ type: "uint8[]", name: "data" }] },
+      providerVersion: "1",
+      providerId: "embedded",
+    }];
+    const second = validateV1SchemaAdmission(reordered);
+    expect(first.schemaDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(second.schemaDigest).toBe(first.schemaDigest);
+    expect(first.providers[0]?.schemaDigest).toBe(first.schemaDigest);
+    expect(first.bindingDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(first.provenanceDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+
+    const tampered = cloneFixture();
+    (tampered.sources as Array<Record<string, unknown>>)[0]!.resultDigest = `sha256:${"0".repeat(64)}`;
+    expect(() => freezeV1Conformance(tampered)).toThrow(/host-derived/);
   });
 
   it("locks the conformance operation snapshot to the implemented live protocol", () => {

@@ -148,12 +148,16 @@ interface ConformancePass {
   readonly id: string;
   readonly result: "pass";
   readonly evidence: string;
+  readonly evidenceDigest: string;
+  readonly resultDigest: string;
 }
 
 interface ConformanceRejection {
   readonly id: string;
   readonly result: "rejected";
   readonly evidence: string;
+  readonly evidenceDigest: string;
+  readonly resultDigest: string;
 }
 
 export interface V1ConformanceFixture {
@@ -186,7 +190,10 @@ export interface V1SchemaProviderCandidate {
 export interface V1SchemaAdmission {
   readonly version: 1;
   readonly typeName: string;
-  readonly providers: readonly V1SchemaProviderCandidate[];
+  readonly schemaDigest: string;
+  readonly bindingDigest: string;
+  readonly provenanceDigest: string;
+  readonly providers: readonly (V1SchemaProviderCandidate & { readonly schemaDigest: string })[];
 }
 
 const encoder = new TextEncoder();
@@ -237,50 +244,39 @@ function assertConformanceCases(
     throw new V1ConformanceViolation("incomplete-conformance", `${label} does not cover every frozen v1 case`);
   }
   value.forEach((candidate, index) => {
-    assertExactKeys(candidate, ["id", "result", "evidence"], `${label}[${index}]`);
+    assertExactKeys(candidate, ["evidence", "evidenceDigest", "id", "result", "resultDigest"], `${label}[${index}]`);
     if (candidate.id !== expectedIds[index] || candidate.result !== result) {
       throw new V1ConformanceViolation("incomplete-conformance", `${label}[${index}] did not produce the required result`);
     }
     if (candidate.evidence !== V1_CONFORMANCE_EVIDENCE[expectedIds[index]!]) {
       throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] does not name its frozen case evidence`);
     }
+    if (typeof candidate.evidenceDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(candidate.evidenceDigest)) {
+      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence digest is invalid`);
+    }
+    const expectedDigest = sha256(canonicalJson([
+      candidate.id,
+      candidate.result,
+      candidate.evidence,
+      candidate.evidenceDigest,
+    ]));
+    if (candidate.resultDigest !== expectedDigest) {
+      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] result digest is not host-derived`);
+    }
   });
 }
 
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  for (const nested of Object.values(value)) deepFreeze(nested);
-  return Object.freeze(value);
+function canonicalPlainData(value: unknown, label: string): unknown {
+  try {
+    return canonicalizePlainData(value, { label, maxDepth: V1_SCHEMA_LIMITS.maxDepth });
+  } catch (error) {
+    if (!(error instanceof CanonicalDataError)) throw error;
+    const code = /depth limit/u.test(error.message) ? "schema-depth" : "invalid-fixture";
+    throw new V1ConformanceViolation(code, error.message);
+  }
 }
 
-function canonicalPlainData(value: unknown, label: string, depth = 0, counter = { value: 0 }): unknown {
-  if (++counter.value > 100_000) throw new V1ConformanceViolation("invalid-fixture", `${label} exceeds the item limit`);
-  if (depth > V1_SCHEMA_LIMITS.maxDepth) throw new V1ConformanceViolation("schema-depth", `${label} exceeds the depth limit`);
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new V1ConformanceViolation("invalid-fixture", `${label} contains a non-finite number`);
-    return value;
-  }
-  if (typeof value !== "object") throw new V1ConformanceViolation("invalid-fixture", `${label} contains executable or unsupported data`);
-  if (Array.isArray(value)) {
-    const expected = ["length", ...value.map((_, index) => String(index))].sort();
-    const actual = Reflect.ownKeys(value).map(String).sort();
-    if (actual.join() !== expected.join()) throw new V1ConformanceViolation("invalid-fixture", `${label} contains augmented array fields`);
-    return value.map((item, index) => canonicalPlainData(item, `${label}[${index}]`, depth + 1, counter));
-  }
-  if (!isRecord(value)) throw new V1ConformanceViolation("invalid-fixture", `${label} must contain plain data`);
-  const keys = Reflect.ownKeys(value);
-  if (keys.some((key) => typeof key !== "string")) throw new V1ConformanceViolation("invalid-fixture", `${label} contains symbols`);
-  const output: Record<string, unknown> = {};
-  for (const key of (keys as string[]).sort()) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
-    if (!descriptor.enumerable || !("value" in descriptor)) throw new V1ConformanceViolation("invalid-fixture", `${label} contains hidden or accessor data`);
-    output[key] = canonicalPlainData(descriptor.value, `${label}.${key}`, depth + 1, counter);
-  }
-  return output;
-}
-
-export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture {
+function parseCanonicalV1ConformanceFixture(value: unknown): V1ConformanceFixture {
   assertExactKeys(value, [
     "fixtureVersion",
     "protocolVersion",
@@ -333,11 +329,15 @@ export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture 
   return value as unknown as V1ConformanceFixture;
 }
 
+export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture {
+  return parseCanonicalV1ConformanceFixture(canonicalPlainData(value, "v1 conformance fixture"));
+}
+
 export function freezeV1Conformance(value: unknown): FrozenV1Conformance {
   const canonical = canonicalPlainData(value, "v1 conformance fixture");
-  const fixture = parseV1ConformanceFixture(canonical);
+  const fixture = parseCanonicalV1ConformanceFixture(canonical);
   const frozen = { ...fixture, frozen: true } as FrozenV1Conformance;
-  return deepFreeze(frozen);
+  return Object.freeze(frozen);
 }
 
 export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
@@ -357,9 +357,11 @@ export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
   }
 
   const schemas = new Set<string>();
-  admission.providers.forEach((provider, index) => {
+  const providerIdentities = new Set<string>();
+  const providers = admission.providers.map((provider, index) => {
     assertExactKeys(provider, ["providerId", "providerVersion", "schema"], `schema provider[${index}]`);
-    if (encoder.encode(JSON.stringify(provider.schema)).byteLength > V1_SCHEMA_LIMITS.maxBytes) {
+    const encodedSchema = canonicalJson(provider.schema);
+    if (encoder.encode(encodedSchema).byteLength > V1_SCHEMA_LIMITS.maxBytes) {
       throw new V1ConformanceViolation("schema-oversize", `schema provider[${index}] exceeds the byte limit`);
     }
     if (
@@ -370,8 +372,37 @@ export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
     ) {
       throw new V1ConformanceViolation("invalid-fixture", `schema provider[${index}] is invalid`);
     }
-    schemas.add(JSON.stringify(provider.schema));
+    const schemaDigest = sha256(encodedSchema);
+    schemas.add(schemaDigest);
+    const identity = `${provider.providerId as string}\0${provider.providerVersion as string}`;
+    if (providerIdentities.has(identity)) throw new V1ConformanceViolation("invalid-fixture", "schema provider identities must be unique");
+    providerIdentities.add(identity);
+    return Object.freeze({
+      providerId: provider.providerId as string,
+      providerVersion: provider.providerVersion as string,
+      schema: provider.schema,
+      schemaDigest,
+    });
   });
   if (schemas.size > 1) throw new V1ConformanceViolation("schema-conflict", "schema providers disagree on canonical content");
-  return deepFreeze(admission as unknown as V1SchemaAdmission);
+  const schemaDigest = providers[0]!.schemaDigest;
+  const bindingDigest = sha256(canonicalJson([1, admission.typeName, schemaDigest]));
+  const provenanceDigest = sha256(canonicalJson(
+    [bindingDigest, providers
+      .map(({ providerId, providerVersion, schemaDigest: providerSchemaDigest }) => [providerId, providerVersion, providerSchemaDigest])
+      .sort(([firstId, firstVersion], [secondId, secondVersion]) => {
+        const first = `${firstId}\0${firstVersion}`;
+        const second = `${secondId}\0${secondVersion}`;
+        return first < second ? -1 : first > second ? 1 : 0;
+      })],
+  ));
+  return Object.freeze({
+    version: 1,
+    typeName: admission.typeName,
+    schemaDigest,
+    bindingDigest,
+    provenanceDigest,
+    providers: Object.freeze(providers),
+  }) as V1SchemaAdmission;
 }
+import { CanonicalDataError, canonicalJson, canonicalizePlainData, sha256 } from "./canonical.js";

@@ -112,6 +112,19 @@ describe("M5 release hardening", () => {
   });
 
   it("passes the executable repository and evidence stop gate", () => {
+    const stopProbe = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      import { repositoryStopReason } from './scripts/toolchain/repository-stop-policy.mjs';
+      const denied = ['LICENSE', 'LICENSE-MIT', 'LICENCE_APACHE', '.env', '.env.production', '.env.production.local'];
+      const allowed = ['LICENSES.md', 'environment.md', '.env-example'];
+      if (denied.some((name) => repositoryStopReason(name) === undefined)) process.exit(1);
+      if (allowed.some((name) => repositoryStopReason(name) !== undefined)) process.exit(2);
+    `], { cwd: root, encoding: "utf8" });
+    expect(stopProbe.stderr).toBe("");
+    expect(stopProbe.status).toBe(0);
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { scripts: Record<string, string> };
+    expect(packageJson.scripts["evidence:m3"]).toBe(
+      "UPDATE_M3_EVIDENCE=1 vitest run --config tests/m3-live/vitest.config.ts tests/m3-live/generate-evidence.test.ts",
+    );
     const result = spawnSync(process.execPath, ["scripts/toolchain/release-readiness-gate.mjs"], {
       cwd: root,
       encoding: "utf8",
