@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M5-release-hardening",
+  "recordedAt": "2026-08-31",
+  "baselineCommit": "02f47252494d6702b20c07db59ee66483f1d997f",
+  "releaseDecision": "blocked",
+  "evidenceBoundary": {
+    "verifiedClasses": [
+      "repository-static",
+      "local-deterministic",
+      "local-in-process",
+      "synthetic-fixture",
+      "mock-webgl2"
+    ],
+    "browserOsRosNetworkProductionCertified": false,
+    "statement": "Passing repository gates proves only the named local, in-process, synthetic, and deterministic contracts. It does not certify a real browser, operating system, GPU, ROS graph, network, object store, identity provider, or production deployment."
+  },
+  "protocolSchemaV1": {
+    "status": "pass-local-synthetic",
+    "frozen": true,
+    "command": "corepack pnpm vitest run packages/protocol/test/index.test.ts packages/protocol/test/conformance-v1.test.ts",
+    "fixture": "packages/protocol/fixtures/v1-conformance.json",
+    "implementation": "packages/protocol/src/conformance-v1.ts",
+    "productionCertification": false,
+    "limitation": "The exact fixture covers local, hosted, ROS1-live, and ROS2-live contract rows in process. It does not prove a browser, operating system, ROS distribution, network, or production environment."
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "AC-01",
+      "status": "pass-local-synthetic",
+      "evidenceClass": "synthetic-fixture",
+      "commands": ["corepack pnpm check:m1", "corepack pnpm check:m2"],
+      "artifacts": ["tests/m1/vertical-slice.test.ts", "packages/m2-recorded-gate/test/index.test.ts", "docs/evidence/m2-recorded-source.json"],
+      "limitation": "Generated fixtures prove the normalized source contract without local ROS; they are not public-corpus or browser certification."
+    },
+    {
+      "id": "AC-02",
+      "status": "pass-local-reference",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm check:m2", "corepack pnpm check:m4"],
+      "artifacts": ["packages/m2-recorded-gate/test/index.test.ts", "packages/source-hosted/test/index.test.ts", "tests/m4-hosted/lifecycle.test.ts"],
+      "limitation": "Hosted equivalence uses immutable granted-range and in-memory reference providers, not production storage or networking."
+    },
+    {
+      "id": "AC-03",
+      "status": "pass-deterministic-model",
+      "evidenceClass": "local-deterministic",
+      "commands": ["corepack pnpm check:m1", "node benchmarks/scenarios/run-m1-dimensional.mjs --check"],
+      "artifacts": ["tests/m1/dimensional-gate.test.ts", "benchmarks/artifacts/m1-dimensional-model.json"],
+      "limitation": "Seek timing is a deterministic dimensional model, not a browser/hardware latency measurement."
+    },
+    {
+      "id": "AC-04",
+      "status": "pass-local-synthetic",
+      "evidenceClass": "synthetic-fixture",
+      "commands": ["corepack pnpm check:m1", "corepack pnpm check:m2", "corepack pnpm check:m4"],
+      "artifacts": ["packages/worker-runtime/test/index.test.ts", "packages/source-hosted/test/index.test.ts"],
+      "limitation": "Bounded range allocation is proven in Node test runtimes, not by a browser heap profile."
+    },
+    {
+      "id": "AC-05",
+      "status": "pass-local-synthetic",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm check:m3"],
+      "artifacts": ["tests/m3-live/security-gate.test.ts", "docs/evidence/m3-live.json"],
+      "limitation": "ROS1/ROS2 adapters are exercised by a deterministic in-process harness; no ROS distribution or network was executed."
+    },
+    {
+      "id": "AC-06",
+      "status": "pass-local-adversarial",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm test:security", "corepack pnpm check:m3"],
+      "artifacts": ["tests/m3-live/security-gate.test.ts", "packages/edge-runtime/test/index.test.ts", "apps/relay/test/index.test.ts"],
+      "limitation": "Identity and reachability denial are contract tests, not deployed firewall, TLS, penetration-test, or public-network evidence."
+    },
+    {
+      "id": "AC-07",
+      "status": "pass-local-deterministic",
+      "evidenceClass": "local-deterministic",
+      "commands": ["corepack pnpm check:m2"],
+      "artifacts": ["packages/displays-core/test/index.test.ts", "packages/m2-recorded-gate/test/index.test.ts"],
+      "limitation": "Semantic scene summaries and mock WebGL2 operations do not certify pixels on real GPU/browser combinations."
+    },
+    {
+      "id": "AC-08",
+      "status": "pass-local-deterministic",
+      "evidenceClass": "synthetic-fixture",
+      "commands": ["corepack pnpm check:m2"],
+      "artifacts": ["packages/core-model/test/index.test.ts", "packages/displays-core/test/index.test.ts", "packages/m2-recorded-gate/test/index.test.ts"],
+      "limitation": "Schema providers and conflicts are fixed fixtures; no external schema service or unreviewed schema pack is certified."
+    },
+    {
+      "id": "AC-09",
+      "status": "pass-local-deterministic",
+      "evidenceClass": "local-deterministic",
+      "commands": ["corepack pnpm check:m1", "corepack pnpm check:m2"],
+      "artifacts": ["packages/tf/test/index.test.ts", "packages/timeline/test/index.test.ts", "packages/m2-recorded-gate/test/index.test.ts"],
+      "limitation": "Time and TF policy is deterministic fixture evidence, not comparison against a production ROS graph."
+    },
+    {
+      "id": "AC-10",
+      "status": "pass-local-adversarial",
+      "evidenceClass": "synthetic-fixture",
+      "commands": ["corepack pnpm check:m1", "corepack pnpm check:m2", "corepack pnpm test:security"],
+      "artifacts": ["tests/m1/vertical-slice.test.ts", "packages/source-ros1bag/test/index.test.ts", "packages/source-ros2-sqlite/test/index.test.ts", "packages/source-hosted/test/index.test.ts"],
+      "limitation": "Checked malformed and bounded cases are not a third-party fuzzing or penetration-testing certification."
+    },
+    {
+      "id": "AC-11",
+      "status": "pass-deterministic-model-only",
+      "evidenceClass": "local-deterministic",
+      "commands": ["corepack pnpm bench:micro", "corepack pnpm bench:corpus", "node benchmarks/scenarios/run-m1-dimensional.mjs --check"],
+      "artifacts": ["docs/benchmark.md", "benchmarks/artifacts/m1-dimensional-model.json", "tests/m1/dimensional-gate.test.ts"],
+      "limitation": "The checked numbers are operation-cost models and logical allocation accounting. Candidate browser/hardware latency and memory targets remain unmeasured and cannot be promoted."
+    },
+    {
+      "id": "AC-12",
+      "status": "pass-local-reference",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm check:m4", "corepack pnpm test:security"],
+      "artifacts": ["packages/hosted-core/test/index.test.ts", "packages/source-hosted/test/index.test.ts", "tests/m4-hosted/lifecycle.test.ts", "docs/evidence/m4-hosted.json"],
+      "limitation": "The capability/grant lifecycle is an in-memory reference, not production identity, object-store, TLS, retention, or deletion evidence."
+    },
+    {
+      "id": "AC-13",
+      "status": "pass-local-deterministic",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm check:m1", "corepack pnpm check:m3", "corepack pnpm check:m4"],
+      "artifacts": ["packages/worker-runtime/test/index.test.ts", "packages/render-core/test/index.test.ts", "tests/m3-live/security-gate.test.ts", "tests/m4-hosted/lifecycle.test.ts"],
+      "limitation": "Bounded/redacted metrics are asserted locally; no production metrics backend or alert operation is certified."
+    },
+    {
+      "id": "AC-14",
+      "status": "pass-local-deterministic",
+      "evidenceClass": "local-in-process",
+      "commands": ["corepack pnpm --filter @ros-web-viewer/extension-api test"],
+      "artifacts": ["packages/extension-api/src/index.ts", "packages/extension-api/test/index.test.ts", "examples/range-summary-extension/src/index.ts", "docs/extension-api.md"],
+      "limitation": "The workspace-private example proves the trusted build-time host subset in process. It is not a runtime plugin sandbox, published package, or untrusted-code boundary."
+    },
+    {
+      "id": "AC-15",
+      "status": "release-blocking-exception",
+      "evidenceClass": "repository-static",
+      "commands": ["node scripts/toolchain/release-readiness-gate.mjs"],
+      "artifacts": ["docs/compatibility.md", "docs/evidence/m5-release-readiness.json"],
+      "limitation": "Target compatibility rows exist, but exact browser/OS/GPU/ROS/storage/compression executions are not certified.",
+      "exception": {
+        "id": "EX-M5-AC15-COMPATIBILITY",
+        "owner": "release-compatibility-owner",
+        "expiresOn": "2026-09-30",
+        "effect": "blocks-release",
+        "closureEvidence": "Exact environment records and passing browser/OS/ROS/storage/compression matrix runs for every promoted row."
+      }
+    },
+    {
+      "id": "AC-16",
+      "status": "release-blocking-exception",
+      "evidenceClass": "repository-static",
+      "commands": ["corepack pnpm test:a11y", "corepack pnpm test:ux"],
+      "artifacts": ["docs/ux-baseline.md", "apps/web/test/shell.test.ts", "docs/evidence/m5-release-readiness.json"],
+      "limitation": "Deterministic semantic assertions exist, but real browser accessibility-tree, screen-reader, contrast, 200% zoom, focus, reduced-motion, and reviewed visual evidence are incomplete.",
+      "exception": {
+        "id": "EX-M5-AC16-ACCESSIBILITY",
+        "owner": "release-accessibility-owner",
+        "expiresOn": "2026-09-30",
+        "effect": "blocks-release",
+        "closureEvidence": "Reviewed exact-browser manual and automated accessibility evidence for every primary state and flow."
+      }
+    },
+    {
+      "id": "AC-17",
+      "status": "unauthorized",
+      "evidenceClass": "policy",
+      "commands": ["node scripts/toolchain/release-readiness-gate.mjs"],
+      "artifacts": ["docs/evidence/m5-release-readiness.json"],
+      "limitation": "No human authorization is recorded.",
+      "prohibitedActions": [
+        "public-name-selection",
+        "license-selection",
+        "package-publication",
+        "repository-publication",
+        "paid-infrastructure",
+        "credential-provisioning",
+        "external-deployment",
+        "production-deployment"
+      ]
+    }
+  ],
+  "browserCompatibility": {
+    "classification": "target-matrix-not-certified",
+    "rows": [
+      { "browser": "stable Chromium", "os": "Ubuntu 24.04", "gpu": "WebGL2-capable integrated GPU", "status": "not-executed" },
+      { "browser": "stable Chromium", "os": "current Windows", "gpu": "WebGL2-capable GPU", "status": "not-executed" },
+      { "browser": "stable Chromium", "os": "current macOS", "gpu": "WebGL2-capable GPU", "status": "not-executed" },
+      { "browser": "stable Firefox", "os": "Ubuntu 24.04", "gpu": "WebGL2-capable integrated GPU", "status": "not-executed" },
+      { "browser": "stable Firefox", "os": "current Windows", "gpu": "WebGL2-capable GPU", "status": "not-executed" },
+      { "browser": "stable Firefox", "os": "current macOS", "gpu": "WebGL2-capable GPU", "status": "not-executed" }
+    ],
+    "requiredEnvironmentFields": ["browserBuild", "osBuild", "cpu", "gpu", "driver", "powerState", "viewport", "dpr", "zoom", "sourceHash", "cacheState", "timestamp"]
+  },
+  "failureRecovery": [
+    { "scenario": "webgl-context-loss", "status": "release-blocked-not-browser-tested", "evidence": ["packages/render-core/test/index.test.ts"], "recovery": "Dispose renderer-owned resources, preserve source choice, rebuild only after a fresh context and source epoch." },
+    { "scenario": "parser-or-source-failure", "status": "pass-local-synthetic", "evidence": ["apps/web/test/shell.test.ts", "packages/source-ros1bag/test/index.test.ts", "packages/source-ros2-sqlite/test/index.test.ts"], "recovery": "Keep source selection, emit actionable bounded diagnostics, and allow a replacement source." },
+    { "scenario": "relay-or-edge-disconnect", "status": "pass-local-in-process", "evidence": ["packages/source-live/test/index.test.ts", "tests/m3-live/security-gate.test.ts"], "recovery": "Advance source epoch, discard stale callbacks, restore only explicit subscriptions, and expose drops/health." },
+    { "scenario": "hosted-expiry-revocation-deletion", "status": "pass-local-reference", "evidence": ["packages/hosted-core/test/index.test.ts", "tests/m4-hosted/lifecycle.test.ts"], "recovery": "Deny new grants, bound residual issued grants, preserve non-secret recovery copy, and require a fresh capability." },
+    { "scenario": "resource-cleanup", "status": "pass-local-deterministic", "evidence": ["packages/render-core/test/index.test.ts", "packages/worker-runtime/test/index.test.ts", "packages/source-hosted/test/index.test.ts"], "recovery": "Cancel stale ranges, invalidate epochs, release pooled GPU resources, and reject post-disposal use." }
+  ],
+  "accessibility": {
+    "automatedStatus": "pass-local-semantic",
+    "automatedCommands": ["corepack pnpm test:a11y", "corepack pnpm test:ux", "corepack pnpm exec vitest run apps/web/test/shell.test.ts"],
+    "checkedContracts": ["keyboard-order", "visible-focus-contract", "focus-restoration-contract", "accessible-names-and-states", "error-announcements", "reduced-motion-contract", "viewport-dpr-zoom-record"],
+    "manualBrowserReviewStatus": "missing-release-blocker",
+    "exceptionId": "EX-M5-AC16-ACCESSIBILITY"
+  },
+  "security": {
+    "status": "pass-local-adversarial",
+    "commands": ["corepack pnpm test:security", "corepack pnpm check:m3", "corepack pnpm check:m4"],
+    "productionCertification": false,
+    "requiredExternalEvidence": ["deployed-network-isolation", "tls-and-secret-lifecycle", "penetration-test", "incident-procedure", "production-identity-and-storage-review"]
+  },
+  "supplyChain": {
+    "status": "pass-repository-gates-when-commands-pass",
+    "commands": ["corepack pnpm install --frozen-lockfile", "corepack pnpm audit:dependencies", "corepack pnpm report:licenses", "corepack pnpm sbom"],
+    "generatedArtifacts": ["artifacts/licenses.json", "artifacts/sbom.cdx.json"],
+    "publicationLicenseSelected": false,
+    "productionSupplyChainCertification": false
+  },
+  "benchmark": {
+    "status": "pass-deterministic-model-only",
+    "commands": ["corepack pnpm bench:micro", "corepack pnpm bench:corpus", "node benchmarks/scenarios/run-m1-dimensional.mjs --check", "corepack pnpm exec vitest run --config benchmarks/scenarios/vitest.config.ts"],
+    "browserBenchmarkResult": false,
+    "productionHardwareResult": false,
+    "artifact": "benchmarks/artifacts/m1-dimensional-model.json"
+  },
+  "cleanTreeReproducibility": {
+    "required": true,
+    "commands": ["corepack pnpm install --frozen-lockfile", "corepack pnpm lint", "corepack pnpm typecheck", "corepack pnpm test", "corepack pnpm build", "node scripts/toolchain/release-readiness-gate.mjs --check-reproducibility --check-clean-tree"],
+    "rule": "The exact committed tree must regenerate deterministic benchmark, license, and SBOM outputs and finish with an empty git status. A dirty or unavailable check is a release blocker, never a waiver."
+  }
+}
