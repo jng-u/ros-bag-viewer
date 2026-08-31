@@ -1,0 +1,12 @@
+{
+  "name": "@ros-web-viewer/source-mcap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test"
+  },
+  "dependencies": {
+    "@mcap/core": "2.2.1"
+  }
+}
