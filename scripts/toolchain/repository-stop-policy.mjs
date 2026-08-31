@@ -99,6 +99,16 @@ function looksHardCodedSecret(value) {
       /(?:secret|token|private|credential)/iu.test(trimmed));
 }
 
+function looksHardCodedSourceSecret(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (/^(?:identifier|keyword|literal|number|string|token|unknown)$/iu.test(trimmed) ||
+    /(?:example|placeholder|documentation|not-a-secret|replace-me)/iu.test(trimmed)) return false;
+  return /^(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})$/u.test(trimmed) ||
+    /^Bearer\s+\S{12,}$/u.test(trimmed) ||
+    trimmed.length >= 16 && !/\s/u.test(trimmed) && /[A-Z]/u.test(trimmed) && /[a-z]/u.test(trimmed) && /\d/u.test(trimmed);
+}
+
 function typescriptContainsCredential(text, filename) {
   if (/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})\b/u.test(text)) return true;
   const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -120,7 +130,7 @@ function typescriptContainsCredential(text, filename) {
       expression = node.right;
     }
     if (key && hasCredentialKey(key) &&
-      [...typescriptStrings(expression, new Map())].some(looksHardCodedSecret)) found = true;
+      [...typescriptStrings(expression, new Map())].some(looksHardCodedSourceSecret)) found = true;
     ts.forEachChild(node, inspect);
   };
   inspect(source);
@@ -132,7 +142,7 @@ function pythonContainsCredential(text) {
   return text.split(/\r?\n/u).some((line) => {
     const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*(?:#.*)?$/u.exec(line);
     if (!assignment || !hasCredentialKey(assignment[1])) return false;
-    return [...pythonStrings(assignment[2], new Map())].some(looksHardCodedSecret);
+    return [...pythonStrings(assignment[2], new Map())].some(looksHardCodedSourceSecret);
   });
 }
 

@@ -91,6 +91,7 @@ const allowed = [
   ["src/reassigned-safe.ts", "let target = \"@pulumi/" + "aws\"; target = \"safe-package\"; await import(target)"],
   ["src/id_parser.ts", "export const parse = (value: string) => value"],
   ["src/token-placeholder.ts", "const token = \"replace-me\""],
+  ["src/relay.test.ts", "const request = { credential: \"edge-only-secret\" }; void request"],
   ["tools/safe.py", "target = \"pulumi_aws\"\nprint(target)"],
   ["helm/values-reference.md", ""],
   ["config/values.yaml", "image: viewer"],
