@@ -723,7 +723,11 @@ export class HostedSharingService {
 
   async readGrantedRangeSerialized(serialized: string, signal: AbortSignal): Promise<Uint8Array> {
     const parsed = parseSerializedRecord(serialized, "granted range read");
-    return this.#readGrantedRange({ sessionCapability: String(parsed.sessionCapability), grantToken: String(parsed.grantToken), sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
+    if (typeof parsed.sessionCapability !== "string" || typeof parsed.grantToken !== "string") {
+      this.#deny();
+      throw new HostedAccessError();
+    }
+    return this.#readGrantedRange({ sessionCapability: parsed.sessionCapability, grantToken: parsed.grantToken, sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
   }
 
   async #readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
@@ -837,7 +841,8 @@ export class HostedSharingService {
     return now;
   }
 
-  #findSession(capability: string): SessionRecord | undefined {
+  #findSession(capability: unknown): SessionRecord | undefined {
+    if (typeof capability !== "string") return undefined;
     const digest = digestToken(capability);
     const session = this.#sessions.get(Buffer.from(digest).toString("hex"));
     return session && equalDigest(session.capabilityDigest, digest) ? session : undefined;
@@ -852,7 +857,8 @@ export class HostedSharingService {
     return session;
   }
 
-  #findGrant(grantToken: string): GrantRecord | undefined {
+  #findGrant(grantToken: unknown): GrantRecord | undefined {
+    if (typeof grantToken !== "string") return undefined;
     const digest = digestToken(grantToken);
     const grant = this.#grants.get(Buffer.from(digest).toString("hex"));
     return grant && equalDigest(grant.tokenDigest, digest) ? grant : undefined;

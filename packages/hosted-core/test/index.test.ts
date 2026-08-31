@@ -407,6 +407,81 @@ describe("serialized hosted admission", () => {
     expect(() => service.issueRangeGrantSerialized("cap", hostile as unknown as string)).toThrow(/serialized JSON/);
     await expect(service.readGrantedRangeSerialized(hostile as unknown as string, new AbortController().signal)).rejects.toThrow(/serialized JSON/);
   });
+
+  it("rejects hostile session capabilities before coercion or reflection traps", async () => {
+    const service = new HostedSharingService();
+    const traps = {
+      get: vi.fn(),
+      getOwnPropertyDescriptor: vi.fn(),
+      getPrototypeOf: vi.fn(),
+      ownKeys: vi.fn(),
+      toJSON: vi.fn(),
+      valueOf: vi.fn(),
+      toString: vi.fn(),
+      toPrimitive: vi.fn(),
+    };
+    const target = {
+      toJSON: traps.toJSON,
+      valueOf: traps.valueOf,
+      toString: traps.toString,
+      [Symbol.toPrimitive]: traps.toPrimitive,
+    };
+    const hostile = new Proxy(target, {
+      get: traps.get,
+      getOwnPropertyDescriptor: traps.getOwnPropertyDescriptor,
+      getPrototypeOf: traps.getPrototypeOf,
+      ownKeys: traps.ownKeys,
+    }) as unknown as string;
+    const request = serializeRangeGrantRequest({
+      sessionId: "session",
+      entryId: "entry",
+      objectId: "object",
+      immutableVersion: "sha256:invalid",
+      offset: 0n,
+      length: 1n,
+    });
+    const assertDenied = (operation: () => unknown) => {
+      expect(operation).toThrowError(expect.objectContaining({
+        name: "HostedAccessError",
+        code: "access-denied",
+        message: "hosted access denied",
+      }));
+    };
+
+    assertDenied(() => service.issueRangeGrantSerialized(hostile, request));
+    assertDenied(() => service.openHostedSession(hostile));
+    assertDenied(() => service.createRangeSource(hostile, "entry"));
+    assertDenied(() => service.revokeSession(hostile));
+    await expect(service.deleteSession(hostile)).rejects.toMatchObject({
+      name: "HostedAccessError",
+      code: "access-denied",
+      message: "hosted access denied",
+    });
+    for (const primitive of [undefined, null, 0, true, 1n, Symbol("capability")]) {
+      assertDenied(() => service.issueRangeGrantSerialized(primitive as unknown as string, request));
+    }
+    for (const trap of Object.values(traps)) expect(trap).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-string serialized capability and grant-token fields without coercion", async () => {
+    const service = new HostedSharingService();
+    const signal = new AbortController().signal;
+    const request = {
+      sessionCapability: {},
+      grantToken: [],
+      sessionId: "session",
+      entryId: "entry",
+      objectId: "object",
+      immutableVersion: "sha256:invalid",
+      offset: "0",
+      length: "1",
+    };
+    await expect(service.readGrantedRangeSerialized(JSON.stringify(request), signal)).rejects.toMatchObject({
+      name: "HostedAccessError",
+      code: "access-denied",
+      message: "hosted access denied",
+    });
+  });
 });
 
 it("accepts configured serialized ceilings above the default envelope", async () => {
