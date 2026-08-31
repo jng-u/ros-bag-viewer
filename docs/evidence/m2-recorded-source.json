@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "milestone": "G003-M2-recorded-source",
+  "recordedAt": "2026-08-31",
+  "evidenceClass": "deterministic-synthetic-fixture",
+  "promotedToPublicSupport": false,
+  "sourceModes": [
+    "ros1-local-blob",
+    "ros1-immutable-granted-range",
+    "ros2-local-directory-multipart",
+    "ros2-immutable-granted-range-multipart"
+  ],
+  "displayKinds": [
+    "camera-info",
+    "frame-tree",
+    "grid",
+    "image",
+    "laser-scan",
+    "marker",
+    "numeric-plot",
+    "occupancy-grid",
+    "odometry",
+    "path",
+    "pointcloud2",
+    "pose",
+    "raw-inspector"
+  ],
+  "gates": {
+    "ros1LocalGrantedEquivalence": "pass",
+    "ros2LocalGrantedEquivalence": "pass",
+    "multipartOrderingAndMissingPartDiagnostics": "pass",
+    "unsupportedStorageCompressionAndCodecDiagnostics": "pass",
+    "corruptAndTruncatedInputDiagnostics": "pass",
+    "epochInvalidation": "pass",
+    "tfMissingExtrapolationAndStaleEpoch": "pass",
+    "schemaBackedNumericAndOpaqueFallback": "pass",
+    "allNativeDisplayGroupsRegistered": "pass",
+    "boundedRangeAndQueryTelemetry": "pass"
+  },
+  "commands": [
+    "corepack pnpm vitest run packages/m2-recorded-gate/test/index.test.ts",
+    "corepack pnpm typecheck",
+    "corepack pnpm test",
+    "corepack pnpm lint"
+  ],
+  "limitations": [
+    "Fixtures are generated synthetic recordings and do not promote a public corpus, browser, OS, or ROS distribution to supported status.",
+    "The HTTP-like source is an immutable granted-range harness; authorization issuance, revocation, and production object storage remain outside M2.",
+    "ROS1 compressed chunks fail explicitly unless a separately bounded bz2 or lz4 decoder is supplied.",
+    "ROS2 SQLite uses an injected read-only test provider; production browser SQLite VFS selection remains a separately reviewed dependency decision."
+  ]
+}

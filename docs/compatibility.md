@@ -1,4 +1,4 @@
-# Compatibility baseline (M0)
+# Compatibility baseline (M0, amended by G003 M2 evidence)
 
 **Status:** target matrix and evidence contract. A row becomes supported only after its pinned fixture and environment evidence pass.
 
@@ -17,10 +17,10 @@
 |---|---|---|---|
 | ROS 2 MCAP | Local `File`/`Blob`; indexed | Topics/types/times, range reads, deterministic seek, schema provenance | Format fixture admitted; ROS 2 SLAM/render evidence deferred to M1 |
 | ROS 2 MCAP | Local/hosted; unindexed | Explicit sequential/degraded mode, bounded index build and cancellation | Planned; fixture not approved |
-| ROS 1 bag | Local recording; isolated ROS 1 lane | Connection schema, supported compression, topic/time inventory | Licensed compressed SLAM bag admitted; adapter execution deferred |
-| ROS 2 SQLite | `metadata.yaml` plus single/multipart `.db3` | Relation validation, ordering, missing-part diagnostics | Humble single-file fixture admitted; multipart evidence deferred to M2 |
+| ROS 1 bag | Local recording; isolated ROS 1 lane | Connection schema, supported compression, topic/time inventory | M2 deterministic synthetic local/granted-range adapter gate passes; public corpus/browser support is not yet promoted |
+| ROS 2 SQLite | `metadata.yaml` plus single/multipart `.db3` | Relation validation, ordering, missing-part diagnostics | M2 deterministic synthetic single/multipart local/granted-range gate passes; production browser SQLite provider and public corpus support are not yet promoted |
 | ROS 1/ROS 2 live | Private generation-specific edge through relay | Read-only subscriptions, schema provenance, reconnect epochs | Deferred to M3 |
-| Hosted recordings | Immutable manifest plus granted ranges | Local/hosted normalized equivalence and authorization failures | Contract only; deferred to M4 |
+| Hosted recordings | Immutable manifest plus granted ranges | Local/hosted normalized equivalence and authorization failures | M2 immutable granted-range equivalence harness passes; production authorization, revocation, storage, and sharing remain M4 |
 
 Evidence records exact browser build, OS, CPU/GPU, WebGL2 capability, viewport/DPR, input hash, ROS generation/distro, storage version, compression codec, schema provider, source mode, and cold/warm/cache state. Current stable Chromium and Firefox on Windows, macOS, and Ubuntu are candidates, not support claims.
 
@@ -46,3 +46,9 @@ ROS 1 evidence must include the exact isolated container/VM digest, host require
 5. Owner, review date, and explicit supported/degraded/unsupported decision.
 
 See [corpus-manifest.md](corpus-manifest.md).
+
+## G003 M2 recorded-source evidence amendment
+
+The M2 gate adds generated ROS 1 bag and ROS 2 SQLite multipart fixtures. It compares local `Blob`/directory reads with immutable HTTP-like granted ranges and requires identical topic, schema, time, message, generic-inspector, and numeric-plot summaries. It also locks deterministic multipart ordering, bounded range/query telemetry, repeated epoch invalidation, explicit TF missing/extrapolation/stale-epoch results, all native display registrations, opaque byte-only inspection, and actionable unsupported storage/compression/codec diagnostics.
+
+This is **synthetic contract evidence**, not a claim that a public recording, browser/OS matrix, production object store, authorization service, compressed ROS 1 decoder, or production browser SQLite VFS has passed. Those rows remain unpromoted until the evidence requirements above are satisfied. The machine-readable scope and gate record is [evidence/m2-recorded-source.json](evidence/m2-recorded-source.json).
