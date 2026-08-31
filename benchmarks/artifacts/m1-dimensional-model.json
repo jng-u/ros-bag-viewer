@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "benchmarks/scenarios/run-m1-dimensional.mjs",
+  "evidenceClassification": {
+    "kind": "deterministic-dimensional-and-operation-cost-model",
+    "productionHardwareResult": false,
+    "browserBenchmarkResult": false,
+    "disclaimer": "This artifact proves dimensions, bounded operations, semantic determinism, and model arithmetic. It is not a production browser or hardware performance result."
+  },
+  "scenario": {
+    "schemaVersion": 1,
+    "corpus": {
+      "id": "generated-m1-dimensional-range-v1",
+      "sourceKind": "synthetic-range-source",
+      "immutableVersion": "model:generated-m1-dimensional-range-v1",
+      "sourceBytes": 8388608,
+      "indexingModes": [
+        "indexed",
+        "unindexed-sequential"
+      ]
+    },
+    "environment": {
+      "machineProfile": "M0-LAPTOP-2026-01 candidate profile (not observed hardware)",
+      "observedMachine": false,
+      "browserProfile": "stable Chromium candidate (not executed by this model)",
+      "browserExecuted": false,
+      "viewportCssPixels": [
+        1440,
+        900
+      ],
+      "devicePixelRatio": 1,
+      "zoomPercent": 100,
+      "theme": "dark-compact",
+      "powerMode": "plugged-in balanced candidate",
+      "cacheState": "cold-model"
+    },
+    "workload": {
+      "pointCount": 120000,
+      "pointTopicRateHz": 10,
+      "maxRenderedPoints": 60000,
+      "pathPoseCount": 2000,
+      "pathTopicRateHz": 5,
+      "maxRenderedPathPoses": 2000,
+      "activeDisplays": 2,
+      "queueCapacity": 4,
+      "warmupFrames": 10,
+      "repetitions": 60
+    },
+    "costModel": {
+      "sequentialReadBytes": 262144,
+      "indexedReadLengths": [
+        64,
+        1024,
+        4096,
+        65536
+      ],
+      "storageThroughputMiBPerSecond": 180,
+      "perReadOverheadMilliseconds": 0.08,
+      "decodeMillisecondsPer100kPoints": 4.2,
+      "fixedOverheadBytes": 8388608,
+      "longTaskThresholdMilliseconds": 50,
+      "percentileMethod": "nearest-rank"
+    }
+  },
+  "source": {
+    "indexedSeek": {
+      "operation": "indexed target-chunk range seek model",
+      "telemetry": {
+        "readCalls": 4,
+        "requestedBytes": 70720,
+        "completedBytes": 70720,
+        "activeReads": 0,
+        "queuedReads": 0,
+        "peakActiveReads": 1,
+        "peakInFlightBytes": 65536,
+        "cancelledReads": 0,
+        "rejectedReads": 0
+      },
+      "rawRequests": [
+        {
+          "offset": 8388544,
+          "length": 64
+        },
+        {
+          "offset": 8387520,
+          "length": 1024
+        },
+        {
+          "offset": 1048576,
+          "length": 4096
+        },
+        {
+          "offset": 2097152,
+          "length": 65536
+        }
+      ],
+      "modeledMilliseconds": 0.695,
+      "boundedRangeProof": true
+    },
+    "unindexedScan": {
+      "operation": "unindexed sequential degraded scan model",
+      "telemetry": {
+        "readCalls": 32,
+        "requestedBytes": 8388608,
+        "completedBytes": 8388608,
+        "activeReads": 0,
+        "queuedReads": 0,
+        "peakActiveReads": 1,
+        "peakInFlightBytes": 262144,
+        "cancelledReads": 0,
+        "rejectedReads": 0
+      },
+      "requestCount": 32,
+      "firstRequest": {
+        "offset": 0,
+        "length": 262144
+      },
+      "lastRequest": {
+        "offset": 8126464,
+        "length": 262144
+      },
+      "modeledMilliseconds": 47.004,
+      "boundedRangeProof": true
+    }
+  },
+  "render": {
+    "semanticScenes": [
+      {
+        "displayKind": "pointcloud2",
+        "frameId": "lidar",
+        "primitive": "points",
+        "inputVertices": 120000,
+        "renderedVertices": 60000,
+        "droppedVertices": 60000,
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            1199.97998046875,
+            99.80000305175781,
+            0.9677419066429138
+          ]
+        }
+      },
+      {
+        "displayKind": "path",
+        "frameId": "map",
+        "primitive": "line-strip",
+        "inputVertices": 2000,
+        "renderedVertices": 2000,
+        "droppedVertices": 0,
+        "bounds": {
+          "min": [
+            0,
+            -0.9999902248382568,
+            0
+          ],
+          "max": [
+            199.89999389648438,
+            0.9999975562095642,
+            0
+          ]
+        }
+      }
+    ],
+    "semanticDigest": "e9a4db314fc09949d02a3d0c729cc608db726339f39a67d0254123b8a958efdf",
+    "thinWebGl2": {
+      "evidenceKind": "deterministic-operation-cost-model-with-mock-webgl2",
+      "hardwareMeasurement": false,
+      "firstContentMilliseconds": 9.935,
+      "frameTime": {
+        "p50Milliseconds": 4.482,
+        "p95Milliseconds": 4.764,
+        "p99Milliseconds": 4.764,
+        "maximumMilliseconds": 4.764
+      },
+      "rawFrameSamplesMilliseconds": [
+        4.2,
+        4.388,
+        4.576,
+        4.764,
+        4.341,
+        4.529,
+        4.717,
+        4.294,
+        4.482,
+        4.67,
+        4.247,
+        4.435,
+        4.623,
+        4.2,
+        4.388,
+        4.576,
+        4.764,
+        4.341,
+        4.529,
+        4.717,
+        4.294,
+        4.482,
+        4.67,
+        4.247,
+        4.435,
+        4.623,
+        4.2,
+        4.388,
+        4.576,
+        4.764,
+        4.341,
+        4.529,
+        4.717,
+        4.294,
+        4.482,
+        4.67,
+        4.247,
+        4.435,
+        4.623,
+        4.2,
+        4.388,
+        4.576,
+        4.764,
+        4.341,
+        4.529,
+        4.717,
+        4.294,
+        4.482,
+        4.67,
+        4.247,
+        4.435,
+        4.623,
+        4.2,
+        4.388,
+        4.576,
+        4.764,
+        4.341,
+        4.529,
+        4.717,
+        4.294
+      ],
+      "longTaskThresholdMilliseconds": 50,
+      "longTaskCount": 0,
+      "rendererTelemetryBeforeDispose": {
+        "liveBuffers": 2,
+        "liveGpuBytes": 744000,
+        "pooledBuffers": 0,
+        "pooledGpuBytes": 0,
+        "peakGpuBytes": 744000,
+        "drawCalls": 2,
+        "disposedBuffers": 0,
+        "rejectedAllocations": 0,
+        "decimatedVertices": 0
+      },
+      "rendererTelemetryAfterDispose": {
+        "liveBuffers": 0,
+        "liveGpuBytes": 0,
+        "pooledBuffers": 0,
+        "pooledGpuBytes": 0,
+        "peakGpuBytes": 744000,
+        "drawCalls": 2,
+        "disposedBuffers": 2,
+        "rejectedAllocations": 0,
+        "decimatedVertices": 0
+      },
+      "mockWebGlOperations": {
+        "bufferAllocations": [
+          720000,
+          24000
+        ],
+        "bufferUploads": [
+          720000,
+          24000
+        ],
+        "drawCalls": [
+          {
+            "mode": 0,
+            "count": 60000
+          },
+          {
+            "mode": 3,
+            "count": 2000
+          }
+        ],
+        "createdBuffers": 2,
+        "deletedBuffers": 2
+      },
+      "memoryEstimate": {
+        "formula": "2 × active decoded bytes + GPU working-set bytes + fixed overhead bytes",
+        "activeDecodedBytes": 1488000,
+        "retainedJsBytes": 11364608,
+        "retainedWasmBytes": 0,
+        "gpuWorkingSetBytes": 744000,
+        "fixedOverheadBytes": 8388608,
+        "workingSetBytes": 12108608
+      },
+      "queue": {
+        "capacity": 4,
+        "modeledMaximumDepth": 1,
+        "modeledDroppedMessagesPerSecond": 0
+      }
+    },
+    "rejectedHeavyweightHelperBaseline": {
+      "evidenceKind": "synthetic-lower-bound-wrapper-model-not-a-library-measurement",
+      "libraryIdentity": null,
+      "installedOrExecutedLibrary": false,
+      "hardwareMeasurement": false,
+      "assumptions": [
+        "one additional retained geometry copy",
+        "one additional scene-wrapper boundary",
+        "0.8 ms deterministic per-frame orchestration cost"
+      ],
+      "frameTime": {
+        "p50Milliseconds": 5.459,
+        "p95Milliseconds": 5.741,
+        "p99Milliseconds": 5.741,
+        "maximumMilliseconds": 5.741
+      },
+      "rawFrameSamplesMilliseconds": [
+        5.177,
+        5.365,
+        5.553,
+        5.741,
+        5.318,
+        5.506,
+        5.694,
+        5.271,
+        5.459,
+        5.647,
+        5.224,
+        5.412,
+        5.6,
+        5.177,
+        5.365,
+        5.553,
+        5.741,
+        5.318,
+        5.506,
+        5.694,
+        5.271,
+        5.459,
+        5.647,
+        5.224,
+        5.412,
+        5.6,
+        5.177,
+        5.365,
+        5.553,
+        5.741,
+        5.318,
+        5.506,
+        5.694,
+        5.271,
+        5.459,
+        5.647,
+        5.224,
+        5.412,
+        5.6,
+        5.177,
+        5.365,
+        5.553,
+        5.741,
+        5.318,
+        5.506,
+        5.694,
+        5.271,
+        5.459,
+        5.647,
+        5.224,
+        5.412,
+        5.6,
+        5.177,
+        5.365,
+        5.553,
+        5.741,
+        5.318,
+        5.506,
+        5.694,
+        5.271
+      ],
+      "additionalRetainedJsBytes": 744000
+    }
+  },
+  "rendererDecisionComparison": {
+    "thinWebGl2": {
+      "runtimeProductionDependencies": 0,
+      "resourceOwnership": "explicit allocation, pooling, telemetry, and disposal",
+      "semanticDisplayKinds": [
+        "pointcloud2",
+        "path"
+      ],
+      "measuredEvidence": "deterministic model and mock-WebGL2 operation trace above"
+    },
+    "rejectedHeavyweightHelper": {
+      "runtimeProductionDependencies": "at least one if selected",
+      "resourceOwnership": "additional wrapper boundary in the synthetic lower-bound model",
+      "semanticDisplayKinds": "no additional M1 capability demonstrated",
+      "measuredEvidence": "no library result; only the explicitly labeled synthetic lower-bound model above"
+    },
+    "conclusion": "Retain thin WebGL2 for M1 because it proves required semantics and bounded ownership without a production helper dependency. Do not claim library-level speed superiority from model evidence."
+  }
+}

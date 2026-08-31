@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "corpus": {
+    "id": "generated-m1-dimensional-range-v1",
+    "sourceKind": "synthetic-range-source",
+    "immutableVersion": "model:generated-m1-dimensional-range-v1",
+    "sourceBytes": 8388608,
+    "indexingModes": ["indexed", "unindexed-sequential"]
+  },
+  "environment": {
+    "machineProfile": "M0-LAPTOP-2026-01 candidate profile (not observed hardware)",
+    "observedMachine": false,
+    "browserProfile": "stable Chromium candidate (not executed by this model)",
+    "browserExecuted": false,
+    "viewportCssPixels": [1440, 900],
+    "devicePixelRatio": 1,
+    "zoomPercent": 100,
+    "theme": "dark-compact",
+    "powerMode": "plugged-in balanced candidate",
+    "cacheState": "cold-model"
+  },
+  "workload": {
+    "pointCount": 120000,
+    "pointTopicRateHz": 10,
+    "maxRenderedPoints": 60000,
+    "pathPoseCount": 2000,
+    "pathTopicRateHz": 5,
+    "maxRenderedPathPoses": 2000,
+    "activeDisplays": 2,
+    "queueCapacity": 4,
+    "warmupFrames": 10,
+    "repetitions": 60
+  },
+  "costModel": {
+    "sequentialReadBytes": 262144,
+    "indexedReadLengths": [64, 1024, 4096, 65536],
+    "storageThroughputMiBPerSecond": 180,
+    "perReadOverheadMilliseconds": 0.08,
+    "decodeMillisecondsPer100kPoints": 4.2,
+    "fixedOverheadBytes": 8388608,
+    "longTaskThresholdMilliseconds": 50,
+    "percentileMethod": "nearest-rank"
+  }
+}
