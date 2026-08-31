@@ -35,7 +35,7 @@ const privilegedNames = new Set([
   "caches", "cookieStore", "location", "history", "crypto", "performance", "console",
   "Proxy", "Promise", "URL", "postMessage",
 ]);
-const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect"]);
+const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect", "constructor", "prototype", "__proto__", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors"]);
 const deniedRuntimeProperties = new Set([
   "constructor", "prototype", "__proto__", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors",
   "defineProperty", "defineProperties", "setPrototypeOf", "getPrototypeOf",
@@ -170,6 +170,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (!symbol && !safeStandardGlobals.has(node.text)) fail(`${filename} references unbound ambient ${node.text}`);
     }
     if (ts.isElementAccessExpression(node)) { const property = node.argumentExpression === undefined ? undefined : constantString(node.argumentExpression); if (property === undefined || deniedRuntimeProperties.has(property) || deniedRuntimeNames.has(property) || privilegedNames.has(property)) fail(`${filename} accesses denied computed property`); }
+    if (ts.isBindingElement(node) && ts.isIdentifier(node.name) && deniedRuntimeProperties.has(node.name.text)) fail(`${filename} destructures a denied runtime property`);
     const exported = node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword) ?? false;
     if (!filename.endsWith(".d.ts") && exported) {
       if (ts.isVariableStatement(node)) {
