@@ -1,5 +1,16 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  type Mode,
+  type PathLike,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -66,14 +77,35 @@ describe("M5 release hardening", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
-  it("fails closed when an active ancestor is renamed during access", () => {
+  it("stays pinned when an ancestor is renamed and replaced between directory and leaf opens", () => {
     const directory = mkdtempSync(join(tmpdir(), "bounded-swap-"));
+    const originalOpenSync = fs.openSync;
     try {
-      const parent = join(directory, "parent"); mkdirSync(parent); const file = join(parent, "payload.json"); writeFileSync(file, "{\"ok\":true}");
-      const moved = join(directory, "moved"); renameSync(parent, moved);
-      expect(() => readBoundedJson(file, 11, "renamed ancestor fixture")).toThrow();
-      expect(readBoundedJson(join(moved, "payload.json"), 11, "pinned original fixture")).toEqual({ ok: true });
-    } finally { rmSync(directory, { recursive: true, force: true }); }
+      const parent = join(directory, "parent");
+      mkdirSync(parent);
+      const file = join(parent, "payload.json");
+      writeFileSync(file, "{\"ok\":true}");
+      const moved = join(directory, "moved");
+      let interleaved = false;
+      fs.openSync = ((path: PathLike, flags: string | number, mode?: Mode): number => {
+        if (!interleaved && typeof path === "string" && /^\/proc\/self\/fd\/\d+\/payload\.json$/.test(path)) {
+          interleaved = true;
+          renameSync(parent, moved);
+          mkdirSync(parent);
+          writeFileSync(join(parent, "payload.json"), "{\"ok\":false}");
+        }
+        return originalOpenSync(path, flags, mode);
+      }) as typeof fs.openSync;
+      syncBuiltinESMExports();
+
+      expect(readBoundedJson(file, 12, "active ancestor swap fixture")).toEqual({ ok: true });
+      expect(interleaved).toBe(true);
+      expect(JSON.parse(readFileSync(join(parent, "payload.json"), "utf8"))).toEqual({ ok: false });
+    } finally {
+      fs.openSync = originalOpenSync;
+      syncBuiltinESMExports();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
   it("freezes the protocol fixture to the exact extension API surface", () => {
     expect(V1_FROZEN_EXTENSION_OPERATIONS).toEqual(TRUSTED_EXTENSION_OPERATIONS);
