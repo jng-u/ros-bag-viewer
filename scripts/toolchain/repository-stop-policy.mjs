@@ -26,6 +26,54 @@ function jsonContains(value, predicate) {
   return Object.entries(value).some(([key, nested]) => predicate(key, nested) || jsonContains(nested, predicate));
 }
 
+function jsonContainsKubernetesResource(value) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(jsonContainsKubernetesResource);
+  const entries = Object.entries(value);
+  const apiVersion = entries.some(([key, nested]) => normalizedCredentialKey(key) === "apiversion" && typeof nested === "string");
+  const kind = entries.some(([key, nested]) => normalizedCredentialKey(key) === "kind" && typeof nested === "string");
+  return apiVersion && kind || entries.some(([, nested]) => jsonContainsKubernetesResource(nested));
+}
+
+function yamlContainsKubernetesResource(text) {
+  return text.split(/^\s*(?:---|\.\.\.)\s*$/gmu).some((document) => {
+    const containers = new Map();
+    const sequences = new Map();
+    const keysByScope = new Map();
+    let nextScope = 0;
+    for (const rawLine of document.split(/\r?\n/u)) {
+      if (/^\s*(?:#|$)/u.test(rawLine)) continue;
+      const indentation = /^\s*/u.exec(rawLine)[0].length;
+      const sequence = /^\s*-\s+/u.test(rawLine);
+      for (const level of [...containers.keys()]) if (indentation <= level) containers.delete(level);
+      for (const level of [...sequences.keys()]) if (indentation < level || !sequence && indentation === level) sequences.delete(level);
+      if (sequence) {
+        for (const level of [...containers.keys()]) if (level >= indentation) containers.delete(level);
+        for (const level of [...sequences.keys()]) if (level >= indentation) sequences.delete(level);
+        sequences.set(indentation, nextScope += 1);
+      }
+      const entry = /^\s*(?:-\s+)?(apiVersion|kind)\s*:\s*([^#\s][^#]*?)\s*(?:#.*)?$/u.exec(rawLine);
+      const effectiveIndentation = indentation + (sequence ? 2 : 0);
+      const scope = [...containers.entries(), ...sequences.entries()]
+        .filter(([level]) => level < effectiveIndentation)
+        .sort(([left], [right]) => left - right)
+        .map(([, id]) => id)
+        .join("/");
+      if (entry) {
+        const key = `${scope}:${effectiveIndentation}`;
+        const fields = keysByScope.get(key) ?? new Set();
+        fields.add(entry[1]);
+        keysByScope.set(key, fields);
+        if (fields.has("apiVersion") && fields.has("kind")) return true;
+      } else {
+        const mapping = /^\s*(?:-\s+)?[^:#]+:\s*(?:#.*)?$/u.exec(rawLine);
+        if (mapping) containers.set(effectiveIndentation, nextScope += 1);
+      }
+    }
+    return false;
+  });
+}
+
 function normalizedCredentialKey(key) { return key.normalize("NFKC").toLowerCase().replace(/[\s_-]/gu, ""); }
 function hasCredentialKey(key) {
   return credentialKeyPattern.test(key) || new Set([
@@ -61,39 +109,51 @@ function typescriptDeclaresInfrastructure(text, filename) {
   const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
   const constants = new Map();
-  for (let pass = 0; pass < 4; pass += 1) {
-    let changed = false;
-    const collect = (node) => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-        const value = typescriptString(node.initializer, constants);
-        if (value !== undefined && constants.get(node.name.text) !== value) {
-          constants.set(node.name.text, value);
-          changed = true;
-        }
-      }
-      ts.forEachChild(node, collect);
-    };
-    collect(source);
-    if (!changed) break;
-  }
   let found = false;
-  const inspect = (node) => {
+
+  const assign = (environment, name, expression, operator = ts.SyntaxKind.EqualsToken) => {
+    const value = typescriptString(expression, environment);
+    if (operator === ts.SyntaxKind.PlusEqualsToken) {
+      const current = environment.get(name);
+      if (current !== undefined && value !== undefined) environment.set(name, current + value);
+      else environment.delete(name);
+    } else if (value === undefined) environment.delete(name);
+    else environment.set(name, value);
+  };
+
+  const inspect = (node, environment = constants) => {
     if (found) return;
     if (ts.isImportDeclaration(node)) {
-      const value = typescriptString(node.moduleSpecifier, constants);
+      const value = typescriptString(node.moduleSpecifier, environment);
       if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-      const value = typescriptString(node.moduleSpecifier, constants);
+      const value = typescriptString(node.moduleSpecifier, environment);
       if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      if (node.initializer) inspect(node.initializer, environment);
+      assign(environment, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
+      return;
+    } else if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) &&
+      [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind)) {
+      inspect(node.right, environment);
+      assign(environment, node.left.text, node.right, node.operatorToken.kind);
+      return;
     } else if (ts.isCallExpression(node)) {
       const loader = node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         ts.isIdentifier(node.expression) && node.expression.text === "require";
       if (loader) {
-        const value = typescriptString(node.arguments[0], constants);
+        const value = typescriptString(node.arguments[0], environment);
         if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
       }
+    } else if (ts.isFunctionLike(node)) {
+      const localConstants = new Map(environment);
+      for (const parameter of node.parameters) {
+        if (ts.isIdentifier(parameter.name)) localConstants.delete(parameter.name.text);
+      }
+      if (node.body) inspect(node.body, localConstants);
+      return;
     }
-    ts.forEachChild(node, inspect);
+    node.forEachChild((child) => inspect(child, environment));
   };
   inspect(source);
   return found;
@@ -209,8 +269,11 @@ export function repositoryStopReason(filename, content) {
   if (name === "package.json" && /["']license["']\s*:\s*["'][^"']+["']/iu.test(text)) return "public-license";
   if (/^\.env(?:$|\.)/u.test(name)) return "credentials";
   if (/^(?:credentials?|secrets?|service-account|client[-_]?secret)(?:$|[-_.])/u.test(name) ||
+      /^service[-_]?account(?:$|[-_.])/u.test(name) ||
       /(?:^|[-_.])credentials?(?:$|[-_.])/u.test(name) ||
       /^(?:access|auth|github|npm)[-_]?tokens?(?:$|[-_.])/u.test(name) ||
+      /^(?:bearer|oauth2?|refresh|session)(?:[-_](?:tokens?|credentials?|secrets?))?\.(?:conf|ini|json|toml|txt|ya?ml)$/u.test(name) ||
+      /^id[-_](?:tokens?|credentials?|secrets?)(?:$|[-_.])/u.test(name) ||
       /^id_[a-z0-9][a-z0-9._-]*$/u.test(name) ||
       [".npmrc", ".netrc", ".pypirc", ".git-credentials", "application_default_credentials.json", "kubeconfig"].includes(name) ||
       normalized === ".aws/config" || normalized.endsWith("/.aws/config") ||
@@ -238,11 +301,12 @@ export function repositoryStopReason(filename, content) {
       !sourceCode && /(?:^|[,{\n]\s*)["']?(?:authorization|token)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
       /(?:^|\n)\s*authorization\s*:\s*bearer\s+\S+/iu.test(text) ||
       structuredTextContainsCredential(name, text)) return "credentials";
-  const archiveName = /(?:\.tar\.xz|\.(?:zip|tar|tgz|gz|bz2|xz|zst|7z|rar|jar))$/u.test(name);
-  const helmFile = segments.includes("helm") &&
-    (name === "chart.lock" || /^(?:chart|values(?:[-_.][a-z0-9-]+)?)\.ya?ml$/u.test(name));
-  const k8sStructured = json && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "apiversion" && typeof value === "string") && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "kind" && typeof value === "string");
-  const k8sYaml = /\.(?:ya?ml)$/u.test(name) && /(?:^|[\n\r])\s*-?\s*(?:apiVersion|kind)\s*:/u.test(text) && /(?:apiVersion|kind)\s*:/u.test(text);
+  const archiveName = /(?:\.tar\.(?:br|xz)|\.(?:zip|tar|tgz|gz|bz2|xz|zst|7z|rar|jar|war|whl|deb))$/u.test(name);
+  const helmPath = segments.length === 1 || segments.some((segment) => ["chart", "charts", "helm"].includes(segment));
+  const helmFile = name === "chart.lock" || /^(?:chart)\.ya?ml$/u.test(name) ||
+    helmPath && /^(?:values(?:[-_.][a-z0-9-]+)?)\.ya?ml$/u.test(name);
+  const k8sStructured = jsonContainsKubernetesResource(json);
+  const k8sYaml = /\.(?:ya?ml)$/u.test(name) && yamlContainsKubernetesResource(text);
   const iacPath = segments.some((segment) => ["infra", "infrastructure", "deploy", "deployment"].includes(segment));
   const iacLoader = /\.(?:[cm]?[jt]sx?)$/u.test(name) ? typescriptDeclaresInfrastructure(text, name) :
     name.endsWith(".py") ? pythonDeclaresInfrastructure(text) : false;
