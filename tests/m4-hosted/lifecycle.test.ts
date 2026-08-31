@@ -21,9 +21,10 @@ import {
 import { McapSourceSession } from "../../packages/source-mcap/src/index.js";
 import {
   HostedSourceSession,
-  type HostedGrantScope,
+  parseHostedGrantScope,
+  parseHostedRangeGrant,
+  serializeHostedRangeGrant,
   type HostedManifestVerifier,
-  type HostedRangeGrant,
   type HostedRangeTransport,
   type SignedManifestEnvelope,
   type VerifiedHostedManifest,
@@ -204,8 +205,14 @@ class CoreRangeTransport implements HostedRangeTransport {
     this.#now = now;
   }
 
-  async issueRangeGrant(capabilityValue: string, scope: HostedGrantScope, signal: AbortSignal): Promise<HostedRangeGrant> {
+  async issueRangeGrant(
+    capabilityValue: string,
+    serializedScope: string,
+    signal: AbortSignal,
+    admitSerializedGrant: (serializedGrant: unknown) => void,
+  ): Promise<void> {
     if (signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    const scope = parseHostedGrantScope(serializedScope);
     const entry = this.#manifest.payload.entries.find((candidate) => candidate.objectId === scope.objectId);
     if (!entry) throw new HostedAccessError();
     const issuedAtMs = this.#now();
@@ -217,10 +224,16 @@ class CoreRangeTransport implements HostedRangeTransport {
       offset: scope.offset,
       length: scope.length,
     });
-    return Object.freeze({ ...scope, token: grant.token, issuedAtMs, expiresAtMs: grant.expiresAtMs });
+    admitSerializedGrant(serializeHostedRangeGrant(Object.freeze({
+      ...scope,
+      token: grant.token,
+      issuedAtMs,
+      expiresAtMs: grant.expiresAtMs,
+    })));
   }
 
-  async fetchRange(grant: HostedRangeGrant, signal: AbortSignal): Promise<Uint8Array> {
+  async fetchRange(serializedGrant: string, signal: AbortSignal): Promise<Uint8Array> {
+    const grant = parseHostedRangeGrant(serializedGrant);
     const entry = this.#manifest.payload.entries.find((candidate) => candidate.objectId === grant.objectId);
     if (!entry) throw new HostedAccessError();
     return readGrantedRange(this.#service, {

@@ -71,10 +71,15 @@ export interface HostedRangeGrant extends HostedGrantScope {
 }
 
 export interface HostedRangeTransport {
-  issueRangeGrant(capability: string, scope: HostedGrantScope, signal: AbortSignal): Promise<HostedRangeGrant>;
-  fetchRange(grant: HostedRangeGrant, signal: AbortSignal): Promise<Uint8Array>;
+  issueRangeGrant(
+    capability: string,
+    serializedScope: string,
+    signal: AbortSignal,
+    admitSerializedGrant: (serializedGrant: unknown) => void,
+  ): Promise<void>;
+  fetchRange(serializedGrant: string, signal: AbortSignal): Promise<Uint8Array>;
   /** Consume/record a fresh exact authorization before serving verified cached bytes. Omit to disable persistent caching. */
-  authorizeCachedRange?(grant: HostedRangeGrant, signal: AbortSignal): Promise<void>;
+  authorizeCachedRange?(serializedGrant: string, signal: AbortSignal): Promise<void>;
 }
 
 export interface HostedBundleEntry {
@@ -187,6 +192,116 @@ interface CachedChunk {
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_RELATIONS = 65_536;
+const MAX_SERIALIZED_GRANT_BYTES = 16 * 1024;
+
+function assertBoundedSerializedText(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.length > MAX_SERIALIZED_GRANT_BYTES) {
+    throw new Error(`${label} must be bounded serialized JSON text`);
+  }
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    let width: number;
+    if (code < 0x80) width = 1;
+    else if (code < 0x800) width = 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        width = 4;
+        index += 1;
+      } else width = 3;
+    } else width = 3;
+    if (width > MAX_SERIALIZED_GRANT_BYTES - bytes) throw new Error(`${label} exceeds the byte ceiling`);
+    bytes += width;
+  }
+}
+
+function parseSerializedRecord(value: unknown, expectedKeys: readonly string[], label: string): Record<string, unknown> {
+  assertBoundedSerializedText(value, label);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`${label} is invalid JSON`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
+  const actualKeys = Object.keys(parsed).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  if (actualKeys.length !== sortedExpectedKeys.length || actualKeys.some((key, index) => key !== sortedExpectedKeys[index])) {
+    throw new Error(`${label} has invalid fields`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function stringField(record: Record<string, unknown>, key: string, label: string): string {
+  const value = record[key];
+  if (typeof value !== "string") throw new Error(`${label}.${key} must be a string`);
+  return value;
+}
+
+function bigintField(record: Record<string, unknown>, key: string, label: string): bigint {
+  const value = stringField(record, key, label);
+  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) throw new Error(`${label}.${key} must be a canonical unsigned integer`);
+  return BigInt(value);
+}
+
+function safeIntegerField(record: Record<string, unknown>, key: string, label: string): number {
+  const value = record[key];
+  if (!Number.isSafeInteger(value)) throw new Error(`${label}.${key} must be a safe integer`);
+  return value as number;
+}
+
+export function serializeHostedGrantScope(scope: HostedGrantScope): string {
+  return JSON.stringify({
+    sessionId: scope.sessionId,
+    objectId: scope.objectId,
+    immutableVersion: scope.immutableVersion,
+    offset: scope.offset.toString(),
+    length: scope.length.toString(),
+  });
+}
+
+export function parseHostedGrantScope(serialized: unknown): HostedGrantScope {
+  const label = "hosted grant scope";
+  const record = parseSerializedRecord(serialized, ["sessionId", "objectId", "immutableVersion", "offset", "length"], label);
+  return Object.freeze({
+    sessionId: stringField(record, "sessionId", label),
+    objectId: stringField(record, "objectId", label),
+    immutableVersion: stringField(record, "immutableVersion", label),
+    offset: bigintField(record, "offset", label),
+    length: bigintField(record, "length", label),
+  });
+}
+
+export function serializeHostedRangeGrant(grant: HostedRangeGrant): string {
+  return JSON.stringify({
+    sessionId: grant.sessionId,
+    objectId: grant.objectId,
+    immutableVersion: grant.immutableVersion,
+    offset: grant.offset.toString(),
+    length: grant.length.toString(),
+    token: grant.token,
+    issuedAtMs: grant.issuedAtMs,
+    expiresAtMs: grant.expiresAtMs,
+  });
+}
+
+export function parseHostedRangeGrant(serialized: unknown): HostedRangeGrant {
+  const label = "hosted range grant";
+  const record = parseSerializedRecord(serialized, [
+    "sessionId", "objectId", "immutableVersion", "offset", "length", "token", "issuedAtMs", "expiresAtMs",
+  ], label);
+  return Object.freeze({
+    sessionId: stringField(record, "sessionId", label),
+    objectId: stringField(record, "objectId", label),
+    immutableVersion: stringField(record, "immutableVersion", label),
+    offset: bigintField(record, "offset", label),
+    length: bigintField(record, "length", label),
+    token: stringField(record, "token", label),
+    issuedAtMs: safeIntegerField(record, "issuedAtMs", label),
+    expiresAtMs: safeIntegerField(record, "expiresAtMs", label),
+  });
+}
 
 function assertPositiveSafeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive safe integer`);
@@ -544,7 +659,26 @@ export class HostedSourceSession {
     this.#telemetry.grantRequests = increment(this.#telemetry.grantRequests);
     let grant: HostedRangeGrant;
     try {
-      grant = await this.#transport.issueRangeGrant(this.#capability, scope, signal);
+      const admission: { called: boolean; invalid: boolean; grant?: HostedRangeGrant } = { called: false, invalid: false };
+      await this.#transport.issueRangeGrant(
+        this.#capability,
+        serializeHostedGrantScope(scope),
+        signal,
+        (serializedGrant): void => {
+          if (admission.called) {
+            admission.invalid = true;
+            return;
+          }
+          admission.called = true;
+          try {
+            admission.grant = parseHostedRangeGrant(serializedGrant);
+          } catch {
+            admission.invalid = true;
+          }
+        },
+      );
+      if (!admission.called || admission.invalid || !admission.grant) throw new HostedSourceError("access-denied");
+      grant = admission.grant;
       if (signal.aborted) throw cancellationError();
       assertGrant(grant, scope, this.#now(), this.#limits.maxGrantTtlMs, this.#manifest.expiresAtMs);
     } catch (error) {
@@ -556,7 +690,7 @@ export class HostedSourceSession {
     const cached = this.#cache.get(cacheKey);
     if (cached && this.#transport.authorizeCachedRange) {
       try {
-        await this.#transport.authorizeCachedRange(grant, signal);
+        await this.#transport.authorizeCachedRange(serializeHostedRangeGrant(grant), signal);
         if (signal.aborted) throw cancellationError();
         assertGrant(grant, scope, this.#now(), this.#limits.maxGrantTtlMs, this.#manifest.expiresAtMs);
       } catch (error) {
@@ -589,7 +723,7 @@ export class HostedSourceSession {
     this.#telemetry.rangeFetches = increment(this.#telemetry.rangeFetches);
     let bytes: Uint8Array;
     try {
-      bytes = await this.#transport.fetchRange(grant, signal);
+      bytes = await this.#transport.fetchRange(serializeHostedRangeGrant(grant), signal);
     } catch (error) {
       if (signal.aborted || (error instanceof Error && error.name === "AbortError")) throw cancellationError();
       throw new HostedSourceError("access-denied");

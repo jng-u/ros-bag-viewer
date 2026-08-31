@@ -13,6 +13,9 @@ import {
 import {
   HostedSourceError,
   HostedSourceSession,
+  parseHostedGrantScope,
+  parseHostedRangeGrant,
+  serializeHostedRangeGrant,
   type HostedGrantScope,
   type HostedManifestEntry,
   type HostedManifestVerifier,
@@ -95,6 +98,7 @@ class FixtureTransport implements HostedRangeTransport {
   tamperPayload = false;
   stallFetch = false;
   mutateGrant?: (grant: HostedRangeGrant) => HostedRangeGrant;
+  grantResponse?: unknown;
   readonly #bytes: Uint8Array;
   readonly #pending: Array<{ readonly grant: HostedRangeGrant; readonly resolve: (bytes: Uint8Array) => void }> = [];
 
@@ -102,9 +106,15 @@ class FixtureTransport implements HostedRangeTransport {
     this.#bytes = bytes;
   }
 
-  async issueRangeGrant(capability: string, scope: HostedGrantScope, signal: AbortSignal): Promise<HostedRangeGrant> {
+  async issueRangeGrant(
+    capability: string,
+    serializedScope: string,
+    signal: AbortSignal,
+    admitSerializedGrant: (serializedGrant: unknown) => void,
+  ): Promise<void> {
     if (signal.aborted) throw abortError();
     if (this.revoked || capability !== "opaque-capability") throw new Error("denied");
+    const scope = parseHostedGrantScope(serializedScope);
     this.scopes.push({ ...scope });
     const grant: HostedRangeGrant = {
       ...scope,
@@ -112,12 +122,13 @@ class FixtureTransport implements HostedRangeTransport {
       issuedAtMs: NOW,
       expiresAtMs: NOW + 5_000,
     };
-    return this.mutateGrant?.(grant) ?? grant;
+    admitSerializedGrant(this.grantResponse ?? serializeHostedRangeGrant(this.mutateGrant?.(grant) ?? grant));
   }
 
-  async fetchRange(grant: HostedRangeGrant, signal: AbortSignal): Promise<Uint8Array> {
+  async fetchRange(serializedGrant: string, signal: AbortSignal): Promise<Uint8Array> {
     this.fetchCalls += 1;
     if (signal.aborted) throw abortError();
+    const grant = parseHostedRangeGrant(serializedGrant);
     if (this.stallFetch) {
       return new Promise<Uint8Array>((resolve, reject) => {
         this.#pending.push({ grant, resolve });
@@ -131,8 +142,9 @@ class FixtureTransport implements HostedRangeTransport {
     return output;
   }
 
-  async authorizeCachedRange(_grant: HostedRangeGrant, signal: AbortSignal): Promise<void> {
+  async authorizeCachedRange(serializedGrant: string, signal: AbortSignal): Promise<void> {
     if (signal.aborted) throw abortError();
+    parseHostedRangeGrant(serializedGrant);
     if (this.revoked) throw new Error("denied");
   }
 
@@ -332,6 +344,35 @@ describe("hosted SourceBundle adapter", () => {
     });
     expect(session.diagnostics()).toEqual(["access-denied: hosted source request denied"]);
     expect(JSON.stringify(session.diagnostics())).not.toMatch(/session-fixture|object-fixture|version-fixture|opaque-capability/);
+  });
+
+  it("rejects a hostile raw grant response without executing Proxy traps before serialized admission", async () => {
+    const bytes = Uint8Array.from({ length: 64 }, (_, index) => index);
+    const traps = { get: 0, getPrototypeOf: 0, ownKeys: 0, toJSON: 0 };
+    const hostileGrant = new Proxy(Object.create(null) as object, {
+      get(_target, property): unknown {
+        traps.get += 1;
+        if (property === "toJSON") traps.toJSON += 1;
+        throw new Error("hostile grant get trap executed");
+      },
+      getPrototypeOf(): object | null {
+        traps.getPrototypeOf += 1;
+        throw new Error("hostile grant getPrototypeOf trap executed");
+      },
+      ownKeys(): ArrayLike<string | symbol> {
+        traps.ownKeys += 1;
+        throw new Error("hostile grant ownKeys trap executed");
+      },
+    });
+    const transport = new FixtureTransport(bytes);
+    transport.grantResponse = hostileGrant;
+    const { session } = await openFixture(bytes, { transport });
+
+    await expect(session.readEntry("entry-fixture", 0n, 4n, new AbortController().signal)).rejects.toMatchObject({
+      code: "access-denied",
+      message: "hosted source request denied",
+    });
+    expect(traps).toEqual({ get: 0, getPrototypeOf: 0, ownKeys: 0, toJSON: 0 });
   });
 
   it("reauthorizes cache hits so revocation immediately denies new reads", async () => {
