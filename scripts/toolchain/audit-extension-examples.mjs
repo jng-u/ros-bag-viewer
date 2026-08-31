@@ -93,7 +93,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const isInTypePosition = (node) => { let p = node.parent; while (p) { if (ts.isTypeNode(p)) return true; if (ts.isExpression(p) || ts.isStatement(p) || ts.isSourceFile(p)) return false; p = p.parent; } return false; };
   const declarationName = (node) => {
     if (!node || !node.name) return false;
-    return (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node));
+    return (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) && node.name === node.parent?.name;
   };
   const isNonReferenceIdentifier = (node) => {
     const p = node.parent;
