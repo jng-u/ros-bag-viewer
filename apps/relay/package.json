@@ -1,1 +1,14 @@
-{"name":"@ros-web-viewer/relay","private":true,"type":"module"}
+{
+  "name": "@ros-web-viewer/relay",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test"
+  },
+  "dependencies": {
+    "@ros-web-viewer/protocol": "workspace:*"
+  }
+}
