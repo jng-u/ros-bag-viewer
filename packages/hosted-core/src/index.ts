@@ -233,6 +233,7 @@ interface SessionRecord {
   readonly entries: ReadonlyMap<string, StoredEntry>;
   readonly expiresAtMs: number;
   readonly retentionAtMs: number;
+  readonly lifecycle: { deleted: boolean };
   revokedAtMs?: number;
 }
 
@@ -242,6 +243,7 @@ interface GrantRecord extends RangeGrantRequest {
   readonly object: ImmutableObjectRef;
   readonly issuedAtMs: number;
   readonly expiresAtMs: number;
+  readonly lifecycle: SessionRecord["lifecycle"];
 }
 
 type MutableHostedTelemetry = {
@@ -592,6 +594,7 @@ export class HostedSharingService {
         entries: storedEntries,
         expiresAtMs: payload.expiresAtMs,
         retentionAtMs: now + retentionMs,
+        lifecycle: { deleted: false },
       });
       this.#storedBytes += totalBytes;
       this.#telemetry.sessionsCreated = increment(this.#telemetry.sessionsCreated);
@@ -646,6 +649,7 @@ export class HostedSharingService {
         object: entry.object,
         issuedAtMs: now,
         expiresAtMs,
+        lifecycle: session.lifecycle,
       }));
       this.#telemetry.grantsIssued = increment(this.#telemetry.grantsIssued);
       this.#record("grant-issued");
@@ -664,6 +668,7 @@ export class HostedSharingService {
       if (
         !grant
         || !equalDigest(grant.sessionCapabilityDigest, capabilityDigest)
+        || grant.lifecycle.deleted
         || grant.expiresAtMs <= this.#now()
         || grant.sessionId !== request.sessionId
         || grant.entryId !== request.entryId
@@ -675,6 +680,8 @@ export class HostedSharingService {
         throw new HostedAccessError();
       }
       const bytes = await this.#store.read(grant.object, request.offset, request.length, signal);
+      if (signal.aborted) throw abortError(signal.reason);
+      if (grant.lifecycle.deleted || grant.expiresAtMs <= this.#now()) throw new HostedAccessError();
       if (bytes.byteLength !== Number(request.length)) throw new HostedAccessError();
       this.#telemetry.rangeReads = increment(this.#telemetry.rangeReads);
       this.#telemetry.bytesServed = increment(this.#telemetry.bytesServed, bytes.byteLength);
@@ -795,6 +802,7 @@ export class HostedSharingService {
   }
 
   async #deleteRecord(session: SessionRecord): Promise<{ objectsDeleted: number; bytesDeleted: number }> {
+    session.lifecycle.deleted = true;
     let objectsDeleted = 0;
     let bytesDeleted = 0;
     for (const { object } of session.entries.values()) {

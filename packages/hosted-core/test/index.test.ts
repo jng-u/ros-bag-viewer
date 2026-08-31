@@ -4,8 +4,32 @@ import {
   HostedAccessError,
   HostedSharingService,
   verifyHostedManifest,
+  type ImmutableObjectRef,
+  type ImmutableObjectStore,
   type SignedHostedManifest,
 } from "../src/index.js";
+
+class AdversarialStore implements ImmutableObjectStore {
+  readonly #objects = new Map<string, Uint8Array>();
+  beforeRead?: () => void;
+
+  async put(ref: ImmutableObjectRef, bytes: Uint8Array): Promise<void> {
+    this.#objects.set(ref.storageKey, bytes.slice());
+  }
+
+  async read(ref: ImmutableObjectRef, offset: bigint, length: bigint, signal: AbortSignal): Promise<Uint8Array> {
+    void signal;
+    const bytes = this.#objects.get(ref.storageKey);
+    if (!bytes) throw new Error("missing object");
+    this.beforeRead?.();
+    return bytes.slice(Number(offset), Number(offset + length));
+  }
+
+  async delete(ref: ImmutableObjectRef): Promise<boolean> {
+    void ref;
+    return false;
+  }
+}
 
 function capability(url: string): string {
   return url.split("/").at(-1)!;
@@ -206,6 +230,61 @@ describe("provider-neutral hosted sharing core", () => {
     await expect(service.sweepRetention()).resolves.toMatchObject({ sessionsDeleted: 1, objectsDeleted: 1, bytesDeleted: 3 });
     await expect(service.sweepRetention()).resolves.toMatchObject({ sessionsDeleted: 0, objectsDeleted: 0, bytesDeleted: 0 });
     expect(() => service.openHostedSession(retainedCapability)).toThrow(HostedAccessError);
+  });
+
+  it("revalidates deletion, expiry, and cancellation after an adversarial asynchronous provider read", async () => {
+    const now = { value: 45_000 };
+    const store = new AdversarialStore();
+    const service = new HostedSharingService({
+      store,
+      now: () => now.value,
+      limits: { sessionTtlMs: 1_000, grantTtlMs: 100, retentionMs: 2_000, maxRangeBytes: 64 },
+    });
+    const create = async () => {
+      const descriptor = await service.createHostedSession({
+        entries: [{ entryId: "bag", relativePath: "recording.bag", bytes: Uint8Array.of(1, 2, 3, 4) }],
+      });
+      const bundle = verifyHostedManifest(descriptor.manifest, descriptor.manifestVerificationKey);
+      const sessionCapability = capability(descriptor.capabilityUrl);
+      const entry = bundle.entries[0]!;
+      const manifestEntry = descriptor.manifest.payload.entries[0]!;
+      const scope = {
+        sessionId: descriptor.manifest.payload.sessionId,
+        entryId: entry.entryId,
+        objectId: manifestEntry.objectId,
+        immutableVersion: entry.immutableVersion,
+        offset: 0n,
+        length: 4n,
+      } as const;
+      const grant = service.issueRangeGrant(sessionCapability, scope);
+      return { descriptor, sessionCapability, scope, grant };
+    };
+
+    const deleted = await create();
+    await service.deleteSession(deleted.sessionCapability);
+    await expect(service.readGrantedRange({
+      ...deleted.scope,
+      sessionCapability: deleted.sessionCapability,
+      grantToken: deleted.grant.token,
+    }, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
+
+    const expiring = await create();
+    store.beforeRead = () => { now.value = expiring.grant.expiresAtMs; };
+    await expect(service.readGrantedRange({
+      ...expiring.scope,
+      sessionCapability: expiring.sessionCapability,
+      grantToken: expiring.grant.token,
+    }, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
+
+    now.value += 1;
+    const cancelling = await create();
+    const abort = new AbortController();
+    store.beforeRead = () => abort.abort("source closed");
+    await expect(service.readGrantedRange({
+      ...cancelling.scope,
+      sessionCapability: cancelling.sessionCapability,
+      grantToken: cancelling.grant.token,
+    }, abort.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("uses incremental cancellable range reads and preserves bundle order and byte equivalence", async () => {
