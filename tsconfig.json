@@ -7,6 +7,7 @@
     { "path": "./packages/source-ros1bag" },
     { "path": "./packages/source-ros2-sqlite" },
     { "path": "./packages/source-live" },
+    { "path": "./packages/source-hosted" },
     { "path": "./packages/protocol" },
     { "path": "./packages/edge-runtime" },
     { "path": "./packages/hosted-core" },

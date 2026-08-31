@@ -7,6 +7,7 @@ export default defineConfig({
       "tests/m0/**/*.test.ts",
       "tests/m1/**/*.test.ts",
       "tests/m3-live/**/*.test.ts",
+      "tests/m4-hosted/**/*.test.ts",
       "packages/**/test/**/*.test.ts",
       "apps/**/test/**/*.test.ts",
     ],

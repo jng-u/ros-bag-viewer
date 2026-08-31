@@ -19,7 +19,9 @@ jobs:
       - run: pnpm check:m1
       - run: pnpm check:m2
       - run: pnpm check:m3
+      - run: pnpm check:m4
       - run: pnpm evidence:m3
+      - run: pnpm evidence:semantic
       - run: pnpm test:security
       - run: pnpm test:a11y
       - run: pnpm test:ux
