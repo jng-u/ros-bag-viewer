@@ -162,7 +162,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function assertExactKeys(value: unknown, expected: readonly string[], label: string): asserts value is Record<string, unknown> {
   if (!isRecord(value)) throw new V1ConformanceViolation("invalid-fixture", `${label} must be an object`);
-  const actual = Object.keys(value).sort();
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new V1ConformanceViolation("invalid-fixture", `${label} has symbol fields`);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Object.values(descriptors).some((descriptor) => !descriptor.enumerable || "get" in descriptor || "set" in descriptor)) {
+    throw new V1ConformanceViolation("invalid-fixture", `${label} has hidden or accessor fields`);
+  }
+  const actual = (keys as string[]).sort();
   const wanted = [...expected].sort();
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     throw new V1ConformanceViolation("invalid-fixture", `${label} has missing or unexpected fields`);

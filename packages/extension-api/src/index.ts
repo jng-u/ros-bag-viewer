@@ -217,6 +217,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   #lastError?: string;
   #contextActive = true;
   #configured = false;
+  #inLifecycle = false;
   #droppedDiagnostics = 0;
   #nextDiagnostic = 0;
   readonly #diagnostics: TrustedDiagnostic[] = [];
@@ -290,14 +291,16 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   configure(config: TConfig): void {
+    this.#assertNotReentrant();
     this.#expectState(["instantiated", "configured", "error"], "configure");
-    this.#configured = false;
-    this.#invoke(() => this.#implementation.configure(config));
+    try { this.#invoke(() => this.#implementation.configure(config)); }
+    catch (error) { this.#configured = false; throw error; }
     this.#configured = true;
     this.#transition("configured");
   }
 
   attachSource(sourceEpoch: number): void {
+    this.#assertNotReentrant();
     this.#expectState(["configured", "attached", "rendering", "suspended", "error"], "attachSource");
     if (!this.#configured) throw new Error("extension must be successfully configured before attaching a source");
     assertEpoch(sourceEpoch);
@@ -310,6 +313,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   update(message: TrustedExtensionMessage<TMessage>): void {
+    this.#assertNotReentrant();
     this.#expectState(["attached", "rendering"], "update");
     if (!this.negotiation.grantedCapabilities.includes("source-messages")) {
       throw new Error("source-messages capability was not granted");
@@ -327,32 +331,44 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   render(): void {
+    this.#assertNotReentrant();
     this.#expectState(["rendering"], "render");
     this.#invoke(() => this.#implementation.render());
   }
 
   suspend(): void {
+    this.#assertNotReentrant();
     this.#expectState(["attached", "rendering", "suspended"], "suspend");
     this.#invoke(() => this.#implementation.suspend());
     if (this.#state !== "suspended") this.#transition("suspended");
   }
 
   handleError(error: Error): void {
+    this.#assertNotReentrant();
     this.#expectState(["configured", "attached", "rendering", "suspended", "error"], "handleError");
     this.#lastError = error.message;
+    this.#inLifecycle = true;
+    this.#contextActive = true;
     try {
       this.#implementation.handleError(error);
     } finally {
+      this.#contextActive = false;
+      this.#inLifecycle = false;
       this.#disposeResources();
       if (this.#state !== "error") this.#transition("error");
     }
   }
 
   dispose(): void {
+    this.#assertNotReentrant();
     if (this.#state === "disposed") return;
+    this.#inLifecycle = true;
+    this.#contextActive = true;
     try {
       this.#implementation.dispose();
     } finally {
+      this.#contextActive = false;
+      this.#inLifecycle = false;
       this.#disposeResources();
       this.#sourceEpoch = undefined;
       this.#configured = false;
@@ -382,6 +398,8 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   #invoke(operation: () => void): void {
+    this.#assertNotReentrant();
+    this.#inLifecycle = true;
     this.#contextActive = true;
     try {
       operation();
@@ -406,7 +424,12 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
       throw error;
     } finally {
       this.#contextActive = false;
+      this.#inLifecycle = false;
     }
+  }
+
+  #assertNotReentrant(): void {
+    if (this.#inLifecycle) throw new Error("extension lifecycle re-entry is not permitted");
   }
 
   #transition(state: TrustedExtensionState): void {
