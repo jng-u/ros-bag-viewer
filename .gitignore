@@ -6,3 +6,4 @@ coverage/
 
 licenses.json
 sbom.cdx.json
+artifacts/

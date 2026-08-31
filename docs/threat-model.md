@@ -2,6 +2,7 @@
 
 - **Status:** Accepted M0 trust-boundary baseline; not a production certification
 - **Gate:** M1 cannot begin until this baseline and the core contracts are reviewed together
+- **External audit record:** approved parent-workspace Architect and Critic iteration-2 reviews under `.omx/plans/reviews/`; those leader-owned artifacts are intentionally outside this isolated Git repository
 
 ## Assets and objectives
 

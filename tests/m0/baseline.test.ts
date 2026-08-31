@@ -42,7 +42,7 @@ describe("M0 repository and evidence gate", () => {
       ".github/workflows/ci.yml",
       "docs/architecture.md",
       "docs/compatibility.md",
-      "docs/security.md",
+      "docs/threat-model.md",
       "docs/ux-baseline.md",
       "benchmarks/corpus-manifest.json",
       "packages/core-model/src/index.ts",
@@ -56,7 +56,7 @@ describe("M0 repository and evidence gate", () => {
     const adr = markdownFiles("docs/adr")
       .map((path) => readFileSync(path, "utf8"))
       .find((text) => /scheduling/i.test(text) && /TF[\s/-]*(query|time)/i.test(text));
-    const security = read("docs/security.md");
+    const security = read("docs/threat-model.md");
 
     expect(adr, "a time/TF ADR is required").toBeDefined();
     expect(adr).toMatch(/approved|accepted/i);
@@ -79,6 +79,9 @@ describe("M0 repository and evidence gate", () => {
       "SourceEpoch",
       "DisplayLifecycle",
       "DisplayState",
+      "NormalizedMessageEnvelope",
+      "retain()",
+      "instantiate()",
     ]) {
       expect(contracts, `missing ${term}`).toContain(term);
     }
@@ -137,6 +140,9 @@ describe("M0 corpus evidence gate", () => {
       expect(entry.expectedMessages).toBeGreaterThanOrEqual(0);
       expect(entry.ciUse).toBe("allowed");
       expect(["allowed", "prohibited-download-by-hash"]).toContain(entry.redistributionPolicy);
+      if (entry.sourceUrl.includes("://")) {
+        expect(entry.licenseEvidence, `${entry.id}.licenseEvidence`).toMatch(/^https:\/\//);
+      }
     }
   });
 
@@ -152,6 +158,9 @@ describe("M0 corpus evidence gate", () => {
     expect(manifest.status).toBe("approved-for-m0");
     expect(manifest.statusReason).toMatch(/license|CI use|CI-use|redistribut|permit/i);
     expect(manifest.deferredCandidates?.length).toBeGreaterThan(0);
+    expect(manifest.entries.some((entry) => entry.id.includes("cartographer"))).toBe(true);
+    expect(manifest.entries.some((entry) => entry.id.includes("ros2"))).toBe(true);
+    expect(manifest.entries.some((entry) => entry.storage === "mcap")).toBe(true);
     for (const candidate of manifest.deferredCandidates ?? []) {
       expect(candidate.status).toMatch(/^deferred-/);
       expect(candidate.missingEvidence.length).toBeGreaterThan(0);

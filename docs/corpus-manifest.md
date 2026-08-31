@@ -1,6 +1,6 @@
 # Corpus manifest and licensing gate (M0)
 
-**Gate status:** **BLOCKED — no external corpus is approved for CI or redistribution yet.** M0 must not invent URLs, licenses, or hashes. Generated fixtures require recorded generator inputs and licensing.
+**Gate status:** **APPROVED FOR M0.** The machine-readable source of truth is [`benchmarks/corpus-manifest.json`](../benchmarks/corpus-manifest.json). It admits one private generated contract fixture and three immutable public fixtures with locally verified size/SHA-256 and upstream license evidence: a Cartographer ROS 1 SLAM bag, a ROS 2 Humble SQLite bag, and an MCAP format fixture. This approval covers M0 metadata/contract checks, not M1 render or performance claims.
 
 ## Required manifest fields
 
@@ -18,16 +18,16 @@
 | `intended_jobs` | Unit, integration, compatibility, E2E, benchmark, or hardware job |
 | `review` | Owner, reviewer, decision, date, and recheck trigger |
 
-## Candidate slots
+## Admitted M0 evidence
 
-| ID | Purpose | Required characteristics | Evidence state |
+| ID | Purpose | License/use decision | Evidence state |
 |---|---|---|---|
-| `generated-minimal` | Deterministic merge gate | MCAP and bundle metadata; TF, odometry, path, point cloud, image, custom and opaque data | Generator/license/hash missing |
-| `ros2-mcap-medium` | Indexed seek/render baseline | Public ROS 2 SLAM/odometry MCAP with dense data | Source/license/hash not selected |
-| `ros2-mcap-unindexed` | Degraded behavior | Reproducible unindexed derivative | Parent and derivative permission unverified |
-| `ros1-bag-medium` | ROS 1 compatibility | Public SLAM/odometry bag with connection definitions | Source/license/hash not selected |
-| `ros2-sqlite-multipart` | Bundle relation checks | `metadata.yaml` plus multiple `.db3` parts | Source/license/hash not selected |
-| `adversarial-generated` | Bounded failure | Truncated, malformed, oversized, traversal, schema-conflict, and decompression cases | Generator/license/hash missing |
+| `generated-m0-source-bundle-smoke-v1` | Deterministic metadata/hash merge gate | Internal CI only; no public project-license choice | Checked in and hash verified |
+| `cartographer-backpack-2d-b0-2014-07-11` | Public ROS 1 compressed SLAM/odometry baseline | Apache-2.0; CI use and redistribution allowed | URL, license, size, SHA-256, duration, topics/types verified |
+| `mcap-upstream-ros2-humble-sqlite-talker` | Public ROS 2 SQLite/schema-generation fixture | MIT; CI use and redistribution allowed | Commit-pinned URL, license, size, SHA-256, topics/types verified |
+| `mcap-upstream-demo-format` | Public indexed MCAP format fixture | MIT; CI use and redistribution allowed | Commit-pinned URL, license, size, SHA-256, topics/types verified |
+
+The JSON manifest separately records larger ROS 2 SLAM/dense-render and multipart SQLite candidates as **deferred to their M1/M2 evidence gates**. They are not represented as existing or passing, and they do not weaken the admitted M0 repository/contract corpus.
 
 ## Selection and approval
 
@@ -39,4 +39,4 @@
 6. Use deterministic generated fixtures for merge gates; reserve large corpus runs for approved runners.
 7. Re-review on disappearance, license change, hash drift, or material transformation.
 
-If CI use or redistribution is unclear, reject the fixture or use a documented non-redistributing acquisition path. M1 remains blocked if no lawful reproducible corpus can exercise its correctness and performance gates.
+If CI use or redistribution becomes unclear, remove the entry from the admitted list and block the affected milestone. M1 performance remains blocked until its deferred medium/large dimensional corpus is separately approved and executed.

@@ -14,8 +14,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:unit
       - run: pnpm check:m0
+      - run: pnpm test:security
+      - run: pnpm test:a11y
+      - run: pnpm test:ux
       - run: pnpm build
-      - run: pnpm audit --audit-level high
+      - run: pnpm audit:dependencies
       - run: pnpm report:licenses
       - run: pnpm sbom
       - run: test -z "$(git status --porcelain)"

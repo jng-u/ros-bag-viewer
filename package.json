@@ -1,24 +1,34 @@
 {
   "name": "ros-web-viewer",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@9.15.5",
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:toolchain": "vitest run tests/toolchain/smoke.test.ts",
     "test:unit": "vitest run --passWithNoTests",
     "test:integration": "node scripts/toolchain/skip-integration.mjs",
+    "test:security": "vitest run tests/m0/baseline.test.ts -t 'approval evidence|paid-infrastructure'",
+    "test:e2e": "node scripts/toolchain/deferred.mjs e2e M1",
+    "test:a11y": "vitest run tests/m0/baseline.test.ts -t 'accessibility'",
+    "test:ux": "vitest run tests/m0/baseline.test.ts -t 'desktop UX baseline'",
+    "bench:micro": "node scripts/toolchain/deferred.mjs microbenchmark M1",
+    "bench:corpus": "node scripts/toolchain/deferred.mjs corpus-benchmark M1",
     "build": "tsc -b",
-    "check:m0": "vitest run tests/m0/**/*.test.ts",
-    "audit:dependencies": "pnpm audit --audit-level high",
-    "report:licenses": "node scripts/toolchain/licenses.mjs",
-    "sbom": "node scripts/toolchain/sbom.mjs"
+    "check:m0": "vitest run tests/m0/baseline.test.ts",
+    "audit:dependencies": "corepack pnpm audit --audit-level high",
+    "report:licenses": "node scripts/toolchain/licenses-report.mjs",
+    "sbom": "node scripts/toolchain/sbom-report.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@types/node": "^22.10.0",
-    "eslint": "^9.17.0",
+    "eslint": "10.9.1",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript-eslint": "8.68.0",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
   }
 }

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "status": "approved-for-m0",
+  "statusReason": "The M0 corpus admits a checked-in generated contract fixture plus immutable, checksummed public ROS 1 SLAM, ROS 2 SQLite, and MCAP format fixtures whose upstream license terms permit CI use. Larger ROS 2 SLAM and dense-render corpora remain scheduled hardware-runner additions and do not block the repository/contract baseline.",
+  "reviewedAt": "2026-08-31",
+  "entries": [
+    {
+      "id": "generated-m0-source-bundle-smoke-v1",
+      "kind": "generated-contract-smoke",
+      "rosGeneration": "none",
+      "sourceUrl": "benchmarks/fixtures/m0-source-bundle-fixture.txt",
+      "license": "INTERNAL-GENERATED-NO-PUBLIC-LICENSE",
+      "licenseEvidence": "Original deterministic fixture created for this private M0 baseline. Internal CI use is approved; public redistribution remains prohibited until a human chooses project licensing.",
+      "ciUse": "allowed",
+      "redistributionPolicy": "prohibited-download-by-hash",
+      "sha256": "2b230e10b4203b2306ba11505a4de3e9569a4ffd099b2f730f122b8b47d0008e",
+      "byteSize": 38,
+      "durationNs": 0,
+      "storage": "plain-text-generated",
+      "compression": "none",
+      "indexing": "not-applicable",
+      "topics": [],
+      "types": [],
+      "expectedFrames": 0,
+      "expectedMessages": 0,
+      "purpose": "M0 manifest and SourceBundle metadata validation only; not performance or ROS compatibility evidence."
+    },
+    {
+      "id": "cartographer-backpack-2d-b0-2014-07-11",
+      "kind": "public-ros1-slam-medium",
+      "rosGeneration": "ROS 1",
+      "sourceUrl": "https://storage.googleapis.com/cartographer-public-data/bags/backpack_2d/b0-2014-07-11-10-58-16.bag",
+      "license": "Apache-2.0",
+      "licenseEvidence": "https://google-cartographer-ros.readthedocs.io/en/latest/data.html#d-cartographer-backpack-deutsches-museum",
+      "ciUse": "allowed",
+      "redistributionPolicy": "allowed",
+      "sha256": "77b943168236396d4330c2149cc9120c09945cc66909b826e72269e369030673",
+      "byteSize": 37809346,
+      "durationNs": 149905362201,
+      "storage": "rosbag-v2",
+      "compression": "bz2",
+      "indexing": "indexed",
+      "topics": [
+        { "name": "horizontal_laser_2d", "type": "sensor_msgs/MultiEchoLaserScan", "messages": 5522 },
+        { "name": "imu", "type": "sensor_msgs/Imu", "messages": 29590 },
+        { "name": "vertical_laser_2d", "type": "sensor_msgs/MultiEchoLaserScan", "messages": 5559 }
+      ],
+      "types": ["sensor_msgs/MultiEchoLaserScan", "sensor_msgs/Imu"],
+      "expectedFrames": 0,
+      "expectedMessages": 40671,
+      "purpose": "Public, licensed ROS 1 2D SLAM/odometry load and compression baseline. Ordinary CI verifies metadata; scheduled runners download by SHA-256."
+    },
+    {
+      "id": "mcap-upstream-ros2-humble-sqlite-talker",
+      "kind": "public-ros2-sqlite-compatibility",
+      "rosGeneration": "ROS 2 Humble",
+      "sourceUrl": "https://media.githubusercontent.com/media/foxglove/mcap/68f77c8c1bba4a17ebc6ba0c409ebb933adb791c/testdata/db3/talker-humble.db3",
+      "license": "MIT",
+      "licenseEvidence": "https://github.com/foxglove/mcap/blob/68f77c8c1bba4a17ebc6ba0c409ebb933adb791c/LICENSE",
+      "ciUse": "allowed",
+      "redistributionPolicy": "allowed",
+      "sha256": "fbba8b1e15b619645219fe5ef975232ef89563de51d5309d4653bbc59ddd9dd7",
+      "byteSize": 16384,
+      "durationNs": 4531096768,
+      "storage": "rosbag2-sqlite3",
+      "compression": "none",
+      "indexing": "sqlite-indexed",
+      "topics": [
+        { "name": "/rosout", "type": "rcl_interfaces/msg/Log" },
+        { "name": "/parameter_events", "type": "rcl_interfaces/msg/ParameterEvent" },
+        { "name": "/topic", "type": "std_msgs/msg/String" }
+      ],
+      "types": ["rcl_interfaces/msg/Log", "rcl_interfaces/msg/ParameterEvent", "std_msgs/msg/String"],
+      "expectedFrames": 0,
+      "expectedMessages": 20,
+      "purpose": "Public, pinned ROS 2 SQLite storage/schema-generation compatibility fixture; not a performance corpus."
+    },
+    {
+      "id": "mcap-upstream-demo-format",
+      "kind": "public-mcap-format-compatibility",
+      "rosGeneration": "ROS 1 serialization in MCAP",
+      "sourceUrl": "https://media.githubusercontent.com/media/foxglove/mcap/68f77c8c1bba4a17ebc6ba0c409ebb933adb791c/testdata/mcap/demo.mcap",
+      "license": "MIT",
+      "licenseEvidence": "https://github.com/foxglove/mcap/blob/68f77c8c1bba4a17ebc6ba0c409ebb933adb791c/LICENSE",
+      "ciUse": "allowed",
+      "redistributionPolicy": "allowed",
+      "sha256": "b90a0af442bfc6aaf31d7ae0a361f04d2a4eecca7168f9917391b74697af5c8c",
+      "byteSize": 990,
+      "durationNs": 1,
+      "storage": "mcap",
+      "compression": "none",
+      "indexing": "summary-indexed",
+      "topics": [
+        { "name": "/chatter", "type": "std_msgs/String", "messages": 2 },
+        { "name": "/diagnostics", "type": "std_msgs/String", "messages": 1 }
+      ],
+      "types": ["std_msgs/String"],
+      "expectedFrames": 0,
+      "expectedMessages": 3,
+      "purpose": "Public, pinned MCAP summary/channel/schema fixture for format and range-read contract checks."
+    }
+  ],
+  "deferredCandidates": [
+    {
+      "id": "public-ros2-medium-slam-mcap",
+      "requiredCoverage": ["ROS 2", "MCAP", "medium", "SLAM/Odometry", "TF", "PointCloud2", "Path"],
+      "status": "deferred-to-m1-hardware-corpus",
+      "missingEvidence": ["approved immutable upstream artifact", "SHA-256", "topic/type inventory"]
+    },
+    {
+      "id": "public-ros2-large-dense-render-corpus",
+      "requiredCoverage": ["ROS 2", "MCAP", "large", "dense PointCloud2", "image", "map"],
+      "status": "deferred-to-m1-hardware-corpus",
+      "missingEvidence": ["approved immutable upstream artifact", "SHA-256", "dimensional scenario"]
+    },
+    {
+      "id": "public-ros2-multipart-sqlite-recording",
+      "requiredCoverage": ["ROS 2", "SQLite", "metadata.yaml", "multipart"],
+      "status": "deferred-to-m2-compatibility",
+      "missingEvidence": ["approved immutable multipart fixture", "metadata relation inventory"]
+    }
+  ]
+}

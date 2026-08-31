@@ -2,6 +2,7 @@
 
 - **Status:** Accepted M0 baseline
 - **Decision source:** approved RALPLAN Architect/Critic consensus
+- **External audit record:** parent workspace `.omx/plans/reviews/architect-ros-web-viewer-iteration-2.md` and `.omx/plans/reviews/critic-ros-web-viewer-iteration-2.md`
 - **Scope:** policy only; implementation and fixture evidence begin after M0
 
 ## Context

@@ -1,0 +1,9 @@
+{
+  "name": "@ros-web-viewer/core-model",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test/index.test.ts"
+  }
+}
