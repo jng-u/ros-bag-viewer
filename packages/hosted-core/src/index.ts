@@ -492,10 +492,10 @@ function signManifest(payload: HostedManifestPayload, privateKey: KeyObject, pub
 
 
 const HOSTED_SERIALIZED_MAX_BYTES = 2 * 1024 * 1024;
-function parseSerializedRecord(value: unknown, label: string): Record<string, unknown> {
+function parseSerializedRecord(value: unknown, label: string, maxBytes = HOSTED_SERIALIZED_MAX_BYTES): Record<string, unknown> {
   if (typeof value !== "string") throw new Error(`${label} requires bounded serialized JSON text`);
-  utf8ByteLengthAtMost(value, HOSTED_SERIALIZED_MAX_BYTES, label);
-  const parsed = parseBoundedJsonText(value, HOSTED_SERIALIZED_MAX_BYTES, label);
+  utf8ByteLengthAtMost(value, maxBytes, label);
+  const parsed = parseBoundedJsonText(value, maxBytes, label);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
   return parsed as Record<string, unknown>;
 }
@@ -550,7 +550,7 @@ export class HostedSharingService {
   }
 
   async createHostedSessionSerialized(serialized: string): Promise<HostedSessionDescriptor> {
-    const parsed = parseSerializedRecord(serialized, "hosted session");
+    const parsed = parseSerializedRecord(serialized, "hosted session", Math.max(HOSTED_SERIALIZED_MAX_BYTES, this.#limits.maxSessionBytes * 2 + 64 * 1024));
     const rawEntries = parsed.entries;
     if (!Array.isArray(rawEntries)) throw new Error("hosted session entries must be an array");
     const entries = rawEntries.map((entry) => {
