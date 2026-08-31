@@ -8,6 +8,10 @@ export type CompatibilityTier =
 
 export type RecordedSourceFormat = "mcap" | "ros1-bag" | "ros2-sqlite";
 
+export type SourceMode = "recorded" | "live";
+
+export type LiveConnectionState = "disconnected" | "connecting" | "connected" | "degraded" | "reconnecting";
+
 export type DisplayKind =
   | "camera-info"
   | "frame-tree"
@@ -60,10 +64,45 @@ export interface SeekResult {
   readonly diagnostic?: string;
 }
 
+export interface LiveConnectionSelection {
+  readonly browserOrigin: string;
+  readonly sessionToken: string;
+}
+
+export interface LiveTelemetrySummary {
+  readonly state: LiveConnectionState;
+  readonly sourceEpoch: number;
+  readonly queuedMessages: number;
+  readonly queuedBytes: number;
+  readonly acceptedMessages: number;
+  readonly deliveredMessages: number;
+  readonly droppedMessages: number;
+  readonly diagnostic?: string;
+}
+
+export interface OpenLiveResult {
+  readonly sourceLabel: string;
+  readonly epoch: number;
+  readonly topics: readonly TopicSummary[];
+  readonly telemetry: LiveTelemetrySummary;
+}
+
+export interface LivePollResult {
+  readonly epoch: number;
+  readonly latestSourceTimeNanos?: bigint;
+  readonly messageCount: number;
+  readonly telemetry: LiveTelemetrySummary;
+}
+
 export interface DesktopShellPorts {
   readonly openLocalMcap?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
   readonly openLocalRecording?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
   readonly seek: (timeNanos: bigint) => Promise<SeekResult>;
+  readonly connectLive?: (selection: LiveConnectionSelection) => Promise<OpenLiveResult>;
+  readonly subscribeLive?: (topicIds: readonly string[]) => Promise<void>;
+  readonly pollLive?: () => LivePollResult;
+  readonly reconnectLive?: () => Promise<OpenLiveResult>;
+  readonly disconnectLive?: () => Promise<void>;
 }
 
 export interface DisplayConfiguration {
@@ -95,6 +134,7 @@ export interface DesktopShellState {
   readonly sourceLabel?: string;
   readonly sourceHash?: string;
   readonly sourceFormat?: RecordedSourceFormat;
+  readonly sourceMode?: SourceMode;
   readonly sourceSelection?: LocalMcapSelection;
   readonly topics: readonly TopicSummary[];
   readonly topicFilter: string;
@@ -104,6 +144,8 @@ export interface DesktopShellState {
   readonly durationNanos: bigint;
   readonly epoch: number;
   readonly indexState: "none" | "indexed" | "sequential";
+  readonly liveState: LiveConnectionState;
+  readonly liveTelemetry?: LiveTelemetrySummary;
   readonly focusedRegion: ShellRegion;
   readonly blockingError?: string;
   readonly notice?: string;
@@ -138,6 +180,7 @@ export class DesktopShellController {
     durationNanos: 0n,
     epoch: 0,
     indexState: "none",
+    liveState: "disconnected",
     focusedRegion: "session",
     notice: "Choose a local MCAP, ROS1 bag, or ROS2 SQLite recording to inspect topics.",
   };
@@ -162,6 +205,9 @@ export class DesktopShellController {
       phase: "loading",
       sourceSelection: selection,
       sourceFormat: selection.format ?? "mcap",
+      sourceMode: "recorded",
+      liveState: "disconnected",
+      liveTelemetry: undefined,
       sourceLabel: selection.name,
       blockingError: undefined,
       notice: `Opening ${selection.name}; indexing and resolving schemas.`,
@@ -205,6 +251,131 @@ export class DesktopShellController {
     const selection = this.#state.sourceSelection;
     if (!selection) throw new Error("no local source is available to retry");
     return this.openLocal(selection);
+  }
+
+  async connectLive(selection: LiveConnectionSelection): Promise<void> {
+    if (!this.ports.connectLive) throw new Error("no secure live-source runtime is registered");
+    this.#state = {
+      ...this.#state,
+      phase: "loading",
+      sourceMode: "live",
+      sourceFormat: undefined,
+      sourceLabel: "Secure live relay",
+      sourceHash: undefined,
+      sourceSelection: undefined,
+      liveState: "connecting",
+      liveTelemetry: undefined,
+      topics: [],
+      displays: [],
+      activeDisplayId: undefined,
+      currentTimeNanos: 0n,
+      durationNanos: 0n,
+      indexState: "none",
+      blockingError: undefined,
+      notice: "Authenticating a browser-bound, subscribe-only live session.",
+    };
+    try {
+      const result = await this.ports.connectLive(selection);
+      this.#state = {
+        ...this.#state,
+        phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
+        sourceLabel: result.sourceLabel,
+        epoch: result.epoch,
+        topics: result.topics,
+        liveState: result.telemetry.state,
+        liveTelemetry: result.telemetry,
+        notice: `${result.topics.length} live topics discovered. Live mode is read-only.`,
+      };
+    } catch (error) {
+      this.#state = {
+        ...this.#state,
+        phase: "error",
+        liveState: "disconnected",
+        blockingError: `Could not connect secure live mode: ${errorMessage(error)}. Retry the authenticated session.`,
+        notice: undefined,
+      };
+    }
+  }
+
+  async subscribeLive(topicIds: readonly string[]): Promise<void> {
+    if (this.#state.sourceMode !== "live" || !this.ports.subscribeLive) {
+      throw new Error("connect secure live mode before subscribing");
+    }
+    await this.ports.subscribeLive(topicIds);
+    this.#state = {
+      ...this.#state,
+      notice: `${topicIds.length} explicit live topic${topicIds.length === 1 ? "" : "s"} subscribed read-only.`,
+    };
+  }
+
+  pollLive(): LivePollResult {
+    if (this.#state.sourceMode !== "live" || !this.ports.pollLive) {
+      throw new Error("connect secure live mode before polling");
+    }
+    const result = this.ports.pollLive();
+    this.#state = {
+      ...this.#state,
+      phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
+      epoch: result.epoch,
+      currentTimeNanos: result.latestSourceTimeNanos ?? this.#state.currentTimeNanos,
+      liveState: result.telemetry.state,
+      liveTelemetry: result.telemetry,
+      notice:
+        result.telemetry.diagnostic ??
+        `${result.messageCount} live message${result.messageCount === 1 ? "" : "s"} delivered to displays.`,
+    };
+    return result;
+  }
+
+  async reconnectLive(): Promise<void> {
+    if (this.#state.sourceMode !== "live" || !this.ports.reconnectLive) {
+      throw new Error("connect secure live mode before reconnecting");
+    }
+    this.#state = {
+      ...this.#state,
+      phase: "loading",
+      liveState: "reconnecting",
+      notice: "Reconnecting live source; stale epoch data is ignored.",
+    };
+    try {
+      const result = await this.ports.reconnectLive();
+      this.#state = {
+        ...this.#state,
+        phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
+        epoch: result.epoch,
+        topics: result.topics,
+        liveState: result.telemetry.state,
+        liveTelemetry: result.telemetry,
+        notice: `Live source reconnected at epoch ${result.epoch}.`,
+      };
+    } catch (error) {
+      this.#state = {
+        ...this.#state,
+        phase: "error",
+        liveState: "disconnected",
+        blockingError: `Live reconnect failed: ${errorMessage(error)}. Retry the authenticated session.`,
+        notice: undefined,
+      };
+    }
+  }
+
+  async disconnectLive(): Promise<void> {
+    await this.ports.disconnectLive?.();
+    this.#state = {
+      ...this.#state,
+      phase: "empty",
+      sourceMode: undefined,
+      sourceLabel: undefined,
+      topics: [],
+      displays: [],
+      activeDisplayId: undefined,
+      currentTimeNanos: 0n,
+      epoch: 0,
+      liveState: "disconnected",
+      liveTelemetry: undefined,
+      blockingError: undefined,
+      notice: "Live session disconnected. Choose a local recording or secure live mode.",
+    };
   }
 
   setTopicFilter(value: string): void {
@@ -361,15 +532,23 @@ export function renderDesktopShell(controller: DesktopShellController): string {
   const inspector = activeDisplay
     ? `<form aria-label="Display configuration"><label>Fixed frame<input name="fixed-frame" value="${escapeHtml(activeDisplay.configuration.fixedFrame)}" aria-describedby="display-config-help"></label><label>Color field<input name="color" value="${escapeHtml(activeDisplay.configuration.color)}"></label><label>Scale<input name="scale" type="number" min="0.01" step="0.01" value="${activeDisplay.configuration.scale}"></label><p id="display-config-help">Invalid edits preserve the last valid rendering.</p></form>`
     : `<p>Select a display to inspect frame, color, scale, schema, and diagnostics.</p>`;
+  const modeSummary = state.sourceMode === "live" ? "secure live · read-only" : `local ${state.sourceFormat ?? "recording"}`;
+  const liveTelemetry = state.liveTelemetry
+    ? `<span>Queue: ${state.liveTelemetry.queuedMessages} messages / ${state.liveTelemetry.queuedBytes} bytes</span><span>Dropped: ${state.liveTelemetry.droppedMessages}</span>`
+    : "";
+  const timeline =
+    state.sourceMode === "live"
+      ? `<output>Latest source time: ${state.currentTimeNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: source / receipt</span>${liveTelemetry}`
+      : `<button type="button" aria-label="Play recording">Play</button><button type="button" aria-label="Step backward">−1</button><input type="range" min="0" max="${state.durationNanos}" value="${state.currentTimeNanos}" aria-label="Seek recording"><button type="button" aria-label="Step forward">+1</button><output>${state.currentTimeNanos} / ${state.durationNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: record</span><span>Index: ${state.indexState}</span>`;
 
-  return `<div class="desktop-shell" data-phase="${state.phase}" data-focused-region="${state.focusedRegion}" aria-label="Local recorded-source desktop viewer">
-  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No local source")}</strong><span>Mode: local ${state.sourceFormat ?? "recording"}</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local recording</button><span id="source-help">Recording bytes remain local.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Unavailable in the local M2 slice; no upload occurs.</span><button type="button" disabled>Live (not available)</button></header>
+  return `<div class="desktop-shell" data-phase="${state.phase}" data-focused-region="${state.focusedRegion}" aria-label="Read-only ROS data desktop viewer">
+  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No source")}</strong><span>Mode: ${modeSummary}</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local recording</button><span id="source-help">Recording bytes remain local.</span><button type="button" data-action="connect-live" aria-describedby="live-help">Connect secure live (read-only)</button><span id="live-help">Uses an authenticated browser session; topic access is explicit and bounded.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Unavailable; no upload occurs.</span></header>
   ${sessionError}
   <div class="shell-notice" role="status" aria-live="polite">${escapeHtml(state.notice ?? "")}</div>
   <nav class="topic-browser" aria-label="Topic browser"><h2>Topics</h2><label for="topic-search">Search topics</label><input id="topic-search" type="search" value="${escapeHtml(state.topicFilter)}"><ul role="tree">${topics}</ul></nav>
   <main class="display-workspace" aria-label="Display workspace" aria-busy="${state.phase === "loading"}"><h2>Displays</h2>${displays}</main>
   <aside class="inspector" aria-label="Inspector"><h2>Inspector</h2>${inspector}</aside>
-  <footer class="timeline" aria-label="Timeline"><button type="button" aria-label="Play recording">Play</button><button type="button" aria-label="Step backward">−1</button><input type="range" min="0" max="${state.durationNanos}" value="${state.currentTimeNanos}" aria-label="Seek recording"><button type="button" aria-label="Step forward">+1</button><output>${state.currentTimeNanos} / ${state.durationNanos} ns</output><span>Epoch ${state.epoch}</span><span>Clock: record</span><span>Index: ${state.indexState}</span></footer>
+  <footer class="timeline" aria-label="Timeline">${timeline}</footer>
 </div>`;
 }
 
@@ -413,6 +592,10 @@ export function captureSemanticEvidence(
         semanticHtml.indexOf("Inspector") < semanticHtml.indexOf("Timeline"),
       accessibleAnnouncements: semanticHtml.includes('role="status"') && semanticHtml.includes('aria-live="polite"'),
       localOnlyEntry: semanticHtml.includes("Open local recording") && semanticHtml.includes("Recording bytes remain local."),
+      secureLiveReadOnlyEntry:
+        semanticHtml.includes("Connect secure live (read-only)") &&
+        semanticHtml.includes("authenticated browser session") &&
+        !semanticHtml.includes("Live (not available)"),
       desktopViewport: width >= 960 && height >= 600,
       validDpr: environment.devicePixelRatio > 0 && environment.devicePixelRatio <= 4,
       zoomOperable: environment.zoomPercent >= 100 && environment.zoomPercent <= 200,

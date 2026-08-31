@@ -71,7 +71,7 @@ describe("minimum desktop shell", () => {
     expect(html).toContain("Recording bytes remain local");
     expect(html).toContain("Share</button>");
     expect(html).toContain("disabled aria-describedby=\"share-help\"");
-    expect(html).toContain("Live (not available)");
+    expect(html).toContain("Connect secure live (read-only)");
     expect(html).not.toMatch(/publish|service call|action call|upload now/i);
   });
 
