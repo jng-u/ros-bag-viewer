@@ -48,6 +48,11 @@ export interface McapTelemetry {
   readonly peakBufferedBytes: number;
 }
 
+export interface McapTimeRange {
+  readonly startTimeNanos: bigint;
+  readonly endTimeNanos: bigint;
+}
+
 export type UnindexedScanEvent =
   | { readonly kind: "progress"; readonly scannedBytes: bigint; readonly totalBytes: bigint; readonly progress: number }
   | { readonly kind: "message"; readonly message: McapMessage };
@@ -223,6 +228,26 @@ export class McapSourceSession {
     return [...this.#indexed.channelsById.values()]
       .sort((left, right) => left.id - right.id)
       .map((channel) => channelInfo(channel, this.#indexed?.schemasById ?? new Map()));
+  }
+
+  timeRange(): McapTimeRange | undefined {
+    if (!this.#indexed) return undefined;
+    const statistics = this.#indexed.statistics;
+    if (statistics && statistics.messageCount > 0n) {
+      return {
+        startTimeNanos: statistics.messageStartTime,
+        endTimeNanos: statistics.messageEndTime,
+      };
+    }
+    const [first, ...rest] = this.#indexed.chunkIndexes;
+    if (!first) return undefined;
+    let startTimeNanos = first.messageStartTime;
+    let endTimeNanos = first.messageEndTime;
+    for (const chunk of rest) {
+      if (chunk.messageStartTime < startTimeNanos) startTimeNanos = chunk.messageStartTime;
+      if (chunk.messageEndTime > endTimeNanos) endTimeNanos = chunk.messageEndTime;
+    }
+    return { startTimeNanos, endTimeNanos };
   }
 
   async *readIndexed(options: {

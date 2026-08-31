@@ -9,5 +9,9 @@
     "moduleResolution": "NodeNext",
     "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../worker-runtime" },
+    { "path": "../source-mcap" }
+  ]
 }

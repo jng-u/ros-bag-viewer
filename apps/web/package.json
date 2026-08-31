@@ -4,5 +4,8 @@
   "type": "module",
   "scripts": {
     "evidence:semantic": "tsc -b && node scripts/generate-semantic-evidence.mjs"
+  },
+  "dependencies": {
+    "@ros-web-viewer/m1-integration": "workspace:*"
   }
 }

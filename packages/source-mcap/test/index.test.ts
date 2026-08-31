@@ -92,6 +92,7 @@ describe("MCAP adapter", () => {
     expect(session.channels()).toMatchObject([
       { topic: "/points", schema: { capability: "schema-present", name: "example_msgs/msg/Point" } },
     ]);
+    expect(session.timeRange()).toEqual({ startTimeNanos: 10n, endTimeNanos: 20n });
     const messages = [];
     for await (const message of session.readIndexed({ startTime: 15n, endTime: 25n })) messages.push(message);
     expect(messages.map((message) => [message.sequence, [...message.data]])).toEqual([[1n, [4, 5, 6]]]);

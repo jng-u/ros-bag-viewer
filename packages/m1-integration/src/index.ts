@@ -1,3 +1,13 @@
+import { McapSourceSession, type McapChannelInfo, type McapLimits } from "@ros-web-viewer/source-mcap";
+import {
+  BlobRangeSource,
+  BoundedByteReader,
+  DEFAULT_WORKER_LIMITS,
+  SourceEpochController,
+  type ReadTelemetry,
+  type WorkerResourceLimits,
+} from "@ros-web-viewer/worker-runtime";
+
 export interface SemanticDecodeLimits {
   readonly maxMessageBytes: number;
   readonly maxStringBytes: number;
@@ -277,5 +287,166 @@ export function decodeRenderAndRelease(
     return summary;
   } finally {
     lease.release();
+  }
+}
+
+export interface LocalMcapSelection {
+  readonly name: string;
+  readonly sizeBytes: number;
+  readonly immutableVersion: string;
+  readonly blob?: Blob;
+}
+
+export interface LocalMcapTopicSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly typeName: string;
+  readonly compatibility: "native-display" | "schema-backed-generic" | "opaque-inspectable";
+  readonly schemaCapability: "schema-present" | "opaque";
+  readonly availableDisplays: readonly ("point-cloud" | "path" | "raw")[];
+}
+
+export interface LocalMcapOpenResult {
+  readonly sourceLabel: string;
+  readonly sourceHash: string;
+  readonly durationNanos: bigint;
+  readonly epoch: number;
+  readonly indexState: "indexed" | "sequential";
+  readonly topics: readonly LocalMcapTopicSummary[];
+  readonly diagnostic?: string;
+}
+
+export interface LocalMcapSeekResult {
+  readonly epoch: number;
+  readonly currentTimeNanos: bigint;
+  readonly diagnostic?: string;
+}
+
+const DEFAULT_DESKTOP_MCAP_LIMITS: McapLimits = {
+  sequentialReadBytes: 256 * 1024,
+  maxBufferedBytes: 16 * 1024 * 1024,
+  maxDecompressedBytes: 64 * 1024 * 1024,
+  maxDecompressionRatio: 100,
+  maxMessageIndexCacheBytes: 8 * 1024 * 1024,
+};
+
+function topicSummary(channel: McapChannelInfo): LocalMcapTopicSummary {
+  const displays = availableDisplaysForSchema(channel.schema.name, channel.schema.capability);
+  return {
+    id: String(channel.id),
+    name: channel.topic,
+    typeName: channel.schema.name,
+    compatibility:
+      displays.some((display) => display !== "raw")
+        ? "native-display"
+        : channel.schema.capability === "schema-present"
+          ? "schema-backed-generic"
+          : "opaque-inspectable",
+    schemaCapability: channel.schema.capability,
+    availableDisplays: displays,
+  };
+}
+
+export class LocalMcapDesktopRuntime {
+  readonly #epoch = new SourceEpochController();
+  readonly #workerLimits: WorkerResourceLimits;
+  readonly #mcapLimits: McapLimits;
+  #blob?: Blob;
+  #mode?: "indexed" | "unindexed-degraded";
+  #startTime = 0n;
+  #duration = 0n;
+  #lastReadTelemetry?: Readonly<ReadTelemetry>;
+
+  constructor(
+    workerLimits: WorkerResourceLimits = DEFAULT_WORKER_LIMITS,
+    mcapLimits: McapLimits = DEFAULT_DESKTOP_MCAP_LIMITS,
+  ) {
+    this.#workerLimits = workerLimits;
+    this.#mcapLimits = mcapLimits;
+  }
+
+  async openLocalMcap(selection: LocalMcapSelection): Promise<LocalMcapOpenResult> {
+    if (selection.name.trim().length === 0) throw new Error("local MCAP selection name cannot be empty");
+    if (selection.immutableVersion.trim().length === 0) {
+      throw new Error("local MCAP selection immutable version cannot be empty");
+    }
+    if (!Number.isSafeInteger(selection.sizeBytes) || selection.sizeBytes < 0) {
+      throw new Error("local MCAP selection size must be a non-negative safe integer");
+    }
+    if (!selection.blob) throw new Error("local MCAP selection is missing its Blob handle");
+    if (selection.sizeBytes !== selection.blob.size) throw new Error("local MCAP selection size does not match its Blob");
+    this.#epoch.advance("local MCAP opened");
+    this.#blob = undefined;
+    this.#mode = undefined;
+    this.#startTime = 0n;
+    this.#duration = 0n;
+    this.#lastReadTelemetry = undefined;
+    const { reader, session } = await this.#openSession(selection.blob);
+    const channels = new Map<number, McapChannelInfo>();
+    for (const channel of session.channels()) channels.set(channel.id, channel);
+    let minimumTime: bigint | undefined;
+    let maximumTime: bigint | undefined;
+    const accept = (logTimeNanos: bigint, channel: McapChannelInfo): void => {
+      channels.set(channel.id, channel);
+      minimumTime = minimumTime === undefined || logTimeNanos < minimumTime ? logTimeNanos : minimumTime;
+      maximumTime = maximumTime === undefined || logTimeNanos > maximumTime ? logTimeNanos : maximumTime;
+    };
+    if (session.mode === "indexed") {
+      const range = session.timeRange();
+      if (range) {
+        minimumTime = range.startTimeNanos;
+        maximumTime = range.endTimeNanos;
+      }
+      if (channels.size === 0) {
+        for await (const message of session.readIndexed()) accept(message.logTimeNanos, message.channel);
+      }
+    } else {
+      for await (const event of session.scanUnindexed()) {
+        if (event.kind === "message") accept(event.message.logTimeNanos, event.message.channel);
+      }
+    }
+    this.#lastReadTelemetry = reader.snapshotTelemetry();
+    this.#startTime = minimumTime ?? 0n;
+    this.#duration = minimumTime === undefined || maximumTime === undefined ? 0n : maximumTime - minimumTime;
+    this.#blob = selection.blob;
+    this.#mode = session.mode;
+    return {
+      sourceLabel: selection.name,
+      sourceHash: selection.immutableVersion,
+      durationNanos: this.#duration,
+      epoch: this.#epoch.epoch,
+      indexState: session.mode === "indexed" ? "indexed" : "sequential",
+      topics: [...channels.values()].sort((left, right) => left.id - right.id).map(topicSummary),
+      ...(session.diagnostic === undefined ? {} : { diagnostic: session.diagnostic }),
+    };
+  }
+
+  async seek(timeNanos: bigint): Promise<LocalMcapSeekResult> {
+    if (!this.#blob || !this.#mode) throw new Error("open a local MCAP source before seeking");
+    const boundedTime = timeNanos < 0n ? 0n : timeNanos > this.#duration ? this.#duration : timeNanos;
+    this.#epoch.advance("local MCAP seek");
+    const { reader, session } = await this.#openSession(this.#blob);
+    this.#lastReadTelemetry = reader.snapshotTelemetry();
+    if (this.#mode === "unindexed-degraded" || session.mode !== "indexed") {
+      return {
+        epoch: this.#epoch.epoch,
+        currentTimeNanos: 0n,
+        diagnostic: "Unindexed MCAP remains in sequential degraded mode; random seek is unavailable.",
+      };
+    }
+    const absolute = this.#startTime + boundedTime;
+    await session.readIndexed({ startTime: absolute, endTime: absolute + 1n }).next();
+    this.#lastReadTelemetry = reader.snapshotTelemetry();
+    return { epoch: this.#epoch.epoch, currentTimeNanos: boundedTime };
+  }
+
+  readTelemetry(): Readonly<ReadTelemetry> | undefined {
+    return this.#lastReadTelemetry;
+  }
+
+  async #openSession(blob: Blob): Promise<{ readonly reader: BoundedByteReader; readonly session: McapSourceSession }> {
+    const reader = new BoundedByteReader(new BlobRangeSource(blob), this.#epoch, this.#workerLimits);
+    const session = await McapSourceSession.open(reader, { limits: this.#mcapLimits });
+    return { reader, session };
   }
 }

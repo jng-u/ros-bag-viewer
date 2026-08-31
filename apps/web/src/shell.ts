@@ -14,6 +14,7 @@ export interface LocalMcapSelection {
   readonly name: string;
   readonly sizeBytes: number;
   readonly immutableVersion: string;
+  readonly blob?: Blob;
 }
 
 export interface TopicSummary {

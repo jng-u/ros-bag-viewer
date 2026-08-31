@@ -1,10 +1,12 @@
 import { McapWriter, type IWritable } from "@mcap/core";
 import { describe, expect, it } from "vitest";
 
+import { createLocalMcapDesktopShell } from "../../apps/web/src/index.js";
 import { ReferenceCountedPayloadLease, type SourceEpoch } from "../../packages/core-model/src/index.js";
 import { PathDisplay, PointCloud2Display, type SemanticSceneSummary } from "../../packages/displays-core/src/index.js";
 import {
   DEFAULT_SEMANTIC_DECODE_LIMITS,
+  LocalMcapDesktopRuntime,
   availableDisplaysForSchema,
   decodeRenderAndRelease,
   decodeSemanticMessage,
@@ -154,16 +156,25 @@ async function mcapFixture(indexed: boolean): Promise<Uint8Array> {
     repeatChannels: indexed,
     useMessageIndex: indexed,
     useChunkIndex: indexed,
+    useMetadataIndex: false,
     chunkSize: 128,
   });
   await writer.start({ profile: "ros2", library: "m1-vertical-slice-fixture" });
-  for (const [topic, name, data] of [
+  const fixtures = [
     ["/points", "sensor_msgs/msg/PointCloud2", pointCloudCdr()],
     ["/path", "nav_msgs/msg/Path", pathCdr()],
-  ] as const) {
+  ] as const;
+  for (const [index, [topic, name, data]] of fixtures.entries()) {
     const schemaId = await writer.registerSchema({ name, encoding: "ros2msg", data: new TextEncoder().encode(name) });
     const channelId = await writer.registerChannel({ schemaId, topic, messageEncoding: "cdr", metadata: new Map() });
-    await writer.addMessage({ channelId, sequence: 0, logTime: 10n, publishTime: 9n, data });
+    const logTime = 10n + BigInt(index) * 10n;
+    await writer.addMessage({ channelId, sequence: 0, logTime, publishTime: logTime - 1n, data });
+  }
+  for (let index = 0; index < 32; index += 1) {
+    await writer.addMetadata({
+      name: `bounded-read-padding-${index}`,
+      metadata: new Map([["padding", "x".repeat(256)]]),
+    });
   }
   await writer.end();
   return writable.bytes();
@@ -356,6 +367,55 @@ describe("complete M1 MCAP vertical slice", () => {
         ...DEFAULT_SEMANTIC_DECODE_LIMITS,
         [field]: DEFAULT_SEMANTIC_DECODE_LIMITS[field] + 1,
       })).toThrow(new RegExp(`${field} cannot exceed the hard semantic decode limit`));
+    }
+  });
+
+  it("binds the desktop shell to real bounded indexed and sequential MCAP runtimes", async () => {
+    for (const indexed of [true, false]) {
+      const bytes = await mcapFixture(indexed);
+      const blobBytes = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const blob = new Blob([blobBytes]);
+      const runtime = new LocalMcapDesktopRuntime(
+        {
+          maxSingleReadBytes: 1024,
+          maxTotalReadBytes: 64n * 1024n,
+          maxConcurrentReads: 2,
+          maxQueuedReads: 4,
+          maxBufferedBytes: 2048,
+          maxDecompressedBytes: 4096,
+          maxDecompressionRatio: 16,
+          maxCacheBytes: 1024,
+        },
+        {
+          sequentialReadBytes: 128,
+          maxBufferedBytes: 2048,
+          maxDecompressedBytes: 4096,
+          maxDecompressionRatio: 16,
+          maxMessageIndexCacheBytes: 256,
+        },
+      );
+      const { controller } = createLocalMcapDesktopShell(runtime);
+      await controller.openLocal({
+        name: indexed ? "indexed.mcap" : "unindexed.mcap",
+        sizeBytes: blob.size,
+        immutableVersion: indexed ? "fixture:indexed" : "fixture:unindexed",
+        blob,
+      });
+      expect(controller.state).toMatchObject({
+        phase: indexed ? "ready" : "degraded",
+        durationNanos: 10n,
+        epoch: 1,
+        indexState: indexed ? "indexed" : "sequential",
+      });
+      expect(controller.state.topics.map(({ name, availableDisplays }) => [name, availableDisplays])).toEqual([
+        ["/points", ["point-cloud", "raw"]],
+        ["/path", ["path", "raw"]],
+      ]);
+      expect(runtime.readTelemetry()?.peakInFlightBytes).toBeLessThan(blob.size);
+      await controller.seek(5n);
+      expect(controller.state.epoch).toBe(2);
+      expect(controller.state.currentTimeNanos).toBe(indexed ? 5n : 0n);
+      if (!indexed) expect(controller.state.notice).toMatch(/random seek is unavailable/);
     }
   });
 });

@@ -35,13 +35,24 @@ importers:
 
   apps/relay: {}
 
-  apps/web: {}
+  apps/web:
+    dependencies:
+      '@ros-web-viewer/m1-integration':
+        specifier: workspace:*
+        version: link:../../packages/m1-integration
 
   packages/core-model: {}
 
   packages/displays-core: {}
 
-  packages/m1-integration: {}
+  packages/m1-integration:
+    dependencies:
+      '@ros-web-viewer/source-mcap':
+        specifier: workspace:*
+        version: link:../source-mcap
+      '@ros-web-viewer/worker-runtime':
+        specifier: workspace:*
+        version: link:../worker-runtime
 
   packages/render-core: {}
 

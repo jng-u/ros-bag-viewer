@@ -252,7 +252,7 @@ describe("M0 forbidden-scope guard", () => {
     expect(violations).toEqual([]);
   });
 
-  it("locks only the approved M1 source dependency and no hosted/live runtime", () => {
+  it("locks only the approved local M1 dependency chain and official MCAP adapter", () => {
     const locked: string[] = [];
     for (const path of packageFiles()) {
       const packageJson = JSON.parse(readFileSync(path, "utf8")) as { dependencies?: Record<string, string> };
@@ -260,9 +260,21 @@ describe("M0 forbidden-scope guard", () => {
         locked.push(`${basename(join(path, ".."))}:${dependency}`);
       }
     }
-    expect(locked, "M1 may pin only the approved official MCAP adapter dependency").toEqual([
+    expect(locked, "M1 may use only the local shell-to-source chain plus the official MCAP adapter").toEqual([
+      "web:@ros-web-viewer/m1-integration",
+      "m1-integration:@ros-web-viewer/source-mcap",
+      "m1-integration:@ros-web-viewer/worker-runtime",
       "source-mcap:@mcap/core",
     ]);
+    const web = JSON.parse(readFileSync(join(root, "apps/web/package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    const integration = JSON.parse(readFileSync(join(root, "packages/m1-integration/package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(web.dependencies["@ros-web-viewer/m1-integration"]).toBe("workspace:*");
+    expect(integration.dependencies["@ros-web-viewer/source-mcap"]).toBe("workspace:*");
+    expect(integration.dependencies["@ros-web-viewer/worker-runtime"]).toBe("workspace:*");
     const sourceMcap = JSON.parse(readFileSync(join(root, "packages/source-mcap/package.json"), "utf8")) as {
       dependencies: Record<string, string>;
     };

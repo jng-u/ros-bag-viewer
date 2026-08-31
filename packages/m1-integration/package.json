@@ -2,8 +2,14 @@
   "name": "@ros-web-viewer/m1-integration",
   "private": true,
   "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run ../../tests/m1/vertical-slice.test.ts"
+  },
+  "dependencies": {
+    "@ros-web-viewer/source-mcap": "workspace:*",
+    "@ros-web-viewer/worker-runtime": "workspace:*"
   }
 }
