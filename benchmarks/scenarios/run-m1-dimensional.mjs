@@ -252,8 +252,8 @@ function renderEvidence(indexedSeek) {
   const renderer = new WebGl2Renderer(
     { getContext: () => gl },
     {
-      maxGpuBytes: 4 * 1024 * 1024,
-      maxBufferBytes: 2 * 1024 * 1024,
+      maxGpuBytes: config.workload.rendererMaxGpuBytes,
+      maxBufferBytes: config.workload.rendererMaxBufferBytes,
       maxVerticesPerGeometry: config.workload.maxRenderedPoints,
       maxPooledBuffers: config.workload.activeDisplays,
     },

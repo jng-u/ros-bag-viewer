@@ -37,7 +37,14 @@ interface Artifact {
       devicePixelRatio: number;
       cacheState: string;
     };
-    workload: { activeDisplays: number; repetitions: number; pointCount: number; pathPoseCount: number };
+    workload: {
+      activeDisplays: number;
+      repetitions: number;
+      pointCount: number;
+      pathPoseCount: number;
+      rendererMaxGpuBytes: number;
+      rendererMaxBufferBytes: number;
+    };
     costModel: { sequentialReadBytes: number; percentileMethod: string; fixedOverheadBytes: number };
   };
   source: {
@@ -81,6 +88,13 @@ interface Artifact {
         liveGpuBytes: number;
         pooledBuffers: number;
         pooledGpuBytes: number;
+      };
+      mockWebGlOperations: {
+        bufferAllocations: number[];
+        bufferUploads: number[];
+        drawCalls: Array<{ mode: number; count: number }>;
+        createdBuffers: number;
+        deletedBuffers: number;
       };
       memoryEstimate: {
         formula: string;
@@ -281,6 +295,15 @@ describe("M1 dimensional evidence gate", () => {
       rejectedAllocations: 0,
       decimatedVertices: 0,
     });
+    expect(artifact.render.thinWebGl2.mockWebGlOperations.drawCalls.map(({ mode }) => mode)).toEqual([0, 3]);
+    expect(
+      artifact.render.thinWebGl2.mockWebGlOperations.bufferAllocations.every(
+        (byteLength) => byteLength <= artifact.scenario.workload.rendererMaxBufferBytes,
+      ),
+    ).toBe(true);
+    expect(artifact.render.thinWebGl2.mockWebGlOperations.createdBuffers).toBe(
+      artifact.render.thinWebGl2.mockWebGlOperations.deletedBuffers,
+    );
   });
 
   it("connects bounded reads, normalized time, TF, queue, and both semantic displays", async () => {

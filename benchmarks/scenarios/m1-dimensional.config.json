@@ -28,6 +28,8 @@
     "maxRenderedPathPoses": 2000,
     "activeDisplays": 2,
     "queueCapacity": 4,
+    "rendererMaxGpuBytes": 4194304,
+    "rendererMaxBufferBytes": 2097152,
     "warmupFrames": 10,
     "repetitions": 60
   },

@@ -32,6 +32,7 @@ The machine-readable contract is [`m1-dimensional.config.json`](../benchmarks/sc
 | Topic rates | PointCloud2 10 Hz; Path 5 Hz |
 | Active displays | 2 |
 | Queue capacity | 4 |
+| Renderer max GPU / buffer | 4,194,304 / 2,097,152 logical bytes |
 | Warmup / repetitions | 10 / 60 modeled frames |
 | Statistics | nearest-rank p50, p95, p99 plus maximum |
 
@@ -69,7 +70,7 @@ The generator sends deterministic PointCloud2 and Path messages through the dogf
 | PointCloud2 (`lidar`) | `POINTS` | 120,000 | 60,000 | 60,000 |
 | Path (`map`) | `LINE_STRIP` | 2,000 | 2,000 | 0 |
 
-The artifact includes deterministic bounds, a SHA-256 semantic-scene digest, allocation/upload/draw traces, renderer telemetry before disposal, and zero live/pooled logical GPU bytes after disposal. WebGL has no portable total-GPU-memory API; every GPU byte here is renderer-owned logical allocation accounting.
+The artifact includes deterministic bounds, a SHA-256 semantic-scene digest, allocation/upload/draw traces, renderer telemetry before disposal, and zero live/pooled logical GPU bytes after disposal. The gate requires draw modes `[POINTS=0, LINE_STRIP=3]` and rejects any recorded allocation above the fixed 2,097,152-byte buffer ceiling. WebGL has no portable total-GPU-memory API; every GPU byte here is renderer-owned logical allocation accounting.
 
 ## Working-set formula
 
