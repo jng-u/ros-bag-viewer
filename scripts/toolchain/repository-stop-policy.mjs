@@ -1,10 +1,13 @@
+import ts from "typescript";
+
 const infrastructureFiles = new Set(["pulumi.yaml", "serverless.yml", "serverless.yaml", "terraform.tfstate"]);
 const credentialDirectories = new Set([".aws", ".azure", ".config/gcloud", "credentials", "secrets"]);
 const generatedInfrastructureDirectories = new Set([
   "archive", "artifact", "artifacts", "build", "deploy", "deployment", "dist", "output", "outputs", "release",
 ]);
 const infrastructurePackagePattern = /^(?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf$|@pulumi\/|pulumi$|serverless$)/u;
-const credentialKeyPattern = /^(?:access[_-]?token|api[_-]?key|auth(?:orization)?[_-]?token|authorization|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|token|github[_-]?token)$/iu;
+const infrastructureModulePattern = /^(?:aws-cdk-lib(?:\/|$)|@aws-cdk\/|@cdktf\/|cdktf(?:\/|$)|@pulumi\/|pulumi(?:\/|$))/u;
+const credentialKeyPattern = /^(?:access[_-]?token|api[_-]?key|auth(?:orization)?[_-]?token|authorization|client[_-]?secret|github[_-]?token|id[_-]?token|npm[_-]?token|password|private[_-]?key|refresh[_-]?token|secret[_-]?token|session[_-]?token|token)$/iu;
 
 function contentText(content) {
   if (content === undefined) return "";
@@ -24,7 +27,163 @@ function jsonContains(value, predicate) {
 }
 
 function normalizedCredentialKey(key) { return key.normalize("NFKC").toLowerCase().replace(/[\s_-]/gu, ""); }
-function hasCredentialKey(key) { return credentialKeyPattern.test(key) || new Set(["githubtoken", "privatekey", "authorization", "token", "credential", "secret"]).has(normalizedCredentialKey(key)); }
+function hasCredentialKey(key) {
+  return credentialKeyPattern.test(key) || new Set([
+    "accesstoken", "apikey", "authorization", "authorizationtoken", "clientsecret", "credential",
+    "githubtoken", "idtoken", "npmtoken", "password", "privatekey", "refreshtoken", "secret",
+    "secrettoken", "sessiontoken", "token",
+  ]).has(normalizedCredentialKey(key));
+}
+
+function typescriptString(node, constants, depth = 0) {
+  if (!node || depth > 16) return undefined;
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isIdentifier(node)) return constants.get(node.text);
+  if (ts.isParenthesizedExpression(node)) return typescriptString(node.expression, constants, depth + 1);
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = typescriptString(node.left, constants, depth + 1);
+    const right = typescriptString(node.right, constants, depth + 1);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const expression = typescriptString(span.expression, constants, depth + 1);
+      if (expression === undefined) return undefined;
+      value += expression + span.literal.text;
+    }
+    return value;
+  }
+  return undefined;
+}
+
+function typescriptDeclaresInfrastructure(text, filename) {
+  const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
+  const constants = new Map();
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+    const collect = (node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        const value = typescriptString(node.initializer, constants);
+        if (value !== undefined && constants.get(node.name.text) !== value) {
+          constants.set(node.name.text, value);
+          changed = true;
+        }
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(source);
+    if (!changed) break;
+  }
+  let found = false;
+  const inspect = (node) => {
+    if (found) return;
+    if (ts.isImportDeclaration(node)) {
+      const value = typescriptString(node.moduleSpecifier, constants);
+      if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+      const value = typescriptString(node.moduleSpecifier, constants);
+      if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+    } else if (ts.isCallExpression(node)) {
+      const loader = node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        ts.isIdentifier(node.expression) && node.expression.text === "require";
+      if (loader) {
+        const value = typescriptString(node.arguments[0], constants);
+        if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+      }
+    }
+    ts.forEachChild(node, inspect);
+  };
+  inspect(source);
+  return found;
+}
+
+function decodeQuotedText(value) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try { return JSON.parse(trimmed); }
+    catch { return undefined; }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/\\(['\\])/gu, "$1");
+  }
+  return undefined;
+}
+
+function pythonString(expression, constants, depth = 0) {
+  const trimmed = expression.trim();
+  if (depth > 16) return undefined;
+  if (/^[A-Za-z_]\w*$/u.test(trimmed)) return constants.get(trimmed);
+  const direct = decodeQuotedText(trimmed);
+  if (direct !== undefined) return direct;
+  let quote;
+  let escaped = false;
+  let start = 0;
+  const parts = [];
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index];
+    if (escaped) { escaped = false; continue; }
+    if (character === "\\") { escaped = true; continue; }
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (character === "+") { parts.push(trimmed.slice(start, index)); start = index + 1; }
+  }
+  if (quote || parts.length === 0) return undefined;
+  parts.push(trimmed.slice(start));
+  const values = parts.map((part) => pythonString(part, constants, depth + 1));
+  return values.some((value) => value === undefined) ? undefined : values.join("");
+}
+
+function pythonDeclaresInfrastructure(text) {
+  const constants = new Map();
+  const importlibAliases = new Set(["importlib"]);
+  const importModuleAliases = new Set();
+  const lines = text.split(/\r?\n/u);
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (const line of lines) {
+      const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/u.exec(line);
+      if (!assignment) continue;
+      const value = pythonString(assignment[2], constants);
+      if (value !== undefined) constants.set(assignment[1], value);
+    }
+  }
+  for (const line of lines) {
+    const importlib = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/u.exec(line);
+    if (importlib) importlibAliases.add(importlib[1] ?? "importlib");
+    const importModule = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(line);
+    if (importModule) importModuleAliases.add(importModule[1] ?? "import_module");
+    const directImport = /^\s*(?:from|import)\s+(aws_cdk|cdktf|pulumi(?:_[A-Za-z0-9_]+)?)(?:\b|\.)/u.exec(line);
+    if (directImport) return true;
+  }
+  const loaders = ["__import__", ...importModuleAliases, ...[...importlibAliases].map((alias) => `${alias}.import_module`)]
+    .map((loader) => loader.replace(".", "\\."))
+    .join("|");
+  const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
+  for (const match of text.matchAll(calls)) {
+    const value = pythonString(match[1].split(",", 1)[0], constants);
+    if (value !== undefined && /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value)) return true;
+  }
+  return false;
+}
+
+function decodedStructuredKey(rawKey) {
+  const trimmed = rawKey.trim();
+  const quoted = decodeQuotedText(trimmed);
+  if (quoted !== undefined) return quoted;
+  return trimmed.replace(/\\u\{([a-f0-9]+)\}|\\u([a-f0-9]{4})/giu, (_, braced, plain) =>
+    String.fromCodePoint(Number.parseInt(braced ?? plain, 16)));
+}
+
+function structuredTextContainsCredential(name, text) {
+  if (!/\.(?:conf|ini|toml|ya?ml)$/u.test(name)) return false;
+  return text.split(/\r?\n/u).some((line) => {
+    const entry = /^\s*-?\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^:=#;]+?))\s*[:=]\s*(.*?)\s*$/u.exec(line);
+    if (!entry || !hasCredentialKey(decodedStructuredKey(entry[1]))) return false;
+    const value = entry[2].replace(/\s+(?:#|;).*$/u, "").replace(/^['"]|['"]$/gu, "");
+    return value.length >= 8;
+  });
+}
 
 function packageDeclaresInfrastructure(manifest) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return false;
@@ -50,6 +209,8 @@ export function repositoryStopReason(filename, content) {
   if (name === "package.json" && /["']license["']\s*:\s*["'][^"']+["']/iu.test(text)) return "public-license";
   if (/^\.env(?:$|\.)/u.test(name)) return "credentials";
   if (/^(?:credentials?|secrets?|service-account|client[-_]?secret)(?:$|[-_.])/u.test(name) ||
+      /(?:^|[-_.])credentials?(?:$|[-_.])/u.test(name) ||
+      /^(?:access|auth|github|npm)[-_]?tokens?(?:$|[-_.])/u.test(name) ||
       /^id_[a-z0-9][a-z0-9._-]*$/u.test(name) ||
       [".npmrc", ".netrc", ".pypirc", ".git-credentials", "application_default_credentials.json", "kubeconfig"].includes(name) ||
       normalized === ".aws/config" || normalized.endsWith("/.aws/config") ||
@@ -73,21 +234,24 @@ export function repositoryStopReason(filename, content) {
       /(?:^|\n)\s*clusters\s*:/u.test(text) && /(?:^|\n)\s*contexts\s*:/u.test(text) &&
         /(?:^|\n)\s*users\s*:/u.test(text) && /(?:^|\n)\s*current-context\s*:/u.test(text) &&
         /(?:token|client-key-data|client-certificate-data|password)\s*:/u.test(text) ||
-      /(?:^|[,{\n]\s*)["']?(?:access[_-]?token|auth(?:orization)?[_-]?token|api[_-]?key|client[_-]?secret|refresh[_-]?token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
+      !sourceCode && /(?:^|[,{\n]\s*)["']?(?:access[_-]?token|auth(?:orization)?[_-]?token|api[_-]?key|client[_-]?secret|github[_-]?token|id[_-]?token|npm[_-]?token|private[_-]?key|refresh[_-]?token|secret[_-]?token|session[_-]?token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
       !sourceCode && /(?:^|[,{\n]\s*)["']?(?:authorization|token)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
-      /(?:^|\n)\s*authorization\s*:\s*bearer\s+\S+/iu.test(text)) return "credentials";
-  const archiveName = /\.(?:zip|tar|tgz|gz|bz2|7z|rar)$/u.test(name);
-  const helmFile = /^(?:chart|values)(?:\.[^.]+)?$/u.test(name) && /\.(?:ya?ml)$/u.test(name);
+      /(?:^|\n)\s*authorization\s*:\s*bearer\s+\S+/iu.test(text) ||
+      structuredTextContainsCredential(name, text)) return "credentials";
+  const archiveName = /(?:\.tar\.xz|\.(?:zip|tar|tgz|gz|bz2|xz|zst|7z|rar|jar))$/u.test(name);
+  const helmFile = segments.includes("helm") &&
+    (name === "chart.lock" || /^(?:chart|values(?:[-_.][a-z0-9-]+)?)\.ya?ml$/u.test(name));
   const k8sStructured = json && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "apiversion" && typeof value === "string") && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "kind" && typeof value === "string");
   const k8sYaml = /\.(?:ya?ml)$/u.test(name) && /(?:^|[\n\r])\s*-?\s*(?:apiVersion|kind)\s*:/u.test(text) && /(?:apiVersion|kind)\s*:/u.test(text);
   const iacPath = segments.some((segment) => ["infra", "infrastructure", "deploy", "deployment"].includes(segment));
-  const iacLoader = /(?:from\s*["'](?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf|@pulumi\/|pulumi)|(?:require|import)\s*(?:\(\s*)?["'](?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf|@pulumi\/|pulumi)|(?:importlib\.import_module|__import__)\s*\(\s*["'](?:aws_cdk|cdktf|pulumi)|(?:require|importlib\.import_module|__import__)\s*\([^)]*(?:aws-cdk|aws_cdk|pulumi|cdktf))/u.test(text);
+  const iacLoader = /\.(?:[cm]?[jt]sx?)$/u.test(name) ? typescriptDeclaresInfrastructure(text, name) :
+    name.endsWith(".py") ? pythonDeclaresInfrastructure(text) : false;
   if (archiveName || helmFile || k8sStructured || k8sYaml || sourceCode && iacPath && iacLoader ||
     infrastructureFiles.has(name) || name.endsWith(".tf") || name.endsWith(".tf.json") ||
-    name.endsWith(".bicep") ||
+    name.endsWith(".bicep") || iacPath && name.endsWith(".hcl") ||
     archiveName ||
     !workspaceBuildOutput && segments.some((segment) => generatedInfrastructureDirectories.has(segment)) ||
-    segments.includes("helm") && ["chart.yaml", "chart.yml", "values.yaml", "values.yml"].includes(name) ||
+    helmFile ||
     /^(?:pulumi|cdktf|serverless)[._-].*output.*$/u.test(name) ||
     segments.some((segment) => ["deploy", "deployment"].includes(segment)) && /\.(?:zip|tar|tgz|gz|7z)$/u.test(name) ||
     /\.(?:auto\.)?tfvars(?:\.json)?$/u.test(name) || /^terraform\.tfstate(?:\.|$)/u.test(name) ||
@@ -107,8 +271,7 @@ export function repositoryStopReason(filename, content) {
     /\.ya?ml$/u.test(name) && /(?:^|\n)\s*Type\s*:\s*AWS::[A-Za-z0-9:]+/u.test(text) ||
     /\.json$/u.test(name) && /["']Type["']\s*:\s*["']AWS::[A-Za-z0-9:]+["']/u.test(text) ||
     /\.ya?ml$/u.test(name) && /(?:^|\n)\s*apiVersion\s*:\s*[^\n]+\n(?:.|\n)*?\s*kind\s*:\s*(?:Deployment|StatefulSet|DaemonSet|Service|Ingress|Secret|Job|CronJob|ConfigMap|Pod|Namespace|Role|ClusterRole)\b/u.test(text) ||
-    /\.(?:[cm]?[jt]sx?)$/u.test(name) && /(?:from\s*["'](?:aws-cdk-lib|@aws-cdk\/[^"']+|@cdktf\/[^"']+|cdktf|@pulumi\/[^"']+|pulumi)(?:\/[^"']*)?["']|(?:require|import)\s*(?:\/\*[\s\S]*?\*\/\s*)?\(\s*(?:\/\*[\s\S]*?\*\/\s*)?["'](?:aws-cdk-lib|@aws-cdk\/[^"']+|@cdktf\/[^"']+|cdktf|@pulumi\/[^"']+|pulumi)(?:\/[^"']*)?["']\s*\))/u.test(text) ||
-    /\.py$/u.test(name) && /(?:^|\n)\s*(?:(?:from|import)\s+(?:aws_cdk|cdktf|pulumi(?:_[A-Za-z0-9_]+)?)\b|(?:importlib\.import_module|__import__)\(\s*["'](?:aws_cdk|cdktf|pulumi)[^"']*["']\s*\))/u.test(text) ||
+    iacLoader ||
     name === "package.json" && (packageDeclaresInfrastructure(json) || /(?:"aws-cdk-lib"|"@aws-cdk\/|"@cdktf\/|"cdktf"|"@pulumi\/|"pulumi"|"serverless"|"npm:(?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf)|\bcdk\b[^"\n]*\bdeploy\b)/u.test(text))
   ) return "infrastructure";
   return undefined;
