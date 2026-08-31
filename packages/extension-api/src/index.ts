@@ -123,7 +123,11 @@ function assertPositiveLimit(value: number, label: string): void {
 }
 
 function ownKeys(value: object): readonly string[] {
-  return Object.keys(value).sort();
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error("extension contracts must be plain objects");
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new Error("extension contracts must not contain symbol operations");
+  return (keys as string[]).sort();
 }
 
 function assertExactKeys(value: object, allowed: readonly string[], label: string): void {
@@ -151,15 +155,15 @@ function snapshotBytes(value: unknown, seen = new Set<object>()): number {
   if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
   if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated object references");
   seen.add(value);
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value.byteLength;
-  if (Array.isArray(value)) return value.reduce((total, item) => total + snapshotBytes(item, seen), 0);
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return 16 + value.byteLength;
+  if (Array.isArray(value)) return 16 + value.reduce((total, item) => total + 8 + snapshotBytes(item, seen), 0);
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
     throw new Error("extension message snapshot must contain only plain data");
   }
   return Object.entries(value).reduce(
-    (total, [key, item]) => total + textEncoder.encode(key).byteLength + snapshotBytes(item, seen),
-    0,
+    (total, [key, item]) => total + 8 + textEncoder.encode(key).byteLength + snapshotBytes(item, seen),
+    16,
   );
 }
 
@@ -211,6 +215,8 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   #state: TrustedExtensionState = "instantiated";
   #sourceEpoch?: number;
   #lastError?: string;
+  #contextActive = true;
+  #configured = false;
   #droppedDiagnostics = 0;
   #nextDiagnostic = 0;
   readonly #diagnostics: TrustedDiagnostic[] = [];
@@ -229,6 +235,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
       apiVersion: TRUSTED_EXTENSION_API_VERSION,
       capabilities: negotiation.grantedCapabilities,
       allocateResource: (kind: TrustedResourceKind, byteLength: number) => {
+        if (!this.#contextActive) throw new Error("extension context is not active");
         if (!granted.has("bounded-resources")) throw new Error("bounded-resources capability was not granted");
         if (!RESOURCE_KINDS.has(kind)) throw new Error(`unsupported resource kind: ${String(kind)}`);
         assertPositiveLimit(byteLength, "resource byteLength");
@@ -250,6 +257,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
         return handle;
       },
       emitDiagnostic: (level: TrustedDiagnosticLevel, code: string, message: string) => {
+        if (!this.#contextActive) throw new Error("extension context is not active");
         if (!granted.has("diagnostics")) throw new Error("diagnostics capability was not granted");
         if (!DIAGNOSTIC_LEVELS.has(level)) throw new Error(`unsupported diagnostic level: ${String(level)}`);
         if (!DIAGNOSTIC_CODE.test(code)) throw new Error("diagnostic code is invalid");
@@ -272,6 +280,8 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
     } catch (error) {
       this.#disposeResources();
       throw error;
+    } finally {
+      this.#contextActive = false;
     }
   }
 
@@ -280,13 +290,16 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   configure(config: TConfig): void {
-    this.#expectState(["instantiated", "configured"], "configure");
+    this.#expectState(["instantiated", "configured", "error"], "configure");
+    this.#configured = false;
     this.#invoke(() => this.#implementation.configure(config));
+    this.#configured = true;
     this.#transition("configured");
   }
 
   attachSource(sourceEpoch: number): void {
     this.#expectState(["configured", "attached", "rendering", "suspended", "error"], "attachSource");
+    if (!this.#configured) throw new Error("extension must be successfully configured before attaching a source");
     assertEpoch(sourceEpoch);
     if (this.#sourceEpoch !== undefined && sourceEpoch <= this.#sourceEpoch) throw new Error("source epoch must advance");
     this.#disposeResources();
@@ -342,6 +355,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
     } finally {
       this.#disposeResources();
       this.#sourceEpoch = undefined;
+      this.#configured = false;
       this.#transition("disposed");
     }
   }
@@ -368,6 +382,7 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
   }
 
   #invoke(operation: () => void): void {
+    this.#contextActive = true;
     try {
       operation();
     } catch (error) {
@@ -389,6 +404,8 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
         this.#disposeResources();
       }
       throw error;
+    } finally {
+      this.#contextActive = false;
     }
   }
 

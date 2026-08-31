@@ -29,8 +29,7 @@ function validSchemaAdmission(): Record<string, unknown> {
   return {
     version: 1,
     typeName: "sensor_msgs/msg/Image",
-    byteLength: 512,
-    depth: 4,
+    schema: { fields: [{ name: "data", type: "uint8[]" }] },
     providers: [
       {
         providerId: "embedded",
@@ -123,10 +122,14 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(() => validateV1SchemaAdmission(conflict)).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-conflict" }),
     );
-    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), byteLength: V1_SCHEMA_LIMITS.maxBytes + 1 }))
+    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
-    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), depth: V1_SCHEMA_LIMITS.maxDepth + 1 }))
+    let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
+    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), schema: deep }))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
+    const oversizedProvider = validSchemaAdmission();
+    oversizedProvider.providers = [{ providerId: "x".repeat(257), providerVersion: "1", contentHash: `sha256:${"a".repeat(64)}` }];
+    expect(() => validateV1SchemaAdmission(oversizedProvider)).toThrowError(/provider/);
     expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), version: 2 }))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "unsupported-version" }));
     expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), executable: "eval()" }))

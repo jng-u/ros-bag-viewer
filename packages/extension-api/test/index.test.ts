@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import { rangeSummaryExtension } from "../../../examples/range-summary-extension/src/index.js";
 import {
@@ -85,6 +85,10 @@ describe("TrustedExtensionHost conformance", () => {
       /unsupported extension capability/,
     );
     expect(host.registeredExtensionIds()).toEqual([]);
+    const hidden = harness().definition as TrustedExtensionDefinition & Record<string, unknown>;
+    Object.defineProperty(hidden, "publish", { value: () => undefined });
+    expect(() => host.register(hidden)).toThrow(/unsupported operations/);
+    expect(() => host.register(Object.assign(Object.create({ publish() {} }), harness().definition))).toThrow(/plain objects/);
   });
 
   it("exposes only the frozen bounded host surface and validates lifecycle operations exactly", () => {
@@ -178,7 +182,7 @@ describe("TrustedExtensionHost conformance", () => {
 
   it("delivers bounded source-detached snapshots rather than retaining caller-owned message values", () => {
     let received: { readonly nested: { value: number } } | undefined;
-    const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 32 } });
+    const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 128 } });
     host.register({
       apiVersion: 1,
       id: "snapshot-probe",
@@ -199,7 +203,10 @@ describe("TrustedExtensionHost conformance", () => {
     instance.attachSource(2);
     expect(received).toEqual({ nested: { value: 1 } });
     expect(() =>
-      instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: { oversized: "x".repeat(64) } }),
+      instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: { oversized: "x".repeat(256) } }),
+    ).toThrow(/snapshot byte budget exceeded/);
+    expect(() =>
+      instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: Array.from({ length: 100 }, () => ({})) }),
     ).toThrow(/snapshot byte budget exceeded/);
   });
 
@@ -298,6 +305,25 @@ describe("TrustedExtensionHost conformance", () => {
       lastError: "configure failed; handleError failed: error callback failed",
     });
   });
+
+  it("revokes retained context access and requires a successful configuration", () => {
+    const value = harness(["bounded-resources"]);
+    const host = new TrustedExtensionHost();
+    host.register(value.definition);
+    const instance = host.instantiate("harness", "revoked-context");
+    expect(() => value.context?.allocateResource("text-buffer", 1)).toThrow(/not active/);
+    instance.dispose();
+    expect(() => value.context?.allocateResource("text-buffer", 1)).toThrow(/not active/);
+
+    const failing = new TrustedExtensionHost();
+    failing.register({
+      apiVersion: 1, id: "configure-failure", requiredCapabilities: [],
+      create: () => lifecycle({ configure: () => { throw new Error("bad config"); } }),
+    });
+    const failed = failing.instantiate("configure-failure", "failed-config");
+    expect(() => failed.configure({})).toThrow(/bad config/);
+    expect(() => failed.attachSource(1)).toThrow(/successfully configured/);
+  });
 });
 
 describe("out-of-core range summary example", () => {
@@ -329,6 +355,15 @@ describe("out-of-core range summary example", () => {
     expect(packageJson.dependencies).toEqual({ "@ros-web-viewer/extension-api": "workspace:*" });
     expect(source).not.toMatch(/@ros-web-viewer\/(?:displays-core|render-core|worker-runtime|source-|hosted-core|protocol)/);
     expect(source).not.toMatch(/\b(?:eval|Function)\s*\(|\bimport\s*\(/);
+    const examples = new URL("../../../examples/", import.meta.url);
+    for (const directory of readdirSync(examples, { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
+      const manifest = JSON.parse(readFileSync(new URL(`${directory.name}/package.json`, examples), "utf8")) as {
+        private?: boolean;
+        dependencies?: Record<string, string>;
+      };
+      expect(manifest.private, directory.name).toBe(true);
+      expect(Object.keys(manifest.dependencies ?? {}), directory.name).toEqual(["@ros-web-viewer/extension-api"]);
+    }
   });
 });
 

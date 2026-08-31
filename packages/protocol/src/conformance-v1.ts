@@ -82,6 +82,7 @@ export const V1_SCHEMA_LIMITS = Object.freeze({
   maxDepth: 64,
   maxProviders: 8,
   maxTypeNameBytes: 256,
+  maxProviderMetadataBytes: 256,
 } as const);
 
 export type V1ConformanceViolationCode =
@@ -146,8 +147,7 @@ export interface V1SchemaProviderCandidate {
 export interface V1SchemaAdmission {
   readonly version: 1;
   readonly typeName: string;
-  readonly byteLength: number;
-  readonly depth: number;
+  readonly schema: unknown;
   readonly providers: readonly V1SchemaProviderCandidate[];
 }
 
@@ -270,7 +270,7 @@ export function freezeV1Conformance(value: unknown): FrozenV1Conformance {
 }
 
 export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
-  assertExactKeys(value, ["version", "typeName", "byteLength", "depth", "providers"], "schema admission");
+  assertExactKeys(value, ["version", "typeName", "schema", "providers"], "schema admission");
   if (value.version !== 1) throw new V1ConformanceViolation("unsupported-version", "only schema admission version 1 is supported");
   if (
     typeof value.typeName !== "string" ||
@@ -279,10 +279,17 @@ export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
   ) {
     throw new V1ConformanceViolation("invalid-fixture", "schema type name is invalid or oversized");
   }
-  if (!Number.isSafeInteger(value.byteLength) || (value.byteLength as number) < 0 || (value.byteLength as number) > V1_SCHEMA_LIMITS.maxBytes) {
+  let encoded: string;
+  try { encoded = JSON.stringify(value.schema); } catch { throw new V1ConformanceViolation("invalid-fixture", "schema content is not serializable"); }
+  if (typeof encoded !== "string" || encoder.encode(encoded).byteLength > V1_SCHEMA_LIMITS.maxBytes) {
     throw new V1ConformanceViolation("schema-oversize", "schema exceeds the frozen v1 byte limit");
   }
-  if (!Number.isSafeInteger(value.depth) || (value.depth as number) < 0 || (value.depth as number) > V1_SCHEMA_LIMITS.maxDepth) {
+  const depth = (item: unknown, seen = new Set<object>()): number => {
+    if (typeof item !== "object" || item === null) return 0;
+    if (seen.has(item)) throw new V1ConformanceViolation("invalid-fixture", "schema content contains a cycle");
+    seen.add(item); return 1 + Math.max(0, ...Object.values(item).map((nested) => depth(nested, seen)));
+  };
+  if (depth(value.schema) > V1_SCHEMA_LIMITS.maxDepth) {
     throw new V1ConformanceViolation("schema-depth", "schema exceeds the frozen v1 depth limit");
   }
   if (!Array.isArray(value.providers) || value.providers.length === 0 || value.providers.length > V1_SCHEMA_LIMITS.maxProviders) {
@@ -295,6 +302,8 @@ export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
     if (
       typeof provider.providerId !== "string" || provider.providerId.length === 0 ||
       typeof provider.providerVersion !== "string" || provider.providerVersion.length === 0 ||
+      encoder.encode(provider.providerId as string).byteLength > V1_SCHEMA_LIMITS.maxProviderMetadataBytes ||
+      encoder.encode(provider.providerVersion as string).byteLength > V1_SCHEMA_LIMITS.maxProviderMetadataBytes ||
       typeof provider.contentHash !== "string" || !digestPattern.test(provider.contentHash)
     ) {
       throw new V1ConformanceViolation("invalid-fixture", `schema provider[${index}] is invalid`);
