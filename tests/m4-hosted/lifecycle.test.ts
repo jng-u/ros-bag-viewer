@@ -6,9 +6,16 @@ import { describe, expect, it } from "vitest";
 import {
   HostedAccessError,
   HostedSharingService,
+  serializeGrantedRangeRead,
   serializeHostedManifestPayload,
+  serializeHostedSessionInput,
+  serializeRangeGrantRequest,
   verifyHostedManifest,
+  type CreateHostedSessionInput,
+  type GrantedRangeRead,
+  type HostedSessionDescriptor,
   type IssuedRangeGrant,
+  type RangeGrantRequest,
   type SignedHostedManifest,
 } from "../../packages/hosted-core/src/index.js";
 import { McapSourceSession } from "../../packages/source-mcap/src/index.js";
@@ -106,6 +113,30 @@ function capability(url: string): string {
   return value;
 }
 
+function createHostedSession(
+  service: HostedSharingService,
+  input: CreateHostedSessionInput,
+): Promise<HostedSessionDescriptor> {
+  return service.createHostedSessionSerialized(serializeHostedSessionInput(input));
+}
+
+function issueRangeGrant(
+  service: HostedSharingService,
+  sessionCapability: string,
+  request: RangeGrantRequest,
+): IssuedRangeGrant {
+  return service.issueRangeGrantSerialized(sessionCapability, serializeRangeGrantRequest(request));
+}
+
+async function readGrantedRange(
+  service: HostedSharingService,
+  request: GrantedRangeRead,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
+  const bytes = await service.readGrantedRangeSerialized(serializeGrantedRangeRead(request), signal);
+  return Uint8Array.from(bytes);
+}
+
 function sourceEnvelope(manifest: SignedHostedManifest): SignedManifestEnvelope {
   return Object.freeze({
     payload: serializeHostedManifestPayload(JSON.stringify(manifest.payload)),
@@ -178,7 +209,7 @@ class CoreRangeTransport implements HostedRangeTransport {
     const entry = this.#manifest.payload.entries.find((candidate) => candidate.objectId === scope.objectId);
     if (!entry) throw new HostedAccessError();
     const issuedAtMs = this.#now();
-    const grant = this.#service.issueRangeGrant(capabilityValue, {
+    const grant = issueRangeGrant(this.#service, capabilityValue, {
       sessionId: scope.sessionId,
       entryId: entry.entryId,
       objectId: scope.objectId,
@@ -192,7 +223,7 @@ class CoreRangeTransport implements HostedRangeTransport {
   async fetchRange(grant: HostedRangeGrant, signal: AbortSignal): Promise<Uint8Array> {
     const entry = this.#manifest.payload.entries.find((candidate) => candidate.objectId === grant.objectId);
     if (!entry) throw new HostedAccessError();
-    return this.#service.readGrantedRange({
+    return readGrantedRange(this.#service, {
       sessionCapability: this.#capability,
       grantToken: grant.token,
       sessionId: grant.sessionId,
@@ -209,7 +240,7 @@ interface HostedFixture {
   readonly service: HostedSharingService;
   readonly clock: MutableClock;
   readonly bytes: Uint8Array;
-  readonly descriptor: Awaited<ReturnType<HostedSharingService["createHostedSession"]>>;
+  readonly descriptor: HostedSessionDescriptor;
   readonly capability: string;
   readonly manifest: SignedHostedManifest;
   readonly source: HostedSourceSession;
@@ -235,7 +266,7 @@ function serviceFixture(clock: MutableClock): HostedSharingService {
 
 async function hostedFixture(bytes: Uint8Array, clock: MutableClock = { value: 100_000 }): Promise<HostedFixture> {
   const service = serviceFixture(clock);
-  const descriptor = await service.createHostedSession({
+  const descriptor = await createHostedSession(service, {
     entries: [{ entryId: "recording", relativePath: "recordings/fixture.mcap", bytes }],
   });
   const sessionCapability = capability(descriptor.capabilityUrl);
@@ -413,21 +444,21 @@ describe("M4 hosted cross-boundary proof", () => {
   it("denies enumeration and cross-session/object/version/range access with constant-shape errors", async () => {
     const first = await hostedFixture(Uint8Array.from({ length: 256 }, (_, index) => index));
     const otherTenant = serviceFixture(first.clock);
-    const secondDescriptor = await first.service.createHostedSession({
+    const secondDescriptor = await createHostedSession(first.service, {
       entries: [{ entryId: "other", relativePath: "other.mcap", bytes: Uint8Array.of(7, 8, 9, 10) }],
     });
     const secondCapability = capability(secondDescriptor.capabilityUrl);
     const second = first.service.openHostedSession(secondCapability);
     const scope = rangeScope(first, 0n, 32n);
-    const validGrant = first.service.issueRangeGrant(first.capability, scope);
+    const validGrant = issueRangeGrant(first.service, first.capability, scope);
     const denied = [
       () => first.service.openHostedSession("A".repeat(43)),
       () => otherTenant.openHostedSession(first.capability),
-      () => first.service.issueRangeGrant(first.capability, { ...scope, entryId: "B".repeat(43) }),
-      () => first.service.issueRangeGrant(first.capability, { ...scope, sessionId: second.payload.sessionId }),
-      () => first.service.issueRangeGrant(first.capability, { ...scope, objectId: second.payload.entries[0]!.objectId }),
-      () => first.service.issueRangeGrant(first.capability, { ...scope, immutableVersion: `sha256:${"0".repeat(64)}` }),
-      () => first.service.issueRangeGrant(first.capability, { ...scope, length: 65n * 1_024n }),
+      () => issueRangeGrant(first.service, first.capability, { ...scope, entryId: "B".repeat(43) }),
+      () => issueRangeGrant(first.service, first.capability, { ...scope, sessionId: second.payload.sessionId }),
+      () => issueRangeGrant(first.service, first.capability, { ...scope, objectId: second.payload.entries[0]!.objectId }),
+      () => issueRangeGrant(first.service, first.capability, { ...scope, immutableVersion: `sha256:${"0".repeat(64)}` }),
+      () => issueRangeGrant(first.service, first.capability, { ...scope, length: 65n * 1_024n }),
     ];
     for (const action of denied) {
       expect(action).toThrowError(expect.objectContaining({ code: "access-denied", message: "hosted access denied" }));
@@ -443,7 +474,7 @@ describe("M4 hosted cross-boundary proof", () => {
       { ...baseRead, length: 31n },
       { ...baseRead, grantToken: "C".repeat(43) },
     ]) {
-      await expect(first.service.readGrantedRange(changed, new AbortController().signal)).rejects.toMatchObject({
+      await expect(readGrantedRange(first.service, changed, new AbortController().signal)).rejects.toMatchObject({
         code: "access-denied",
         message: "hosted access denied",
       });
@@ -455,21 +486,21 @@ describe("M4 hosted cross-boundary proof", () => {
   it("enforces immediate new-grant revocation, residual expiry, deletion, and deterministic retention", async () => {
     const fixture = await hostedFixture(Uint8Array.from({ length: 256 }, (_, index) => index), { value: 200_000 });
     const scope = rangeScope(fixture, 0n, 32n);
-    const residual = fixture.service.issueRangeGrant(fixture.capability, scope);
+    const residual = issueRangeGrant(fixture.service, fixture.capability, scope);
     fixture.service.revokeSession(fixture.capability);
-    expect(() => fixture.service.issueRangeGrant(fixture.capability, scope)).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(fixture.service, fixture.capability, scope)).toThrow(HostedAccessError);
     fixture.clock.value = residual.expiresAtMs - 1;
-    await expect(fixture.service.readGrantedRange(grantedRead(fixture, residual), new AbortController().signal)).resolves.toEqual(
+    await expect(readGrantedRange(fixture.service, grantedRead(fixture, residual), new AbortController().signal)).resolves.toEqual(
       fixture.bytes.subarray(0, 32),
     );
     fixture.clock.value = residual.expiresAtMs;
-    await expect(fixture.service.readGrantedRange(grantedRead(fixture, residual), new AbortController().signal)).rejects.toBeInstanceOf(
+    await expect(readGrantedRange(fixture.service, grantedRead(fixture, residual), new AbortController().signal)).rejects.toBeInstanceOf(
       HostedAccessError,
     );
     expect(residual.expiresAtMs - 200_000).toBe(fixture.descriptor.residualGrantLifetimeMs);
 
     fixture.clock.value += 1;
-    const deleted = await fixture.service.createHostedSession({
+    const deleted = await createHostedSession(fixture.service, {
       entries: [{ entryId: "deleted", relativePath: "deleted.bag", bytes: Uint8Array.of(1, 2, 3, 4) }],
     });
     const deletedCapability = capability(deleted.capabilityUrl);
@@ -482,16 +513,16 @@ describe("M4 hosted cross-boundary proof", () => {
       offset: 0n,
       length: 4n,
     } as const;
-    const deletedGrant = fixture.service.issueRangeGrant(deletedCapability, deletedScope);
+    const deletedGrant = issueRangeGrant(fixture.service, deletedCapability, deletedScope);
     await fixture.service.deleteSession(deletedCapability);
     expect(() => fixture.service.openHostedSession(deletedCapability)).toThrow(HostedAccessError);
-    await expect(fixture.service.readGrantedRange({
+    await expect(readGrantedRange(fixture.service, {
       ...deletedGrant,
       sessionCapability: deletedCapability,
       grantToken: deletedGrant.token,
     }, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
 
-    const retained = await fixture.service.createHostedSession({
+    const retained = await createHostedSession(fixture.service, {
       entries: [{ entryId: "retained", relativePath: "retained.bag", bytes: Uint8Array.of(9, 8, 7) }],
       sessionTtlMs: 100,
       retentionMs: 200,
@@ -512,8 +543,8 @@ describe("M4 hosted cross-boundary proof", () => {
     expect(() => verifyHostedManifest(JSON.stringify(fixture.manifest), "AA")).toThrow(/trusted/);
 
     const scope = rangeScope(fixture, 0n, 4n);
-    const grant = fixture.service.issueRangeGrant(fixture.capability, scope);
-    await fixture.service.readGrantedRange(grantedRead(fixture, grant), new AbortController().signal);
+    const grant = issueRangeGrant(fixture.service, fixture.capability, scope);
+    await readGrantedRange(fixture.service, grantedRead(fixture, grant), new AbortController().signal);
     expect(() => fixture.service.openHostedSession("D".repeat(43))).toThrow(HostedAccessError);
     const telemetry = fixture.service.telemetry();
     const audit = fixture.service.auditEvents();
