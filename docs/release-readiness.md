@@ -53,7 +53,7 @@ corepack pnpm exec vitest run --config benchmarks/scenarios/vitest.config.ts
 corepack pnpm audit:dependencies
 corepack pnpm report:licenses
 corepack pnpm sbom
-node scripts/toolchain/release-readiness-gate.mjs --check-reproducibility --check-clean-tree
+corepack pnpm release:readiness:full
 ```
 
-The final command checks the benchmark artifact, generates the license inventory and SBOM twice to prove deterministic bytes, and fails on a dirty tree. Run this sequence on the exact clean commit; missing, skipped, dirty, or unavailable evidence blocks release.
+The final command checks the benchmark artifact, generates the license inventory and SBOM twice to prove deterministic bytes, and fails on a dirty tree. Run this sequence on the exact clean commit; missing, skipped, dirty, or unavailable evidence blocks release. `corepack pnpm check:m5` is the focused extension, frozen-protocol, and release-readiness test gate.
