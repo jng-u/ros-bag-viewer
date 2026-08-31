@@ -123,6 +123,8 @@ export const V1_SCHEMA_LIMITS = Object.freeze({
   maxTypeNameBytes: 256,
   maxProviderMetadataBytes: 256,
 } as const);
+export const V1_CONFORMANCE_FIXTURE_MAX_BYTES = 256 * 1024;
+export const V1_CONFORMANCE_TEST_NAME_MAX_BYTES = 512;
 
 export type V1ConformanceViolationCode =
   | "invalid-fixture"
@@ -259,6 +261,9 @@ function assertConformanceCases(
     if (typeof candidate.testName !== "string" || candidate.testName.length === 0) {
       throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence test name is invalid`);
     }
+    if (encoder.encode(candidate.testName).byteLength > V1_CONFORMANCE_TEST_NAME_MAX_BYTES) {
+      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] evidence test name is oversized`);
+    }
     const expectedDigest = sha256(canonicalJson([
       candidate.id,
       candidate.result,
@@ -272,12 +277,17 @@ function assertConformanceCases(
   });
 }
 
-function canonicalPlainData(value: unknown, label: string, maxBytes?: number): unknown {
+function canonicalPlainData(
+  value: unknown,
+  label: string,
+  maxBytes?: number,
+  byteLimitCode: "invalid-fixture" | "schema-oversize" = "schema-oversize",
+): unknown {
   try {
     return canonicalizePlainData(value, { label, maxDepth: V1_SCHEMA_LIMITS.maxDepth, maxBytes });
   } catch (error) {
     if (!(error instanceof CanonicalDataError)) throw error;
-    const code = error.code === "depth-limit" ? "schema-depth" : error.code === "byte-limit" ? "schema-oversize" : "invalid-fixture";
+    const code = error.code === "depth-limit" ? "schema-depth" : error.code === "byte-limit" ? byteLimitCode : "invalid-fixture";
     throw new V1ConformanceViolation(code, error.message);
   }
 }
@@ -336,11 +346,21 @@ function parseCanonicalV1ConformanceFixture(value: unknown): V1ConformanceFixtur
 }
 
 export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture {
-  return parseCanonicalV1ConformanceFixture(canonicalPlainData(value, "v1 conformance fixture"));
+  return parseCanonicalV1ConformanceFixture(canonicalPlainData(
+    value,
+    "v1 conformance fixture",
+    V1_CONFORMANCE_FIXTURE_MAX_BYTES,
+    "invalid-fixture",
+  ));
 }
 
 export function freezeV1Conformance(value: unknown): FrozenV1Conformance {
-  const canonical = canonicalPlainData(value, "v1 conformance fixture");
+  const canonical = canonicalPlainData(
+    value,
+    "v1 conformance fixture",
+    V1_CONFORMANCE_FIXTURE_MAX_BYTES,
+    "invalid-fixture",
+  );
   const fixture = parseCanonicalV1ConformanceFixture(canonical);
   const frozen = { ...fixture, frozen: true } as FrozenV1Conformance;
   return Object.freeze(frozen);

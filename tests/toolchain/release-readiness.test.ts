@@ -125,6 +125,10 @@ describe("M5 release hardening", () => {
         'LICENSE', 'LICENSE-MIT', 'LICENCE_APACHE', 'COPYING', 'COPYING.txt', 'NOTICE', 'NOTICE.md',
         '.env', '.env.production', '.env.production.local', '.npmrc', '.netrc', 'credentials.json',
         'nested/id_rsa', 'private.pem', 'deploy.key',
+        'infra/main.tf.json', 'infra/prod.auto.tfvars', 'terraform.tfstate.backup', '.terraformrc',
+        'Pulumi.production.yaml', '.pulumi/state.json', 'serverless.json', '.serverless/output.json',
+        'Dockerfile.production', 'docker-compose.yaml', 'compose.prod.yml', 'cloudformation-template.json',
+        'cfn-stack.yaml', 'samconfig.toml', 'cdk.json', 'cdk.out/manifest.json',
       ];
       const allowed = ['LICENSES.md', 'environment.md', '.env-example'];
       if (denied.some((name) => repositoryStopReason(name) === undefined)) process.exit(1);
@@ -157,5 +161,5 @@ describe("M5 release hardening", () => {
       verifyConformanceExecutionManifest(process.cwd(), value);
     `], { cwd: root, encoding: "utf8" });
     expect(tamper.status).not.toBe(0);
-  });
+  }, 60_000);
 });

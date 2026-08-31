@@ -12,6 +12,7 @@ import {
   V1_FROZEN_BROWSER_OPERATIONS,
   V1_FROZEN_EDGE_OPERATIONS,
   V1_FROZEN_EXTENSION_OPERATIONS,
+  V1_CONFORMANCE_TEST_NAME_MAX_BYTES,
   V1_SCHEMA_LIMITS,
   freezeV1Conformance,
   parseBrowserFrame,
@@ -157,6 +158,9 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(() => freezeV1Conformance(skipped)).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "incomplete-conformance" }),
     );
+    const oversizedTestName = cloneFixture();
+    (oversizedTestName.sources as Array<Record<string, unknown>>)[0]!.testName = "x".repeat(V1_CONFORMANCE_TEST_NAME_MAX_BYTES + 1);
+    expect(() => parseV1ConformanceFixture(oversizedTestName)).toThrow(/test name is oversized/);
   });
 
   it("keeps write/service/action/parameter/raw command widening denied by the executable parser", () => {

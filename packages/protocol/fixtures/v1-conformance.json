@@ -118,9 +118,9 @@
       "id": "header-time",
       "result": "pass",
       "evidence": "packages/timeline/test/index.test.ts",
-      "resultDigest": "sha256:8015aa9e65119df72a84c7de21223da21bca6fbe5c87ae7112fe58e879d3a677",
+      "resultDigest": "sha256:d97209194539898e4ba91a3f3925da00537e01a58f86e5a86e2e0e1c9f5e2e56",
       "evidenceDigest": "sha256:b7bdebf668235ddb81a16284536d5c96adf37b5a679ab07497f10a90d8781e02",
-      "testName": "timeline normalization uses diagnosed fallback rather than silently substituting timestamps"
+      "testName": "bounded live source normalizes schema/time envelopes and drains them in deterministic order"
     },
     {
       "id": "receipt-time",
@@ -176,72 +176,72 @@
       "id": "register",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:50c1bb4ed6570a2f9e507ea3c416c7eb7a8d8214687539f271654fbfde906483",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:835fd8a25bc2dee12740debd20ec5c679f1bca6f6d4f5f4906602401340de316",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration"
     },
     {
       "id": "instantiate",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:05de751e183f660ed1e6edca6ddefd36b3e0cb5cb110e5a8cb9ae79bea7b2d61",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:584c01a9735c0fd0cd0df990ff78647cd55ec07d96b9f567caeec343539b524b",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly"
     },
     {
       "id": "configure",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:916298a8e982c43b745e54123afb5b3cc86476a3be03baa01ba51aeeaea91eb2",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:e34763bb2816951f3c6b0bc952897c4bbcd17f8ccb286d355c0325355a82565f",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration"
     },
     {
       "id": "attach",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:a8d35d22107e13bff90a9bf08122185e831e0fbef892fdfb32454259014de8a9",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:ef41ee0c75a5746ba75e65daace7ad4afc7561e8722b5ed792824dbffa77d6f6",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance"
     },
     {
       "id": "update",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:ea177a28ecde68a953d94b494ecbac3f84079639820c580034b860ff7520f7d4",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:0e7515e97c6957bcf1bd9c3e60942affea698f1c9d29729daad1456778ad7da9",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once"
     },
     {
       "id": "render",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:74c401a016b4b814cef79b86e923b3a44b01ca85ef0aa8f1ab501fb4bd725b51",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:0822fe35b0cdb60b398a7a4530c88cbf1f0796aa85577f2b0627a5f5794ae652",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "out-of-core range summary example runs through the v1 host and releases its bounded handle"
     },
     {
       "id": "suspend",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:7e4fd701db5e49d2be11cfe525629a53fb19ca82c64d6e33f96ffc01b65019ea",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:049ceec6adcf4ded84ea46d4f8105f277bda50e66bcc18deff02ee4396434797",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance bounds resource handles and diagnostics and cleans up after callback failures"
     },
     {
       "id": "error",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:5fa1ae0bdcbcf728c6c3740b9bed7e5112a4eef9b1c4f153692166cb6bdda5d4",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:1f8596deb58350aac0f0ae121aa439216a6619402bc3f3002801b81bf1d6c21b",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback"
     },
     {
       "id": "dispose",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:3ce55198d97c1d0d2e9d6028fe987e65695826d77ec44ea2070ecb5d62f9ebaf",
-      "evidenceDigest": "sha256:11b5bbaefb3de7c93f6e706dec3f3020979248b4e76454d6322e36a611da26e2",
+      "resultDigest": "sha256:938501e514c4f3e13d180a70dc47891f530e66f51426062a35287b319d46c269",
+      "evidenceDigest": "sha256:0a74c8190887af511442d4018415491010e9a8a2a3ca14accc56fd5ba8930433",
       "testName": "out-of-core range summary example runs through the v1 host and releases its bounded handle"
     }
   ],
@@ -250,80 +250,80 @@
       "id": "unknown-version",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:82cf8e39af850bdf7ecc6b804d4e581d6ce070406a5193122e9e4e4c5f12c20e",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:058b7887a2cf3fa609665380975404c29945e0949bf1726fd5fadba92e9e664c",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "extra-key",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:750d4ac67a38a3bee610a0127b249e13eeb1aeeab9070e20d78059252e8c2a73",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:6f265bda69a346dbdc4d09bedb2aac2fa7e8d429890db350f68f97351d690d01",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "operation-widening",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:32514f27d04e719d254066dbaf54f721ba7809ae7bf5443be57d4e7b31604e1f",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:24232730a87e146f666e973f7ba483b007525288dda2c3071565374aabbadd7c",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "capability-escalation",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:b5b11af500f13328a6b1074e2dde8b88c370c65f375c66b56349b9956fbea818",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:3307e526872cce486e3ece9de1d6c057110b0a918ab76eb155be12cdbc55a76c",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects unknown versions, extra keys, incomplete results, and operation or capability widening"
     },
     {
       "id": "schema-conflict",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:72e8535ec0f3d6e1b09e0fb959746de20f1c961ee8aa7b028cc37a98ae76779b",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:4163ba6a5ca72d22077de39f012e91096c7388708dc4f31568e65a719352c543",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "schema-oversize",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:3d4189d2f6f9d6351908401c6b480c73676b6bc7c9193ce1fdc2efe21e0a1503",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:413c21f3b938c715227ea84b9d287921d7c4cb7bf93415067285a08e7b731403",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "schema-depth",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:193f6deda3f4ef909645067193e010da197ccf91a0704e7f35a11d22a38b507b",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:cd8b6a3aa629bab1efcc9b76474e4937e771084cafb805b1ff0ce22a0988f6cb",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions"
     },
     {
       "id": "lifetime-use-after-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:b896d99cee5a660201409601d87d17d45ed0c9d5afec6edc712c88b984491f9e",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:f5c17819a675140b6f19ee5455cea754f4758787fd15c8452e33e059fecde028",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     },
     {
       "id": "lifetime-double-release",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:4f871981e7f9d2f1b2a59de4300e2675d8fa059f3fb20e4b76889011ad4e81d4",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:8a496e6cf94b3945ba022e4c3fb5a8fd4268cb5d2b1c919787d3e9f8cc1b7d7e",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     },
     {
       "id": "lifetime-stale-epoch",
       "result": "rejected",
       "evidence": "packages/protocol/test/conformance-v1.test.ts",
-      "resultDigest": "sha256:cfd5a5b1850e2016b3577b09da58573ef8ed27683c2be2f62fa4754241d521e1",
-      "evidenceDigest": "sha256:87164614b45b032277e81012987663b2dcaac0baaeb52cbd51abbbb2f8860ceb",
+      "resultDigest": "sha256:ef18369eaca36a2cb7fc479f12e3fd7c55cc6fc731fd8949980fa293e4779691",
+      "evidenceDigest": "sha256:45c1618622d586faf163767d696a7bc3bd19072e709c75d610fa3f77548a945f",
       "testName": "protocol/schema v1 conformance freeze rejects payload lifetime use-after-release, double release, and stale epochs"
     }
   ]

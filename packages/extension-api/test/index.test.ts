@@ -430,6 +430,25 @@ describe("TrustedExtensionHost conformance", () => {
     boundedHost.register(harness().definition);
     const bounded = boundedHost.instantiate("harness", "envelope-budget"); bounded.configure({}); bounded.attachSource(1);
     expect(() => bounded.update({ sourceEpoch: 1, topic: `/${"x".repeat(256)}`, schemaName: "X", value: null })).toThrow(/byte budget/);
+
+    const hugeArray: unknown[] = [];
+    hugeArray.length = 100_001;
+    const ownKeys = vi.fn(Reflect.ownKeys);
+    const hostileArray = new Proxy(hugeArray, { ownKeys });
+    expect(() => bounded.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: hostileArray })).toThrow(/item limit|byte budget/);
+    expect(ownKeys).not.toHaveBeenCalled();
+    expect(() => bounded.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: 1n })).toThrow(/BigInt/);
+
+    const capabilityArray: TrustedExtensionCapability[] = [];
+    capabilityArray.length = 100_001;
+    const capabilityOwnKeys = vi.fn(Reflect.ownKeys);
+    const hostileCapabilities = new Proxy(capabilityArray, { ownKeys: capabilityOwnKeys }) as readonly TrustedExtensionCapability[];
+    expect(() => definitionHost.register({
+      ...harness().definition,
+      id: "hostile-capabilities",
+      requiredCapabilities: hostileCapabilities,
+    })).toThrow(/item limit/);
+    expect(capabilityOwnKeys).not.toHaveBeenCalled();
   });
 });
 
@@ -475,6 +494,13 @@ describe("out-of-core range summary example", () => {
       'require/*comment*/("node:fs");',
       'eval/*comment*/("1");',
       'new Function/*comment*/("return 1");',
+      'import "../../packages/hosted-core/src/index.js";',
+      'export * from "./untracked-local-file.js";',
+      '(0, eval)("1");',
+      'const evaluator = eval;',
+      'globalThis["fetch"]("/");',
+      'Reflect.get(globalThis, "Function");',
+      '[]["filter"]["constructor"]("return 1")();',
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",

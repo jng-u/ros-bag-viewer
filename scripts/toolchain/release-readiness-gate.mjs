@@ -114,9 +114,10 @@ function validateEvidence(evidence) {
 
 function validateRepositoryStops() {
   for (const path of listFiles(root)) {
+    const repositoryPath = relative(root, path);
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-    const stopReason = repositoryStopReason(name);
-    if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${relative(root, path)}`);
+    const stopReason = repositoryStopReason(repositoryPath);
+    if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
     const packageJson = JSON.parse(readFileSync(path, "utf8"));
     if (packageJson.private !== true) fail(`${relative(root, path)} must remain private`);

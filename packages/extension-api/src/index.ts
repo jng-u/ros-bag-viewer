@@ -143,14 +143,22 @@ function captureExactObject(value: unknown, allowed: readonly string[], label: s
 
 function captureExactArray<T>(value: unknown, label: string, maxLength = 100_000): readonly T[] {
   if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new Error(`${label} must be an ordinary array`);
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  const length = lengthDescriptor?.value;
+  if (!lengthDescriptor || "get" in lengthDescriptor || !Number.isSafeInteger(length) || length < 0 || length > maxLength) {
+    throw new Error(`${label} exceeds the item limit`);
+  }
   const keys = Reflect.ownKeys(value);
   if (keys.some((key) => typeof key !== "string")) throw new Error(`${label} must not contain symbol fields`);
-  const length = value.length;
-  if (length > maxLength) throw new Error(`${label} exceeds the item limit`);
-  const expected = ["length", ...Array.from({ length }, (_, index) => String(index))].sort();
-  const actual = (keys as string[]).sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+  if (keys.length !== length + 1 || !(keys as string[]).includes("length")) {
     throw new Error(`${label} must be dense and unaugmented`);
+  }
+  for (const key of keys as string[]) {
+    if (key === "length") continue;
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== key) {
+      throw new Error(`${label} must be dense and unaugmented`);
+    }
   }
   const snapshot: T[] = [];
   for (let index = 0; index < length; index += 1) {
@@ -169,7 +177,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const textEncoder = new TextEncoder();
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) { bytes += 4; index += 1; } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 interface SnapshotBudget {
   bytes: number;
@@ -178,8 +198,10 @@ interface SnapshotBudget {
 }
 
 function chargeSnapshot(budget: SnapshotBudget, bytes: number): void {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > budget.maxBytes - budget.bytes) {
+    throw new Error("extension message snapshot byte budget exceeded");
+  }
   budget.bytes += bytes;
-  if (budget.bytes > budget.maxBytes) throw new Error("extension message snapshot byte budget exceeded");
 }
 
 function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, seen = new Set<object>()): unknown {
@@ -187,8 +209,9 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
   if (depth > 64) throw new Error("extension message snapshot depth limit exceeded");
   if (value === null || value === undefined) return value;
   if (typeof value === "boolean") { chargeSnapshot(budget, 1); return value; }
-  if (typeof value === "number" || typeof value === "bigint") { chargeSnapshot(budget, 8); return value; }
-  if (typeof value === "string") { chargeSnapshot(budget, textEncoder.encode(value).byteLength); return value; }
+  if (typeof value === "number") { chargeSnapshot(budget, 8); return value; }
+  if (typeof value === "bigint") throw new Error("extension message snapshot must not contain BigInt values");
+  if (typeof value === "string") { chargeSnapshot(budget, utf8ByteLength(value)); return value; }
   if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
   if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated references");
   seen.add(value);
@@ -207,8 +230,13 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
     return structuredClone(value);
   }
   if (Array.isArray(value)) {
-    const items = captureExactArray<unknown>(value, "extension message array");
-    chargeSnapshot(budget, 16 + items.length * 8);
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    const length = lengthDescriptor?.value;
+    if (!lengthDescriptor || "get" in lengthDescriptor || !Number.isSafeInteger(length) || length < 0 || length > 100_000) {
+      throw new Error("extension message array exceeds the item limit");
+    }
+    chargeSnapshot(budget, 16 + length * 8);
+    const items = captureExactArray<unknown>(value, "extension message array", length);
     return items.map((item) => canonicalSnapshot(item, budget, depth + 1, seen));
   }
   const prototype = Object.getPrototypeOf(value);
@@ -221,7 +249,7 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
     if (key === "__proto__") throw new Error("extension message snapshot must not contain __proto__ fields");
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
     if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("extension message snapshot must contain plain enumerable data");
-    chargeSnapshot(budget, 8 + textEncoder.encode(key).byteLength);
+    chargeSnapshot(budget, 8 + utf8ByteLength(key));
     Object.defineProperty(output, key, {
       value: canonicalSnapshot(descriptor.value, budget, depth + 1, seen),
       enumerable: true,
