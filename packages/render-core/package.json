@@ -1,0 +1,9 @@
+{
+  "name": "@ros-web-viewer/render-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test/index.test.ts"
+  }
+}
