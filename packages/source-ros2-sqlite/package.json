@@ -1,0 +1,11 @@
+{
+  "name": "@ros-web-viewer/source-ros2-sqlite",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run test"
+  }
+}
