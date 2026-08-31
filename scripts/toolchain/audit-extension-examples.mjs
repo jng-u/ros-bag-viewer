@@ -86,9 +86,16 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const directReturns = (callback) => {
     if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return undefined;
     if (!ts.isBlock(callback.body)) return [callback.body];
-    const out = [];
-    for (const statement of callback.body.statements) if (ts.isReturnStatement(statement)) out.push(statement.expression);
-    return out;
+    const statements = [...callback.body.statements];
+    const returns = statements.filter((statement) => ts.isReturnStatement(statement));
+    if (returns.length !== 1) return [];
+    const index = statements.indexOf(returns[0]);
+    for (const statement of statements.slice(0, index)) {
+      if (!ts.isVariableStatement(statement) && !ts.isFunctionDeclaration(statement) && !ts.isClassDeclaration(statement)) return [];
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((d) => d.initializer && ts.isCallExpression(d.initializer) && isBuilderCall(d.initializer, "defineTrustedLifecycle"))) return [];
+    }
+    if (statements.slice(index + 1).length > 0) return [];
+    return [returns[0].expression];
   };
   const isInTypePosition = (node) => { let p = node.parent; while (p) { if (ts.isTypeNode(p)) return true; if (ts.isExpression(p) || ts.isStatement(p) || ts.isSourceFile(p)) return false; p = p.parent; } return false; };
   const declarationName = (node) => {
@@ -142,7 +149,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
     const exported = node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword) ?? false;
     if (!filename.endsWith(".d.ts") && exported) {
       if (ts.isVariableStatement(node)) {
-        if (node.declarationList.declarations.length !== 1) fail(`${filename} exports multiple runtime bindings`);
+        if (node.declarationList.declarations.length !== 1 || node.declarationList.flags & ts.NodeFlags.Let || node.declarationList.flags & ts.NodeFlags.Var) fail(`${filename} exported definition must be immutable const`);
         const declaration = node.declarationList.declarations[0];
         if (!declaration.initializer || !isBuilderCall(declaration.initializer, "defineTrustedExtension")) fail(`${filename} must export exact definition builder result`);
         const callback = declaration.initializer.arguments[1];
@@ -158,7 +165,13 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   visit(file);
   for (const entry of importedSymbols.values()) if (!entry.symbol) entry.symbol = checker.getSymbolsInScope(file, ts.SymbolFlags.Value).find((s) => s.name === entry.name);
   if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 || runtimeBuilderCalls.defineTrustedExtension !== 1 || runtimeBuilderCalls.defineTrustedLifecycle !== 1)) fail(`${filename} must contain exactly one exact imported extension/lifecycle builder path`);
-  if (exportedDefinitionType) for (const name of exportedTypes.keys()) if (!exportedDefinitionType.getText(file).includes(name)) fail(`${filename} exports unused type ${name}`);
+  if (exportedTypes.size > 0 && !exportedDefinitionType) fail(`${filename} exported types must be referenced by the definition type surface`);
+  if (exportedDefinitionType) {
+    const used = new Set();
+    const collectTypeNames = (node) => { if (ts.isIdentifier(node) && exportedTypes.has(node.text)) used.add(node.text); ts.forEachChild(node, collectTypeNames); };
+    collectTypeNames(exportedDefinitionType);
+    for (const name of exportedTypes.keys()) if (!used.has(name)) fail(`${filename} exports unused type ${name}`);
+  }
 }
 
 export function auditManifest(manifest, label = "package.json") {
