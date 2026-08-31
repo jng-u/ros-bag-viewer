@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "gate": "G004 M3 secure-live local contract",
+  "evidenceKind": "deterministic-local-synthetic-contract",
+  "generatedBy": "UPDATE_M3_EVIDENCE=1 vitest run --config tests/m3-live/vitest.config.ts tests/m3-live/generate-evidence.test.ts",
+  "runtime": "v24.15.0",
+  "networkExecution": false,
+  "containerExecution": false,
+  "productionSecurityClaim": false,
+  "negativeCases": [
+    "invalid-origin",
+    "invalid-session",
+    "invalid-browser-credential",
+    "invalid-relay-identity",
+    "expiry",
+    "replay",
+    "write-operation",
+    "topic-and-type-escalation",
+    "size-and-quota",
+    "public-direct-edge-identity"
+  ],
+  "loadProfiles": [
+    {
+      "generation": "ros1",
+      "evidenceKind": "deterministic-local-synthetic",
+      "iterations": 500,
+      "attemptedFrames": 1000,
+      "payloadClasses": [
+        {
+          "topic": "/points",
+          "bytes": 512
+        },
+        {
+          "topic": "/camera/image",
+          "bytes": 2048
+        }
+      ],
+      "edge": {
+        "acceptedFrames": 400,
+        "droppedFrames": 600,
+        "peakConfiguredFramesPerSubscription": 4,
+        "peakConfiguredBufferedBytes": 16384,
+        "telemetryEvents": 32
+      },
+      "relay": {
+        "queueDepth": 6,
+        "queueBytes": 9984,
+        "queueHighWaterMessages": 7,
+        "queueHighWaterBytes": 9984,
+        "droppedMessages": 394,
+        "drainedMessages": 6
+      },
+      "syntheticTransitLatencyNanos": {
+        "samples": 400,
+        "maximum": 2000000,
+        "p95": 2000000,
+        "clockModel": "deterministic-same-clock"
+      },
+      "reconnectEpochs": [
+        1,
+        2
+      ],
+      "noRosWriteSurface": true
+    },
+    {
+      "generation": "ros2",
+      "evidenceKind": "deterministic-local-synthetic",
+      "iterations": 500,
+      "attemptedFrames": 1000,
+      "payloadClasses": [
+        {
+          "topic": "/points",
+          "bytes": 512
+        },
+        {
+          "topic": "/camera/image",
+          "bytes": 2048
+        }
+      ],
+      "edge": {
+        "acceptedFrames": 400,
+        "droppedFrames": 600,
+        "peakConfiguredFramesPerSubscription": 4,
+        "peakConfiguredBufferedBytes": 16384,
+        "telemetryEvents": 32
+      },
+      "relay": {
+        "queueDepth": 6,
+        "queueBytes": 9984,
+        "queueHighWaterMessages": 7,
+        "queueHighWaterBytes": 9984,
+        "droppedMessages": 394,
+        "drainedMessages": 6
+      },
+      "syntheticTransitLatencyNanos": {
+        "samples": 400,
+        "maximum": 2000000,
+        "p95": 2000000,
+        "clockModel": "deterministic-same-clock"
+      },
+      "reconnectEpochs": [
+        1,
+        2
+      ],
+      "noRosWriteSurface": true
+    }
+  ],
+  "assertions": {
+    "browserProtocolIsSubscribeOnly": true,
+    "directBrowserOrPublicEdgeIdentityDenied": true,
+    "rosWriteSurfaceAbsent": true,
+    "relayAndEdgeQueuesBounded": true,
+    "dropsAndBackpressureVisible": true,
+    "reconnectEpochsIncrease": true,
+    "telemetryIsBoundedAndRedacted": true
+  },
+  "limitations": [
+    "All protocol, load, latency, and reachability results are in-process deterministic synthetic contract evidence.",
+    "No real socket, firewall, container, ROS graph, browser, public network, TLS handshake, or production identity provider was exercised.",
+    "The fixed 2 ms transit latency is a same-clock harness value, not a hardware or network measurement.",
+    "Production promotion still requires network isolation tests, real ROS1/ROS2 environments, browser/OS coverage, penetration testing, and operational review."
+  ]
+}

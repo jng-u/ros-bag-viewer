@@ -1,4 +1,4 @@
-# Browser–relay–edge threat model (M0)
+# Browser–relay–edge threat model (M0, amended by G004 M3 contract evidence)
 
 - **Status:** Accepted M0 trust-boundary baseline; not a production certification
 - **Gate:** M1 cannot begin until this baseline and the core contracts are reviewed together
@@ -35,6 +35,8 @@ Browser credentials are never valid at the edge. Relay-edge identity is separate
 
 Edge and ROS networks have no public/browser route. Network tests prove only the relay reaches the edge. Responses avoid unnecessary private addresses or ROS topology.
 
+The M3 local reference adapters enforce private/loopback literal listeners with TLS enabled and exact relay identity verification. The current proof denies public- and browser-shaped identities in process; it does not prove deployed firewall, routing, DNS, certificate, or public reachability controls because no real network execution occurred.
+
 ### Malicious input and schemas
 
 Parsing/decompression run in terminate-able workers under compressed/expanded byte, ratio, nesting, queue, and time budgets. Paths are traversal-free; metadata cannot trigger arbitrary fetches. Sanitized errors leave the app able to open another source.
@@ -55,4 +57,4 @@ Pass means fail-closed behavior, bounded resources, no ROS write reaching the ed
 
 ## Residual and deferred decisions
 
-Authentication provider, relay protocol, storage provider, grant TTL, network implementation, renderer helper, and binary transport remain unselected. Production requires configuration review, penetration testing, dependency evidence, incident/rotation procedures, and authorization for credentials or paid infrastructure.
+M3 selects a versioned subscribe-only contract and local reference relay/edge behavior for deterministic validation. Authentication provider, session issuance, network and TLS implementation, relay hosting, edge deployment, credential rotation, storage provider, grant TTL, renderer helper, and binary transport remain unselected. The machine-readable [M3 evidence](evidence/m3-live.json) is synthetic and explicitly records that no socket, container, browser, ROS graph, public network, or production identity provider was exercised. Production requires configuration review, deployed network-isolation evidence, penetration testing, dependency evidence, incident/rotation procedures, and authorization for credentials or paid infrastructure.
