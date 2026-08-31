@@ -92,7 +92,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
     const index = statements.indexOf(returns[0]);
     for (const statement of statements.slice(0, index)) {
       if (!ts.isVariableStatement(statement) && !ts.isFunctionDeclaration(statement) && !ts.isClassDeclaration(statement)) return [];
-      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((d) => d.initializer && ts.isCallExpression(d.initializer) && isBuilderCall(d.initializer, "defineTrustedLifecycle"))) return [];
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((d) => d.initializer && ts.isCallExpression(d.initializer))) return [];
     }
     if (statements.slice(index + 1).length > 0) return [];
     return [returns[0].expression];
@@ -168,7 +168,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   if (exportedTypes.size > 0 && !exportedDefinitionType) fail(`${filename} exported types must be referenced by the definition type surface`);
   if (exportedDefinitionType) {
     const used = new Set();
-    const collectTypeNames = (node) => { if (ts.isIdentifier(node) && exportedTypes.has(node.text)) used.add(node.text); ts.forEachChild(node, collectTypeNames); };
+    const collectTypeNames = (node) => { const parent = node.parent; const propertyName = (ts.isPropertySignature(parent) || ts.isPropertyDeclaration(parent) || ts.isMethodSignature(parent)) && parent.name === node; if (ts.isIdentifier(node) && exportedTypes.has(node.text) && !propertyName) used.add(node.text); ts.forEachChild(node, collectTypeNames); };
     collectTypeNames(exportedDefinitionType);
     for (const name of exportedTypes.keys()) if (!used.has(name)) fail(`${filename} exports unused type ${name}`);
   }
