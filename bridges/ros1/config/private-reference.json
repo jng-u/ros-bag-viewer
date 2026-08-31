@@ -1,0 +1,33 @@
+{
+  "deployment": "local-reference-only",
+  "generation": "ros1",
+  "listener": { "host": "127.0.0.1", "port": 7441, "tls": true },
+  "allowedRelayIds": ["local-relay"],
+  "allowlistDigest": "sha256:7553ee23007d0edb1047c354dcc2207c86065aa0689867adc78e6ee75331b348",
+  "relayCredentialProvider": "local-secret-file",
+  "allowedTopics": [
+    { "topic": "/tf", "type": "tf2_msgs/msg/TFMessage", "maxRateHz": 100, "maxMessageBytes": 1048576 },
+    { "topic": "/tf_static", "type": "tf2_msgs/msg/TFMessage", "maxRateHz": 10, "maxMessageBytes": 1048576 },
+    { "topic": "/points", "type": "sensor_msgs/msg/PointCloud2", "maxRateHz": 30, "maxMessageBytes": 4194304 },
+    { "topic": "/path", "type": "nav_msgs/msg/Path", "maxRateHz": 30, "maxMessageBytes": 1048576 }
+  ],
+  "limits": {
+    "maxCommandBytes": 4096,
+    "maxCommandsPerWindow": 120,
+    "commandWindowMs": 60000,
+    "maxPlanTtlMs": 30000,
+    "maxTrackedConnections": 32,
+    "maxSubscriptions": 16,
+    "maxFrameBytes": 4194304,
+    "maxQueuedFramesPerSubscription": 8,
+    "maxBufferedBytes": 16777216,
+    "maxTelemetryEvents": 128
+  },
+  "eolIsolation": {
+    "lifecycle": "separate-process",
+    "filesystem": "read-only",
+    "processUser": "non-root",
+    "browserIngress": false,
+    "ros2DomainAccess": false
+  }
+}
