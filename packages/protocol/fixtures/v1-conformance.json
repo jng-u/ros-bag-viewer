@@ -92,7 +92,7 @@
       "result": "pass",
       "evidence": "packages/source-hosted/test/index.test.ts",
       "resultDigest": "sha256:1ece741af0d0fee19a365972f5ba80e848f6e3241baa5862a742bbc542612c6e",
-      "evidenceDigest": "sha256:64913e4717746aeb33b841a412d7d7faa63000bc3511d30a0b8592cf00e226da",
+      "evidenceDigest": "sha256:8183c3f9822c7c2e665ba040a2b140f91e26ba814411be84e8199087d4f39db1",
       "testName": "hosted SourceBundle adapter verifies the signed manifest and preserves local MCAP schema, order, timeline, payload hashes, and diagnostics",
       "semanticEvent": {
         "schemaVersion": 1,
