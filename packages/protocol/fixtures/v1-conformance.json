@@ -360,7 +360,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:470bcccb28967001631b0ee0ecfbc78689be405b5415aa2653b267967ab1a379",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -378,7 +378,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:02f41a6467656a2c82f94f6644b0e0989b13ab535ef396e4086d6e9cfd5d2180",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -396,7 +396,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:d05e7dbfb2eaf09d4b8f9d9b1fea4988378a1c640d4cc2bf57f88348956e6b3b",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -414,7 +414,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:13fe60ecce7f1b84b595738f4420c8f7e74a4736a46575aae88c005e04735284",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -432,7 +432,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:f6d104b19fc867caf2943b04102e2b18c4b416bd3e3821dff4796fb3749c6730",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -450,7 +450,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:ecf19185c99edba71bf28302aa7c89076c62928f954e7a61c4cbd0e0e4203245",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "out-of-core range summary example renders through the v1 host with a bounded handle",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -469,7 +469,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:f4873507818e6f68ee5c64fa0fa94613b6d647d019f37659fb5b1d8ba3f054d8",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance suspends an attached source and records the lifecycle transition",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -487,7 +487,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:4da0cefd33285c3d49ff880e57bf6a432f26d2f7571216db218c63b91469970c",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -505,7 +505,7 @@
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
       "resultDigest": "sha256:ad116857294b0b398ab9ab843b172b9aea9f8a7e57e70c6170afcea2c8bb4aa6",
-      "evidenceDigest": "sha256:236ad75e437efc70480e2ee32f01b85d35cd81903bab2272cd9acad5e85b5196",
+      "evidenceDigest": "sha256:aa9ebe9b0f7505da60830a0b5f9353868d3ae55bc14157d44d9a5d8ae61d1f8e",
       "testName": "out-of-core range summary example disposes its bounded handle idempotently",
       "semanticEvent": {
         "schemaVersion": 1,
