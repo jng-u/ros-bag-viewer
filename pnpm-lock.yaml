@@ -37,6 +37,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@ros-web-viewer/core-model':
+        specifier: workspace:*
+        version: link:../../packages/core-model
       '@ros-web-viewer/m1-integration':
         specifier: workspace:*
         version: link:../../packages/m1-integration
@@ -61,6 +64,10 @@ importers:
       '@mcap/core':
         specifier: 2.2.1
         version: 2.2.1
+
+  packages/source-ros1bag: {}
+
+  packages/source-ros2-sqlite: {}
 
   packages/tf: {}
 

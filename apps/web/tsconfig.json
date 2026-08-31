@@ -1,1 +1,1 @@
-{"compilerOptions":{"composite":true,"outDir":"dist","rootDir":"src","strict":true,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","skipLibCheck":true},"include":["src"],"references":[{"path":"../../packages/m1-integration"}]}
+{"compilerOptions":{"composite":true,"outDir":"dist","rootDir":"src","strict":true,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","skipLibCheck":true},"include":["src"],"references":[{"path":"../../packages/core-model"},{"path":"../../packages/m1-integration"}]}

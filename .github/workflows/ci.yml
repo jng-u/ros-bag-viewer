@@ -13,11 +13,17 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
+      - run: pnpm test:integration
+      - run: pnpm test:e2e
       - run: pnpm check:m0
+      - run: pnpm check:m1
+      - run: pnpm check:m2
       - run: pnpm test:security
       - run: pnpm test:a11y
       - run: pnpm test:ux
       - run: pnpm build
+      - run: pnpm bench:micro
+      - run: pnpm bench:corpus
       - run: pnpm audit:dependencies
       - run: pnpm report:licenses
       - run: pnpm sbom

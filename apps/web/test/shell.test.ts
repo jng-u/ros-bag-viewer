@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DesktopShellController,
+  RecordedSourceRegistry,
   captureSemanticEvidence,
   desktopShellStyles,
   renderDesktopShell,
@@ -66,7 +67,7 @@ describe("minimum desktop shell", () => {
     for (const region of ["Session bar", "Topic browser", "Display workspace", "Inspector", "Timeline"]) {
       expect(html).toContain(`aria-label="${region}"`);
     }
-    expect(html).toContain("Choose a local MCAP recording");
+    expect(html).toContain("Choose a local MCAP, ROS1 bag, or ROS2 SQLite recording");
     expect(html).toContain("Recording bytes remain local");
     expect(html).toContain("Share</button>");
     expect(html).toContain("disabled aria-describedby=\"share-help\"");
@@ -140,7 +141,7 @@ describe("minimum desktop shell", () => {
     });
     await openFailure.openLocal(selection);
     expect(openFailure.state).toMatchObject({ phase: "error", sourceSelection: selection });
-    expect(renderDesktopShell(openFailure)).toContain("Choose another local MCAP or retry");
+    expect(renderDesktopShell(openFailure)).toContain("Choose another local recording or retry");
 
     const seekFailure = new DesktopShellController({
       openLocalMcap: async () => indexedSource,
@@ -214,5 +215,32 @@ describe("minimum desktop shell", () => {
       expect(scenario.hardwareMeasurement).toBe(false);
       expect(Object.values(scenario.assertions).every(Boolean)).toBe(true);
     }
+  });
+
+  it("dispatches MCAP, ROS1 bag, and ROS2 SQLite selections through the recorded-source registry", async () => {
+    const registry = new RecordedSourceRegistry();
+    const opens: string[] = [];
+    for (const format of ["mcap", "ros1-bag", "ros2-sqlite"] as const) {
+      registry.register(format, {
+        async open(value) {
+          opens.push(`${format}:${value.name}`);
+          return { ...indexedSource, sourceLabel: value.name, epoch: opens.length };
+        },
+        async seek(currentTimeNanos) {
+          return { epoch: opens.length + 1, currentTimeNanos };
+        },
+      });
+    }
+    expect(registry.formats()).toEqual(["mcap", "ros1-bag", "ros2-sqlite"]);
+    const controller = new DesktopShellController(registry);
+    for (const format of registry.formats()) {
+      await controller.openLocal({ ...selection, format, name: `fixture-${format}` });
+      expect(controller.state).toMatchObject({ phase: "ready", sourceFormat: format, sourceLabel: `fixture-${format}` });
+    }
+    expect(opens).toEqual([
+      "mcap:fixture-mcap",
+      "ros1-bag:fixture-ros1-bag",
+      "ros2-sqlite:fixture-ros2-sqlite",
+    ]);
   });
 });

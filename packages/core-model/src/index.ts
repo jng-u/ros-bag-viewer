@@ -3,6 +3,45 @@ export type SourceEpoch = number & { readonly __sourceEpoch: unique symbol };
 export type SourceEntryId = string & { readonly __sourceEntryId: unique symbol };
 export type ChannelId = string & { readonly __channelId: unique symbol };
 
+export type RecordedSourceFormat = "mcap" | "ros1-bag" | "ros2-sqlite";
+
+export interface RecordedSourceRegistration {
+  readonly format: RecordedSourceFormat;
+  readonly extensions: readonly string[];
+  readonly multipart: boolean;
+  readonly indexedSeek: "native" | "degraded-when-unindexed";
+  readonly capabilityDiagnostic?: string;
+}
+
+export const BUILTIN_RECORDED_SOURCES: readonly RecordedSourceRegistration[] = Object.freeze([
+  Object.freeze({
+    format: "mcap" as const,
+    extensions: Object.freeze([".mcap"]),
+    multipart: false,
+    indexedSeek: "degraded-when-unindexed" as const,
+  }),
+  Object.freeze({
+    format: "ros1-bag" as const,
+    extensions: Object.freeze([".bag"]),
+    multipart: false,
+    indexedSeek: "degraded-when-unindexed" as const,
+    capabilityDiagnostic: "bz2/lz4 require an explicitly supplied bounded decoder adapter",
+  }),
+  Object.freeze({
+    format: "ros2-sqlite" as const,
+    extensions: Object.freeze(["metadata.yaml", ".db3"]),
+    multipart: true,
+    indexedSeek: "native" as const,
+    capabilityDiagnostic: "requires a read-only browser-compatible SQLite query provider",
+  }),
+]);
+
+export function recordedSourceRegistration(format: RecordedSourceFormat): RecordedSourceRegistration {
+  const registration = BUILTIN_RECORDED_SOURCES.find((candidate) => candidate.format === format);
+  if (!registration) throw new Error(`unknown recorded source format ${format}`);
+  return registration;
+}
+
 export interface ByteRange {
   readonly offset: bigint;
   readonly length: bigint;

@@ -6,11 +6,29 @@ export type CompatibilityTier =
   | "opaque-inspectable"
   | "unsupported";
 
-export type DisplayKind = "point-cloud" | "path" | "raw";
+export type RecordedSourceFormat = "mcap" | "ros1-bag" | "ros2-sqlite";
+
+export type DisplayKind =
+  | "camera-info"
+  | "frame-tree"
+  | "grid"
+  | "image"
+  | "laser-scan"
+  | "marker"
+  | "numeric-plot"
+  | "occupancy-grid"
+  | "odometry"
+  | "path"
+  | "point-cloud"
+  | "pointcloud2"
+  | "pose"
+  | "raw"
+  | "raw-inspector";
 
 export type ShellRegion = "session" | "topics" | "workspace" | "inspector" | "timeline";
 
 export interface LocalMcapSelection {
+  readonly format?: RecordedSourceFormat;
   readonly name: string;
   readonly sizeBytes: number;
   readonly immutableVersion: string;
@@ -43,7 +61,8 @@ export interface SeekResult {
 }
 
 export interface DesktopShellPorts {
-  readonly openLocalMcap: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
+  readonly openLocalMcap?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
+  readonly openLocalRecording?: (selection: LocalMcapSelection) => Promise<OpenLocalResult>;
   readonly seek: (timeNanos: bigint) => Promise<SeekResult>;
 }
 
@@ -75,6 +94,7 @@ export interface DesktopShellState {
   readonly phase: ShellPhase;
   readonly sourceLabel?: string;
   readonly sourceHash?: string;
+  readonly sourceFormat?: RecordedSourceFormat;
   readonly sourceSelection?: LocalMcapSelection;
   readonly topics: readonly TopicSummary[];
   readonly topicFilter: string;
@@ -119,7 +139,7 @@ export class DesktopShellController {
     epoch: 0,
     indexState: "none",
     focusedRegion: "session",
-    notice: "Choose a local MCAP recording to inspect topics.",
+    notice: "Choose a local MCAP, ROS1 bag, or ROS2 SQLite recording to inspect topics.",
   };
 
   constructor(private readonly ports: DesktopShellPorts) {}
@@ -141,13 +161,18 @@ export class DesktopShellController {
       ...this.#state,
       phase: "loading",
       sourceSelection: selection,
+      sourceFormat: selection.format ?? "mcap",
       sourceLabel: selection.name,
       blockingError: undefined,
       notice: `Opening ${selection.name}; indexing and resolving schemas.`,
     };
 
     try {
-      const result = await this.ports.openLocalMcap(selection);
+      const result = this.ports.openLocalRecording
+        ? await this.ports.openLocalRecording(selection)
+        : this.ports.openLocalMcap
+          ? await this.ports.openLocalMcap(selection)
+          : await Promise.reject(new Error("no recorded-source runtime is registered"));
       this.#state = {
         ...this.#state,
         phase: result.indexState === "sequential" ? "degraded" : "ready",
@@ -170,7 +195,7 @@ export class DesktopShellController {
       this.#state = {
         ...this.#state,
         phase: "error",
-        blockingError: `Could not open ${selection.name}: ${errorMessage(error)}. Choose another local MCAP or retry.`,
+        blockingError: `Could not open ${selection.name}: ${errorMessage(error)}. Choose another local recording or retry.`,
         notice: undefined,
       };
     }
@@ -337,8 +362,8 @@ export function renderDesktopShell(controller: DesktopShellController): string {
     ? `<form aria-label="Display configuration"><label>Fixed frame<input name="fixed-frame" value="${escapeHtml(activeDisplay.configuration.fixedFrame)}" aria-describedby="display-config-help"></label><label>Color field<input name="color" value="${escapeHtml(activeDisplay.configuration.color)}"></label><label>Scale<input name="scale" type="number" min="0.01" step="0.01" value="${activeDisplay.configuration.scale}"></label><p id="display-config-help">Invalid edits preserve the last valid rendering.</p></form>`
     : `<p>Select a display to inspect frame, color, scale, schema, and diagnostics.</p>`;
 
-  return `<div class="desktop-shell" data-phase="${state.phase}" data-focused-region="${state.focusedRegion}" aria-label="Local MCAP desktop viewer">
-  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No local source")}</strong><span>Mode: local MCAP</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local MCAP</button><span id="source-help">Recording bytes remain local.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Unavailable in the local M1 slice; no upload occurs.</span><button type="button" disabled>Live (not available)</button></header>
+  return `<div class="desktop-shell" data-phase="${state.phase}" data-focused-region="${state.focusedRegion}" aria-label="Local recorded-source desktop viewer">
+  <header class="session-bar" aria-label="Session bar"><strong>${escapeHtml(state.sourceLabel ?? "No local source")}</strong><span>Mode: local ${state.sourceFormat ?? "recording"}</span><span>State: ${state.phase}</span><button type="button" data-action="open-local" aria-describedby="source-help">Open local recording</button><span id="source-help">Recording bytes remain local.</span><button type="button" disabled aria-describedby="share-help">Share</button><span id="share-help">Unavailable in the local M2 slice; no upload occurs.</span><button type="button" disabled>Live (not available)</button></header>
   ${sessionError}
   <div class="shell-notice" role="status" aria-live="polite">${escapeHtml(state.notice ?? "")}</div>
   <nav class="topic-browser" aria-label="Topic browser"><h2>Topics</h2><label for="topic-search">Search topics</label><input id="topic-search" type="search" value="${escapeHtml(state.topicFilter)}"><ul role="tree">${topics}</ul></nav>
@@ -387,7 +412,7 @@ export function captureSemanticEvidence(
         semanticHtml.indexOf("Display workspace") < semanticHtml.indexOf("Inspector") &&
         semanticHtml.indexOf("Inspector") < semanticHtml.indexOf("Timeline"),
       accessibleAnnouncements: semanticHtml.includes('role="status"') && semanticHtml.includes('aria-live="polite"'),
-      localOnlyEntry: semanticHtml.includes("Open local MCAP") && semanticHtml.includes("Recording bytes remain local."),
+      localOnlyEntry: semanticHtml.includes("Open local recording") && semanticHtml.includes("Recording bytes remain local."),
       desktopViewport: width >= 960 && height >= 600,
       validDpr: environment.devicePixelRatio > 0 && environment.devicePixelRatio <= 4,
       zoomOperable: environment.zoomPercent >= 100 && environment.zoomPercent <= 200,

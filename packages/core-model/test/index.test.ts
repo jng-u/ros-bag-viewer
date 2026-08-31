@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BUILTIN_RECORDED_SOURCES,
   ReferenceCountedPayloadLease,
   assertBundle,
   assertEpoch,
+  recordedSourceRegistration,
   type SourceBundle,
   type SourceEntryId,
   type SourceEpoch,
   type SourceId,
 } from "../src/index.js";
+
+describe("recorded source registry contract", () => {
+  it("registers the bounded M2 formats without claiming unavailable codecs or providers", () => {
+    expect(BUILTIN_RECORDED_SOURCES.map(({ format }) => format)).toEqual(["mcap", "ros1-bag", "ros2-sqlite"]);
+    expect(recordedSourceRegistration("ros1-bag")).toMatchObject({ multipart: false, indexedSeek: "degraded-when-unindexed" });
+    expect(recordedSourceRegistration("ros1-bag").capabilityDiagnostic).toMatch(/bounded decoder/);
+    expect(recordedSourceRegistration("ros2-sqlite")).toMatchObject({ multipart: true, indexedSeek: "native" });
+    expect(recordedSourceRegistration("ros2-sqlite").capabilityDiagnostic).toMatch(/read-only.*SQLite/);
+  });
+});
 
 const epoch = 1 as SourceEpoch;
 const sourceId = "source-1" as SourceId;
