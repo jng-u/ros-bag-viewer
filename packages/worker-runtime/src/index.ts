@@ -19,7 +19,7 @@ export interface WorkerResourceLimits {
   readonly maxCacheBytes: number;
 }
 
-export const DEFAULT_WORKER_LIMITS: WorkerResourceLimits = {
+export const DEFAULT_WORKER_LIMITS: WorkerResourceLimits = Object.freeze({
   maxSingleReadBytes: 4 * 1024 * 1024,
   maxTotalReadBytes: 512n * 1024n * 1024n,
   maxConcurrentReads: 4,
@@ -28,7 +28,19 @@ export const DEFAULT_WORKER_LIMITS: WorkerResourceLimits = {
   maxDecompressedBytes: 64 * 1024 * 1024,
   maxDecompressionRatio: 100,
   maxCacheBytes: 32 * 1024 * 1024,
-};
+});
+
+/** Absolute ceilings for caller-provided limits. These caps are not configuration defaults. */
+export const HARD_WORKER_LIMITS: WorkerResourceLimits = Object.freeze({
+  maxSingleReadBytes: 64 * 1024 * 1024,
+  maxTotalReadBytes: 16n * 1024n * 1024n * 1024n,
+  maxConcurrentReads: 64,
+  maxQueuedReads: 4096,
+  maxBufferedBytes: 512 * 1024 * 1024,
+  maxDecompressedBytes: 2 * 1024 * 1024 * 1024,
+  maxDecompressionRatio: 1024,
+  maxCacheBytes: 512 * 1024 * 1024,
+});
 
 export interface ReadTelemetry {
   readCalls: number;
@@ -51,6 +63,45 @@ function abortError(reason?: unknown): Error {
 function assertRange(range: ByteRange, size: bigint): void {
   if (range.offset < 0n || range.length < 0n || range.offset + range.length > size) {
     throw new RangeError("byte range is outside the immutable source");
+  }
+}
+
+function assertWorkerResourceLimits(limits: WorkerResourceLimits): void {
+  const positiveNumericFields = [
+    "maxSingleReadBytes",
+    "maxConcurrentReads",
+    "maxBufferedBytes",
+    "maxDecompressedBytes",
+    "maxDecompressionRatio",
+  ] as const;
+  const nonnegativeNumericFields = ["maxQueuedReads", "maxCacheBytes"] as const;
+  for (const name of positiveNumericFields) {
+    const value = limits[name];
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive safe integer`);
+    if (value > HARD_WORKER_LIMITS[name]) throw new Error(`${name} cannot exceed the hard worker resource limit`);
+  }
+  for (const name of nonnegativeNumericFields) {
+    const value = limits[name];
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative safe integer`);
+    if (value > HARD_WORKER_LIMITS[name]) throw new Error(`${name} cannot exceed the hard worker resource limit`);
+  }
+  if (typeof limits.maxTotalReadBytes !== "bigint" || limits.maxTotalReadBytes <= 0n) {
+    throw new Error("maxTotalReadBytes must be a positive bigint");
+  }
+  if (limits.maxTotalReadBytes > HARD_WORKER_LIMITS.maxTotalReadBytes) {
+    throw new Error("maxTotalReadBytes cannot exceed the hard worker resource limit");
+  }
+  if (limits.maxSingleReadBytes > limits.maxBufferedBytes) {
+    throw new Error("maxSingleReadBytes cannot exceed maxBufferedBytes");
+  }
+  if (BigInt(limits.maxSingleReadBytes) > limits.maxTotalReadBytes) {
+    throw new Error("maxSingleReadBytes cannot exceed maxTotalReadBytes");
+  }
+  if (limits.maxBufferedBytes > limits.maxDecompressedBytes) {
+    throw new Error("maxBufferedBytes cannot exceed maxDecompressedBytes");
+  }
+  if (limits.maxCacheBytes > limits.maxDecompressedBytes) {
+    throw new Error("maxCacheBytes cannot exceed maxDecompressedBytes");
   }
 }
 
@@ -151,10 +202,9 @@ export class BoundedByteReader {
   constructor(source: RangeSource, epoch: SourceEpochController, limits: WorkerResourceLimits = DEFAULT_WORKER_LIMITS) {
     this.#source = source;
     this.#epoch = epoch;
-    this.#limits = limits;
-    if (limits.maxConcurrentReads < 1 || limits.maxQueuedReads < 0 || limits.maxSingleReadBytes < 1) {
-      throw new Error("worker read limits must be positive and finite");
-    }
+    const limitsSnapshot = { ...limits };
+    assertWorkerResourceLimits(limitsSnapshot);
+    this.#limits = Object.freeze(limitsSnapshot);
   }
 
   async size(): Promise<bigint> {
