@@ -218,10 +218,10 @@ function pythonContainsCredential(text) {
 }
 
 function typescriptStrings(node, constants, depth = 0) {
+  node = transparentTypeScriptExpression(node);
   if (!node || depth > 16) return new Set();
   if (ts.isStringLiteralLike(node)) return new Set([node.text]);
   if (ts.isIdentifier(node)) return new Set(constants.get(node.text) ?? []);
-  if (ts.isParenthesizedExpression(node)) return typescriptStrings(node.expression, constants, depth + 1);
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
     const values = new Set();
     for (const left of typescriptStrings(node.left, constants, depth + 1)) {
@@ -314,6 +314,13 @@ function typescriptDeclaresInfrastructure(text, filename) {
     node = transparentTypeScriptExpression(node);
     if (!node) return false;
     if (ts.isIdentifier(node)) return node.text === "require" || loaders.has(node.text);
+    if (ts.isCallExpression(node) && node.arguments.length === 1 && node.arguments[0].kind === ts.SyntaxKind.NullKeyword) {
+      const bind = transparentTypeScriptExpression(node.expression);
+      if (ts.isPropertyAccessExpression(bind) && bind.name.text === "bind") {
+        const target = transparentTypeScriptExpression(bind.expression);
+        if (ts.isIdentifier(target) && (target.text === "require" || loaders.has(target.text))) return true;
+      }
+    }
     if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node) && !ts.isFunctionDeclaration(node) || node.parameters.length !== 1 ||
       !ts.isIdentifier(node.parameters[0].name) || !node.body) return false;
     const parameter = node.parameters[0].name.text;
@@ -486,7 +493,17 @@ function pythonDeclaresInfrastructure(text) {
         }
       }
     }
-    return normalized.replace(/^\(\s*([A-Za-z_]\w*)\s*\)\s*\.\s*import_module$/u, "$1.import_module");
+    const member = /^(.*?)\s*\.\s*import_module$/u.exec(normalized);
+    if (member) {
+      const receiver = normalizeLoaderExpression(member[1]);
+      if (/^[A-Za-z_]\w*$/u.test(receiver)) return `${receiver}.import_module`;
+    }
+    const getattr = /^getattr\s*\(\s*(.+?)\s*,\s*(["'])import_module\2\s*\)$/u.exec(normalized);
+    if (getattr) {
+      const receiver = normalizeLoaderExpression(getattr[1]);
+      if (/^[A-Za-z_]\w*$/u.test(receiver)) return `${receiver}.import_module`;
+    }
+    return normalized;
   };
   const isLoaderExpression = (expression) => {
     const loader = normalizeLoaderExpression(expression);
@@ -551,7 +568,7 @@ function pythonDeclaresInfrastructure(text) {
       if (isLoaderExpression(assignment[2])) state.loaderAliases.add(assignment[1]);
       else state.loaderAliases.delete(assignment[1]);
     }
-    const returned = /^\s*return\s+([A-Za-z_.]\w*(?:\.\w+)*)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
+    const returned = /^\s*return\s+(.+?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
     const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");
     if (returned && activeFunction && returned[2] === activeFunction.parameter && isLoaderExpression(returned[1])) activeFunction.wrapper = true;
     const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)]
@@ -675,7 +692,6 @@ export function repositoryStopReason(filename, content) {
       /(?:AWSTemplateFormatVersion|AWS::Serverless-2016-10-31)/u.test(text) ||
     /\.ya?ml$/u.test(name) && /(?:^|\n)\s*Type\s*:\s*AWS::[A-Za-z0-9:]+/u.test(text) ||
     /\.json$/u.test(name) && /["']Type["']\s*:\s*["']AWS::[A-Za-z0-9:]+["']/u.test(text) ||
-    /\.ya?ml$/u.test(name) && /(?:^|\n)\s*apiVersion\s*:\s*[^\n]+\n(?:.|\n)*?\s*kind\s*:\s*(?:Deployment|StatefulSet|DaemonSet|Service|Ingress|Secret|Job|CronJob|ConfigMap|Pod|Namespace|Role|ClusterRole)\b/u.test(text) ||
     iacLoader ||
     name === "package.json" && (packageDeclaresInfrastructure(json) || /(?:"aws-cdk-lib"|"@aws-cdk\/|"@cdktf\/|"cdktf"|"@pulumi\/|"pulumi"|"serverless"|"npm:(?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf)|\bcdk\b[^"\n]*\bdeploy\b)/u.test(text))
   ) return "infrastructure";
