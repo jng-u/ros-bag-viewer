@@ -1,5 +1,5 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { dirname, parse, resolve } from "node:path";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { parse, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { TextDecoder } from "node:util";
 
@@ -31,53 +31,42 @@ export function utf8ByteLengthAtMost(value, maxBytes, label = "text") {
 
 export function readBoundedBytes(path, maxBytes, label = path) {
   assertByteCeiling(maxBytes, label);
+  if (process.platform !== "linux" || constants.O_DIRECTORY === undefined || constants.O_NOFOLLOW === undefined) {
+    throw new Error(`${label} requires Linux O_DIRECTORY/O_NOFOLLOW pinned traversal`);
+  }
   const absolutePath = resolve(path instanceof URL ? fileURLToPath(path) : path);
-  const assertStableAncestors = () => {
-    const root = parse(absolutePath).root;
-    let current = dirname(absolutePath);
-    while (current !== root) {
-      const status = lstatSync(current);
-      if (!status.isDirectory() || status.isSymbolicLink()) {
-        throw new Error(`${label} has a non-directory or symlinked ancestor`);
-      }
-      current = dirname(current);
-    }
-  };
-  assertStableAncestors();
-  const pathBefore = lstatSync(absolutePath);
-  if (!pathBefore.isFile()) throw new Error(`${label} must be a regular non-symlink file`);
-  const descriptor = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const parsed = parse(absolutePath);
+  const components = absolutePath.slice(parsed.root.length).split("/").filter(Boolean);
+  if (components.some((part) => part === "." || part === ".." || part.includes("\0")) || components.length === 0) throw new Error(`${label} has invalid path components`);
+  const descriptors = [];
+  let parent;
   try {
-    const before = fstatSync(descriptor);
-    assertStableAncestors();
-    const pathAfterOpen = lstatSync(absolutePath);
-    if (!before.isFile() || !pathAfterOpen.isFile() ||
-        pathBefore.dev !== before.dev || pathBefore.ino !== before.ino ||
-        pathAfterOpen.dev !== before.dev || pathAfterOpen.ino !== before.ino) {
-      throw new Error(`${label} must be one stable regular non-symlink file`);
+    parent = openSync(parsed.root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    descriptors.push(parent);
+    for (const component of components.slice(0, -1)) {
+      const next = openSync(`/proc/self/fd/${parent}/${component}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      if (!fstatSync(next).isDirectory()) { closeSync(next); throw new Error(`${label} must be a regular non-symlink file`); }
+      descriptors.push(next); parent = next;
     }
+    const descriptor = openSync(`/proc/self/fd/${parent}/${components.at(-1)}`, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptors.push(descriptor);
+    const before = fstatSync(descriptor);
+    if (!before.isFile()) throw new Error(`${label} must be a regular non-symlink file`);
     if (before.size > maxBytes) throw new Error(`${label} exceeds the byte ceiling`);
-    const chunks = [];
-    let total = 0;
+    const chunks = []; let total = 0;
     while (total <= maxBytes) {
       const buffer = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, maxBytes + 1 - total));
       const count = readSync(descriptor, buffer, 0, buffer.byteLength, null);
       if (count === 0) break;
-      chunks.push(buffer.subarray(0, count));
-      total += count;
+      chunks.push(buffer.subarray(0, count)); total += count;
     }
     const after = fstatSync(descriptor);
-    assertStableAncestors();
-    const pathAfterRead = lstatSync(absolutePath);
-    if (total > maxBytes || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
-        !pathAfterRead.isFile() || pathAfterRead.dev !== after.dev || pathAfterRead.ino !== after.ino ||
-        before.mtimeMs !== after.mtimeMs || total !== after.size) {
-      throw new Error(`${label} changed while being read or exceeds the byte ceiling`);
-    }
+    if (total > maxBytes || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs || total !== after.size) throw new Error(`${label} changed while being read or exceeds the byte ceiling`);
     return Buffer.concat(chunks, total);
-  } finally {
-    closeSync(descriptor);
-  }
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ELOOP" || error?.code === "ENOTDIR") throw new Error(`${label} has a non-directory or symlinked ancestor (non-symlink file required)`, { cause: error });
+    throw error;
+  } finally { for (const descriptor of descriptors.reverse()) { try { closeSync(descriptor); } catch { /* already closed */ } } }
 }
 
 export function readBoundedText(path, maxBytes, label = path) {

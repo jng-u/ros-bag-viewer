@@ -70,88 +70,39 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const scriptKind = filename.endsWith(".tsx") ? ts.ScriptKind.TSX : filename.endsWith(".jsx") ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKind);
   if (file.parseDiagnostics.length > 0) fail(`${filename} contains TypeScript parse errors`);
-  const rootScope = { parent: undefined, bindings: new Set() };
-  const scopeByNode = new WeakMap();
-  const declaredLocals = new Set();
-  const bindName = (scope, name, local = false) => {
-    if (ts.isIdentifier(name)) {
-      scope.bindings.add(name.text);
-      if (local) declaredLocals.add(name.text);
-    }
-    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-      for (const element of name.elements) if (ts.isBindingElement(element)) bindName(scope, element.name, local);
-    }
-  };
-  const collectBindings = (node, scope) => {
-    scopeByNode.set(node, scope);
-    if ((ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) && node.name) bindName(scope, node.name);
-    if (ts.isImportClause(node) && node.name) bindName(scope, node.name);
-    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isClassDeclaration(node) ||
-        ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
-      if (node.name) bindName(scope, node.name, !ts.isImportSpecifier(node));
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) bindName(scope, node.name, true);
-    if (ts.isFunctionLike(node)) {
-      const functionScope = { parent: scope, bindings: new Set() };
-      scopeByNode.set(node, functionScope);
-      if (ts.isFunctionExpression(node) && node.name) bindName(functionScope, node.name, true);
-      for (const parameter of node.parameters) collectBindings(parameter, functionScope);
-      if (node.body) collectBindings(node.body, functionScope);
-      return;
-    }
-    if (node !== file && (ts.isBlock(node) || ts.isCaseBlock(node) || ts.isCatchClause(node) || ts.isModuleBlock(node))) {
-      const blockScope = { parent: scope, bindings: new Set() };
-      scopeByNode.set(node, blockScope);
-      ts.forEachChild(node, (child) => collectBindings(child, blockScope));
-      return;
-    }
-    ts.forEachChild(node, (child) => collectBindings(child, scope));
-  };
-  collectBindings(file, rootScope);
-  const isBoundAt = (node, name) => {
-    let scope = scopeByNode.get(node);
-    while (scope) {
-      if (scope.bindings.has(name)) return true;
-      scope = scope.parent;
-    }
-    return false;
-  };
-  const rootIdentifier = (expression) => {
-    let current = expression;
-    while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) current = current.expression;
-    while (ts.isParenthesizedExpression(current) || ts.isNonNullExpression(current)) current = current.expression;
-    return ts.isIdentifier(current) ? current.text : undefined;
-  };
+  const options = { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest, module: ts.ModuleKind.ESNext, allowJs: true };
+  const baseHost = ts.createCompilerHost(options);
+  const host = { ...baseHost, getSourceFile: (name) => name === filename ? file : undefined,
+    fileExists: (name) => name === filename, readFile: (name) => name === filename ? source : undefined };
+  const checker = ts.createProgram([filename], options, host).getTypeChecker();
+  const symbolAt = (node) => ts.isIdentifier(node) ? checker.getSymbolAtLocation(node) : undefined;
+  const importedSymbols = new Map();
+  const importedLocalNames = new Set();
   let extensionApiImport = false;
   let extensionDefinitionExports = 0;
-  const importedSymbols = new Map();
-  const isDirectImportedCall = (expression, importedName) =>
-    ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) &&
-    importedSymbols.get(expression.expression.text) === importedName;
-  const returnedExpressions = (callback) => {
+  const exportedTypes = new Map();
+  let exportedDefinitionType;
+    const isBuilderCall = (expression, name) => { const entry = ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) ? importedSymbols.get(expression.expression.text) : undefined; return !!entry && entry.name === name && symbolAt(expression.expression) === entry.symbol; };
+  const directReturns = (callback) => {
     if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return undefined;
     if (!ts.isBlock(callback.body)) return [callback.body];
-    const returns = [];
-    const collectReturns = (node) => {
-      if (node !== callback && ts.isFunctionLike(node)) return;
-      if (ts.isReturnStatement(node)) {
-        if (!node.expression) return;
-        returns.push(node.expression);
-        return;
-      }
-      ts.forEachChild(node, collectReturns);
-    };
-    collectReturns(callback.body);
-    return returns;
+    const out = [];
+    for (const statement of callback.body.statements) if (ts.isReturnStatement(statement)) out.push(statement.expression);
+    return out;
   };
-  const isBoundExtensionDefinition = (initializer) => {
-    if (!isDirectImportedCall(initializer, "defineTrustedExtension")) return false;
-    const callback = initializer.arguments[1];
-    if (!callback) return false;
-    const returns = returnedExpressions(callback);
-    return returns !== undefined && returns.length > 0 &&
-      returns.every((expression) => isDirectImportedCall(expression, "defineTrustedLifecycle"));
+  const isInTypePosition = (node) => { let p = node.parent; while (p) { if (ts.isTypeNode(p)) return true; if (ts.isExpression(p) || ts.isStatement(p) || ts.isSourceFile(p)) return false; p = p.parent; } return false; };
+  const declarationName = (node) => {
+    if (!node || !node.name) return false;
+    return (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node));
   };
+  const isNonReferenceIdentifier = (node) => {
+    const p = node.parent;
+    return declarationName(p) || isInTypePosition(node) || (ts.isPropertyAccessExpression(p) && p.name === node) ||
+      (ts.isPropertyAssignment(p) && p.name === node) || (ts.isMethodDeclaration(p) && p.name === node) ||
+      (ts.isMethodSignature(p) && p.name === node) || (ts.isImportSpecifier(p) || ts.isNamespaceImport(p) || ts.isImportClause(p) || ts.isExportSpecifier(p)) ||
+      (ts.isLabeledStatement(p) || ts.isBreakOrContinueStatement(p));
+  };
+  const runtimeBuilderCalls = { defineTrustedExtension: 0, defineTrustedLifecycle: 0 };
   const visit = (node) => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier !== undefined) {
       if (!ts.isStringLiteral(node.moduleSpecifier)) fail(`${filename} has a non-literal module specifier`);
@@ -159,104 +110,55 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (ts.isExportDeclaration(node) && node.moduleSpecifier.text === allowedModule) fail(`${filename} must not re-export the host API`);
       if (ts.isImportDeclaration(node) && node.moduleSpecifier.text === allowedModule) {
         const clause = node.importClause;
-        if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) {
-          fail(`${filename} must use exact named extension-api imports`);
-        }
+        if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) fail(`${filename} must use exact named extension-api imports`);
         for (const element of clause.namedBindings.elements) {
           const imported = element.propertyName?.text ?? element.name.text;
           if (!allowedExtensionImports.has(imported)) fail(`${filename} imports unsupported extension-api symbol ${imported}`);
+          if (element.propertyName) fail(`${filename} must not alias extension-api symbols`);
           if (importedSymbols.has(element.name.text)) fail(`${filename} duplicates extension-api binding ${element.name.text}`);
-          importedSymbols.set(element.name.text, imported);
-          if (["defineTrustedExtension", "defineTrustedLifecycle"].includes(imported) && (clause.isTypeOnly || element.isTypeOnly)) {
-            fail(`${filename} imports runtime builder ${imported} as type-only`);
-          }
+          importedSymbols.set(element.name.text, { name: imported, symbol: undefined }); importedLocalNames.add(element.name.text);
+          if (["defineTrustedExtension", "defineTrustedLifecycle"].includes(imported) && (clause.isTypeOnly || element.isTypeOnly)) fail(`${filename} imports runtime builder ${imported} as type-only`);
+          extensionApiImport = true;
         }
-        extensionApiImport = true;
+        for (const element of clause.namedBindings.elements) importedSymbols.get(element.name.text).symbol = symbolAt(element.name);
       }
-    }
-    if (ts.isImportEqualsDeclaration(node)) {
-      const reference = node.moduleReference;
-      if (!ts.isExternalModuleReference(reference) || !reference.expression || !ts.isStringLiteral(reference.expression)) {
-        fail(`${filename} uses denied import-equals syntax`);
-      }
-      assertModule(reference.expression.text, filename, resolveRelative);
     }
     if (ts.isCallExpression(node)) {
-      if (ts.isIdentifier(node.expression) && !isBoundAt(node, node.expression.text) && !safeStandardGlobals.has(node.expression.text)) {
-        fail(`${filename} calls unbound ambient ${node.expression.text}`);
-      }
+      if (ts.isIdentifier(node.expression) && ["require", "eval", "Function"].includes(node.expression.text)) fail(`${filename} calls ${node.expression.text}`);
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) fail(`${filename} uses dynamic import`);
-      if (ts.isIdentifier(node.expression) && ["require", "eval", "Function"].includes(node.expression.text)) {
-        fail(`${filename} calls ${node.expression.text}`);
-      }
-      if (ts.isPropertyAccessExpression(node.expression) &&
-          ((ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "require") ||
-           (ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "module" && node.expression.name.text === "require"))) {
-        fail(`${filename} uses a runtime module loader`);
-      }
-      if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Reflect") {
-        fail(`${filename} uses computed reflection`);
-      }
-      if (ts.isPropertyAccessExpression(node.expression) && deniedRuntimeProperties.has(node.expression.name.text)) {
-        fail(`${filename} acquires a runtime descriptor`);
-      }
+      if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && (node.expression.expression.text === "require" || node.expression.expression.text === "Reflect")) fail(`${filename} uses a denied runtime loader/reflection`);
+      if (ts.isPropertyAccessExpression(node.expression) && deniedRuntimeProperties.has(node.expression.name.text)) fail(`${filename} acquires a runtime descriptor`);
+      if (ts.isIdentifier(node.expression) && importedSymbols.get(node.expression.text)?.name in runtimeBuilderCalls) runtimeBuilderCalls[importedSymbols.get(node.expression.text).name] += 1;
     }
-    if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && !isBoundAt(node, node.tag.text)) {
-      fail(`${filename} calls unbound ambient tag ${node.tag.text}`);
+    if (ts.isNewExpression(node) && (!ts.isIdentifier(node.expression) || node.expression.text !== "Error")) fail(`${filename} constructs a non-approved runtime object`);
+    if (ts.isPropertyAccessExpression(node) && deniedRuntimeProperties.has(node.name.text)) fail(`${filename} accesses denied runtime property ${node.name.text}`);
+    if (ts.isIdentifier(node) && !isNonReferenceIdentifier(node)) {
+      if (privilegedNames.has(node.text)) fail(`${filename} references privileged ${node.text}`);
+      if (deniedRuntimeNames.has(node.text)) fail(`${filename} references denied runtime ${node.text}`);
+      const symbol = symbolAt(node);
+      if (!symbol && !safeStandardGlobals.has(node.text)) fail(`${filename} references unbound ambient ${node.text}`);
     }
-    if (ts.isNewExpression(node)) {
-      if (!ts.isIdentifier(node.expression) || node.expression.text !== "Error") {
-        fail(`${filename} constructs a non-approved runtime object`);
-      }
-    }
-    if (ts.isPropertyAccessExpression(node) && deniedRuntimeProperties.has(node.name.text)) {
-      fail(`${filename} accesses denied runtime property ${node.name.text}`);
-    }
-    if (ts.isPropertyAccessExpression(node)) {
-      const root = rootIdentifier(node);
-      if (root !== undefined && !isBoundAt(node, root) && !safeStandardGlobals.has(root)) {
-        fail(`${filename} references unbound ambient ${root}`);
-      }
-    }
-    if (ts.isBindingElement(node) && node.propertyName !== undefined) {
-      const property = constantString(node.propertyName);
-      if (property === undefined || deniedRuntimeProperties.has(property)) fail(`${filename} destructures a denied or computed runtime property`);
-    }
-    if (ts.isIdentifier(node) && privilegedNames.has(node.text)) fail(`${filename} references privileged ${node.text}`);
-    if (ts.isIdentifier(node) && deniedRuntimeNames.has(node.text)) fail(`${filename} references denied runtime ${node.text}`);
-    if (ts.isElementAccessExpression(node)) {
-      const property = node.argumentExpression === undefined ? undefined : constantString(node.argumentExpression);
-      if (property === undefined) fail(`${filename} uses unresolved computed access`);
-      if (deniedRuntimeProperties.has(property) || deniedRuntimeNames.has(property) || privilegedNames.has(property)) {
-        fail(`${filename} accesses denied computed property ${property}`);
-      }
-    }
+    if (ts.isElementAccessExpression(node)) { const property = node.argumentExpression === undefined ? undefined : constantString(node.argumentExpression); if (property === undefined || deniedRuntimeProperties.has(property) || deniedRuntimeNames.has(property) || privilegedNames.has(property)) fail(`${filename} accesses denied computed property`); }
     const exported = node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword) ?? false;
     if (!filename.endsWith(".d.ts") && exported) {
       if (ts.isVariableStatement(node)) {
         if (node.declarationList.declarations.length !== 1) fail(`${filename} exports multiple runtime bindings`);
         const declaration = node.declarationList.declarations[0];
-        if (declaration?.initializer && isBoundExtensionDefinition(declaration.initializer)) {
-          extensionDefinitionExports += 1;
-        } else fail(`${filename} must export a definition whose create callback directly returns the exact imported lifecycle builder result`);
-      } else if (!ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node)) {
-        fail(`${filename} exports unsupported runtime declaration`);
-      }
+        if (!declaration.initializer || !isBuilderCall(declaration.initializer, "defineTrustedExtension")) fail(`${filename} must export exact definition builder result`);
+        const callback = declaration.initializer.arguments[1];
+        const returns = callback && directReturns(callback);
+        if (!returns || returns.length !== 1 || !returns[0] || !isBuilderCall(returns[0], "defineTrustedLifecycle")) fail(`${filename} create callback must have exactly one direct lifecycle return`);
+        extensionDefinitionExports += 1; exportedDefinitionType = declaration.type;
+      } else if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) exportedTypes.set(node.name.text, node);
+      else fail(`${filename} exports unsupported runtime declaration`);
     }
-    if (!filename.endsWith(".d.ts") && (ts.isExportAssignment(node) ||
-        ts.isExportDeclaration(node) && node.moduleSpecifier === undefined)) {
-      fail(`${filename} uses an unsupported runtime export`);
-    }
+    if (!filename.endsWith(".d.ts") && (ts.isExportAssignment(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier === undefined))) fail(`${filename} uses an unsupported runtime export`);
     ts.forEachChild(node, visit);
   };
   visit(file);
-  if ([...importedSymbols.keys()].some((name) => declaredLocals.has(name))) {
-    fail(`${filename} shadows an imported extension-api symbol`);
-  }
-  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 ||
-      ![...importedSymbols.values()].includes("defineTrustedExtension") || ![...importedSymbols.values()].includes("defineTrustedLifecycle"))) {
-    fail(`${filename} must call the exact imported builders and export one defineTrustedExtension result`);
-  }
+  for (const entry of importedSymbols.values()) if (!entry.symbol) entry.symbol = checker.getSymbolsInScope(file, ts.SymbolFlags.Value).find((s) => s.name === entry.name);
+  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 || runtimeBuilderCalls.defineTrustedExtension !== 1 || runtimeBuilderCalls.defineTrustedLifecycle !== 1)) fail(`${filename} must contain exactly one exact imported extension/lifecycle builder path`);
+  if (exportedDefinitionType) for (const name of exportedTypes.keys()) if (!exportedDefinitionType.getText(file).includes(name)) fail(`${filename} exports unused type ${name}`);
 }
 
 export function auditManifest(manifest, label = "package.json") {

@@ -4,7 +4,7 @@ const generatedInfrastructureDirectories = new Set([
   "archive", "artifact", "artifacts", "build", "deploy", "deployment", "dist", "output", "outputs", "release",
 ]);
 const infrastructurePackagePattern = /^(?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf$|@pulumi\/|pulumi$|serverless$)/u;
-const credentialKeyPattern = /^(?:access[_-]?token|api[_-]?key|auth(?:orization)?[_-]?token|authorization|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|token)$/iu;
+const credentialKeyPattern = /^(?:access[_-]?token|api[_-]?key|auth(?:orization)?[_-]?token|authorization|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|token|github[_-]?token)$/iu;
 
 function contentText(content) {
   if (content === undefined) return "";
@@ -22,6 +22,9 @@ function jsonContains(value, predicate) {
   if (Array.isArray(value)) return value.some((entry) => jsonContains(entry, predicate));
   return Object.entries(value).some(([key, nested]) => predicate(key, nested) || jsonContains(nested, predicate));
 }
+
+function normalizedCredentialKey(key) { return key.normalize("NFKC").toLowerCase().replace(/[\s_-]/gu, ""); }
+function hasCredentialKey(key) { return credentialKeyPattern.test(key) || new Set(["githubtoken", "privatekey", "authorization", "token", "credential", "secret"]).has(normalizedCredentialKey(key)); }
 
 function packageDeclaresInfrastructure(manifest) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return false;
@@ -59,7 +62,7 @@ export function repositoryStopReason(filename, content) {
       /^private(?:[-_.].*)?\.pem$/u.test(name) ||
       /^(?:google|gcp|azure)[-_.].*credentials?(?:$|[-_.])/u.test(name) ||
       /\.(?:key|p12|pfx|jks|keystore)$/u.test(name)) return "credentials";
-  if (jsonContains(json, (key, value) => credentialKeyPattern.test(key) &&
+  if (jsonContains(json, (key, value) => hasCredentialKey(key) &&
       (typeof value === "string" ? value.length >= 8 : value !== undefined && value !== null))) return "credentials";
   if (/-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/u.test(text) ||
       text.includes("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----") ||
@@ -73,9 +76,16 @@ export function repositoryStopReason(filename, content) {
       /(?:^|[,{\n]\s*)["']?(?:access[_-]?token|auth(?:orization)?[_-]?token|api[_-]?key|client[_-]?secret|refresh[_-]?token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
       !sourceCode && /(?:^|[,{\n]\s*)["']?(?:authorization|token)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
       /(?:^|\n)\s*authorization\s*:\s*bearer\s+\S+/iu.test(text)) return "credentials";
-  if (
+  const archiveName = /\.(?:zip|tar|tgz|gz|bz2|7z|rar)$/u.test(name);
+  const helmFile = /^(?:chart|values)(?:\.[^.]+)?$/u.test(name) && /\.(?:ya?ml)$/u.test(name);
+  const k8sStructured = json && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "apiversion" && typeof value === "string") && jsonContains(json, (key, value) => normalizedCredentialKey(key) === "kind" && typeof value === "string");
+  const k8sYaml = /\.(?:ya?ml)$/u.test(name) && /(?:^|[\n\r])\s*-?\s*(?:apiVersion|kind)\s*:/u.test(text) && /(?:apiVersion|kind)\s*:/u.test(text);
+  const iacPath = segments.some((segment) => ["infra", "infrastructure", "deploy", "deployment"].includes(segment));
+  const iacLoader = /(?:from\s*["'](?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf|@pulumi\/|pulumi)|(?:require|import)\s*(?:\(\s*)?["'](?:aws-cdk-lib|@aws-cdk\/|@cdktf\/|cdktf|@pulumi\/|pulumi)|(?:importlib\.import_module|__import__)\s*\(\s*["'](?:aws_cdk|cdktf|pulumi)|(?:require|importlib\.import_module|__import__)\s*\([^)]*(?:aws-cdk|aws_cdk|pulumi|cdktf))/u.test(text);
+  if (archiveName || helmFile || k8sStructured || k8sYaml || sourceCode && iacPath && iacLoader ||
     infrastructureFiles.has(name) || name.endsWith(".tf") || name.endsWith(".tf.json") ||
     name.endsWith(".bicep") ||
+    archiveName ||
     !workspaceBuildOutput && segments.some((segment) => generatedInfrastructureDirectories.has(segment)) ||
     segments.includes("helm") && ["chart.yaml", "chart.yml", "values.yaml", "values.yml"].includes(name) ||
     /^(?:pulumi|cdktf|serverless)[._-].*output.*$/u.test(name) ||
