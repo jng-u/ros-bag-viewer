@@ -408,3 +408,12 @@ describe("serialized hosted admission", () => {
     await expect(service.readGrantedRangeSerialized(hostile as unknown as string, new AbortController().signal)).rejects.toThrow(/serialized JSON/);
   });
 });
+
+it("accepts configured serialized ceilings above the default envelope", async () => {
+  const service = new HostedSharingService({ limits: { maxSessionBytes: 3_000_000, maxStoredBytes: 4_000_000 } });
+  const raw = new Uint8Array(1_600_000);
+  const serialized = JSON.stringify({ entries: [{ entryId: "large", relativePath: "large.bin", bytes: Buffer.from(raw).toString("base64") }] });
+  expect(Buffer.byteLength(serialized)).toBeGreaterThan(2_000_000);
+  const descriptor = await service.createHostedSessionSerialized(serialized);
+  expect(descriptor.manifest.payload.entries[0]?.sizeBytes).toBe("1600000");
+});

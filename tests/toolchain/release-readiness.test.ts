@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +65,15 @@ describe("M5 release hardening", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+  it("fails closed when an active ancestor is renamed during access", () => {
+    const directory = mkdtempSync(join(tmpdir(), "bounded-swap-"));
+    try {
+      const parent = join(directory, "parent"); mkdirSync(parent); const file = join(parent, "payload.json"); writeFileSync(file, "{\"ok\":true}");
+      const moved = join(directory, "moved"); renameSync(parent, moved);
+      expect(() => readBoundedJson(file, 11, "renamed ancestor fixture")).toThrow();
+      expect(readBoundedJson(join(moved, "payload.json"), 11, "pinned original fixture")).toEqual({ ok: true });
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
   it("freezes the protocol fixture to the exact extension API surface", () => {
     expect(V1_FROZEN_EXTENSION_OPERATIONS).toEqual(TRUSTED_EXTENSION_OPERATIONS);

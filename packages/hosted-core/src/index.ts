@@ -554,7 +554,7 @@ export class HostedSharingService {
     const rawEntries = parsed.entries;
     if (!Array.isArray(rawEntries)) throw new Error("hosted session entries must be an array");
     const entries = rawEntries.map((entry) => {
-      const record = parseSerializedRecord(JSON.stringify(entry), "hosted upload entry");
+      const record = parseSerializedRecord(JSON.stringify(entry), "hosted upload entry", Math.max(HOSTED_SERIALIZED_MAX_BYTES, this.#limits.maxSessionBytes * 2 + 64 * 1024));
       if (typeof record.bytes !== "string") throw new Error("hosted upload bytes must be base64 text");
       return { entryId: String(record.entryId), relativePath: String(record.relativePath), bytes: decodeBoundedBase64(record.bytes, this.#limits.maxSessionBytes, "hosted upload bytes") };
     });
