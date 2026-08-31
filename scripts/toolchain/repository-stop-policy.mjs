@@ -283,6 +283,15 @@ function replaceTypeScriptEnvironment(target, source) {
   for (const loader of source.loaders) target.loaders.add(loader);
 }
 
+function transparentTypeScriptExpression(node) {
+  let current = node;
+  while (current && (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current) || ts.isNonNullExpression(current))) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function typescriptDeclaresInfrastructure(text, filename) {
   const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
@@ -302,16 +311,20 @@ function typescriptDeclaresInfrastructure(text, filename) {
   };
 
   const isLoaderAlias = (node, loaders) => {
+    node = transparentTypeScriptExpression(node);
     if (!node) return false;
     if (ts.isIdentifier(node)) return node.text === "require" || loaders.has(node.text);
     if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node) && !ts.isFunctionDeclaration(node) || node.parameters.length !== 1 ||
       !ts.isIdentifier(node.parameters[0].name) || !node.body) return false;
     const parameter = node.parameters[0].name.text;
-    const expression = ts.isBlock(node.body) ? node.body.statements.find(ts.isReturnStatement)?.expression : node.body;
-    return Boolean(expression && ts.isCallExpression(expression) &&
-      (expression.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(expression.expression) &&
-        (expression.expression.text === "require" || loaders.has(expression.expression.text))) &&
-      ts.isIdentifier(expression.arguments[0]) && expression.arguments[0].text === parameter);
+    const expression = transparentTypeScriptExpression(ts.isBlock(node.body) ?
+      node.body.statements.find(ts.isReturnStatement)?.expression : node.body);
+    const callee = expression && ts.isCallExpression(expression) ? transparentTypeScriptExpression(expression.expression) : undefined;
+    const argument = expression && ts.isCallExpression(expression) ? transparentTypeScriptExpression(expression.arguments[0]) : undefined;
+    return Boolean(expression && ts.isCallExpression(expression) && callee &&
+      (callee.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(callee) &&
+        (callee.text === "require" || loaders.has(callee.text))) &&
+      argument && ts.isIdentifier(argument) && argument.text === parameter);
   };
 
   const inspectBlock = (node, environment) => {
@@ -367,8 +380,9 @@ function typescriptDeclaresInfrastructure(text, filename) {
       inspectBlock(node, environment);
       return;
     } else if (ts.isCallExpression(node)) {
-      const loader = node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        ts.isIdentifier(node.expression) && (node.expression.text === "require" || environment.loaders.has(node.expression.text));
+      const callee = transparentTypeScriptExpression(node.expression);
+      const loader = callee.kind === ts.SyntaxKind.ImportKeyword ||
+        ts.isIdentifier(callee) && (callee.text === "require" || environment.loaders.has(callee.text));
       if (loader) {
         if ([...typescriptStrings(node.arguments[0], environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
       }
@@ -449,11 +463,36 @@ function pythonDeclaresInfrastructure(text) {
     importModuleAliases: new Set(states.flatMap(({ importModuleAliases }) => [...importModuleAliases])),
     loaderAliases: new Set(states.flatMap(({ loaderAliases }) => [...loaderAliases])),
   });
+  const normalizeLoaderExpression = (expression) => {
+    let normalized = expression.trim();
+    let changed = true;
+    while (changed && normalized.startsWith("(") && normalized.endsWith(")")) {
+      changed = false;
+      let depth = 0;
+      let quote;
+      let escaped = false;
+      for (let index = 0; index < normalized.length; index += 1) {
+        const character = normalized[index];
+        if (escaped) { escaped = false; continue; }
+        if (character === "\\") { escaped = true; continue; }
+        if (quote) { if (character === quote) quote = undefined; continue; }
+        if (character === '"' || character === "'") { quote = character; continue; }
+        if (character === "(") depth += 1;
+        else if (character === ")") depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) break;
+        if (index === normalized.length - 1 && depth === 0) {
+          normalized = normalized.slice(1, -1).trim();
+          changed = true;
+        }
+      }
+    }
+    return normalized.replace(/^\(\s*([A-Za-z_]\w*)\s*\)\s*\.\s*import_module$/u, "$1.import_module");
+  };
   const isLoaderExpression = (expression) => {
-    const loader = expression.trim();
+    const loader = normalizeLoaderExpression(expression);
     if (state.loaderAliases.has(loader) || state.importModuleAliases.has(loader) ||
       [...state.importlibAliases].some((alias) => loader === `${alias}.import_module`)) return true;
-    const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_.]\w*(?:\.\w+)*)\s*\(\s*\1\s*\)$/u.exec(loader);
+    const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*(.+)\s*\(\s*\1\s*\)$/u.exec(loader);
     return Boolean(lambda && isLoaderExpression(lambda[2]));
   };
   const lines = text.split(/\r?\n/u);
