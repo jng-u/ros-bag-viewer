@@ -22,6 +22,13 @@ const infrastructureFiles = [
   "bundle.war",
   "package.whl",
   "viewer.deb",
+  "viewer.rpm",
+  "viewer.apk",
+  "viewer.cab",
+  "viewer.dmg",
+  "viewer.iso",
+  "viewer.crate",
+  "viewer.tar.lz4",
 ] as const;
 
 const credentialFiles = [
@@ -45,11 +52,20 @@ const infrastructureContents = [
   ["src/constant.ts", "const target = \"@pulumi/" + "aws\"; await import(target)"],
   ["src/reassigned.ts", "let target = \"safe-package\"; target = \"@pulumi/" + "aws\"; await import(target)"],
   ["src/compound.ts", "let target = \"@pulumi/\"; target += \"aws\"; await import(target)"],
+  ["src/conditional.ts", "let target = \"@pulumi/" + "aws\"; if (enabled) target = \"safe-package\"; await import(target)"],
+  ["src/conditional-hostile.ts", "let target = \"safe-package\"; if (enabled) target = \"@pulumi/" + "aws\"; await import(target)"],
+  ["src/import-alias.ts", "const load = (name: string) => import(name); load(\"@pulumi/" + "aws\")"],
+  ["src/require-alias.ts", "const load = require; load(\"aws-" + "cdk-lib\")"],
   ["infra/aliased.py", "import importlib as loader\nloader.import_module(\"aws_" + "cdk.aws_s3\")"],
   ["infra/concatenated.py", "__import__(\"aws_\" + \"cdk\")"],
   ["infra/constant.py", "target = \"pulumi_" + "aws\"\n__import__(target)"],
+  ["infra/conditional.py", "target = \"pulumi_" + "aws\"\nif enabled:\n  target = \"safe_package\"\n__import__(target)"],
+  ["infra/conditional-hostile.py", "target = \"safe_package\"\nif enabled:\n  target = \"pulumi_" + "aws\"\n__import__(target)"],
+  ["infra/loader-alias.py", "import importlib\nload = importlib.import_module\nload(\"aws_" + "cdk.aws_s3\")"],
   ["deployment.yaml", "kind: Deployment\napiVersion: apps/v1\nmetadata:\n  name: viewer"],
   ["resources.yaml", "items:\n  - apiVersion: v1\n    kind: ConfigMap\n    metadata:\n      name: viewer"],
+  ["quoted.yaml", "\"apiVersion\": v1\n'kind': ConfigMap"],
+  ["flow.yaml", "resource: { apiVersion: v1, kind: ConfigMap, metadata: { name: viewer } }"],
   ["deployment.json", "{\"items\":[{\"kind\":\"CustomResourceDefinition\",\"apiVersion\":\"apiextensions.k8s.io/v1\"}]}"],
 ] as const;
 
@@ -61,6 +77,9 @@ const credentialContents = [
   ["tokens.yaml", "session_" + "token: super-secret-token-value"],
   ["tokens.yaml", "npm_" + "token: super-secret-token-value"],
   ["tokens.yaml", "secret_" + "token: super-secret-token-value"],
+  ["src/github.ts", "const githubToken = \"" + "ghp_" + "A".repeat(36) + "\""],
+  ["src/token.ts", "const token = \"Abc123TokenSecretValue987\""],
+  ["tools/token.py", "token = \"Abc123TokenSecretValue987\""],
 ] as const;
 
 const allowed = [
@@ -70,6 +89,8 @@ const allowed = [
   ["src/module-name.ts", "const documented = \"aws-" + "cdk-lib\"; void documented"],
   ["src/safe-import.ts", "import \"aws-cdk-lite\""],
   ["src/reassigned-safe.ts", "let target = \"@pulumi/" + "aws\"; target = \"safe-package\"; await import(target)"],
+  ["src/id_parser.ts", "export const parse = (value: string) => value"],
+  ["src/token-placeholder.ts", "const token = \"replace-me\""],
   ["tools/safe.py", "target = \"pulumi_aws\"\nprint(target)"],
   ["helm/values-reference.md", ""],
   ["config/values.yaml", "image: viewer"],
@@ -88,6 +109,9 @@ const allowed = [
   ["separate.yaml", "apiVersion: v1\n---\nkind: note"],
   ["separate-items.yaml", "items:\n  - apiVersion: v1\n  - kind: note"],
   ["split.json", "{\"metadata\":{\"apiVersion\":\"v1\"},\"spec\":{\"kind\":\"note\"}}"],
+  ["lexer.json", "{\"token\":{\"kind\":\"identifier\",\"start\":0,\"end\":3}}"],
+  ["schema.json", "{\"properties\":{\"token\":{\"type\":\"string\"}}}"],
+  ["descriptor.json", "{\"token\":\"identifier\"}"],
 ] as const;
 
 describe("structured repository stop policy", () => {

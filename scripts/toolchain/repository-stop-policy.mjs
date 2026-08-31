@@ -37,6 +37,10 @@ function jsonContainsKubernetesResource(value) {
 
 function yamlContainsKubernetesResource(text) {
   return text.split(/^\s*(?:---|\.\.\.)\s*$/gmu).some((document) => {
+    const flowResource = document.includes("{") && [...document.matchAll(/\{([^{}]{0,65536})/gu)]
+      .some(([, object]) => /(?:^|,)\s*["']?apiVersion["']?\s*:/u.test(object) &&
+        /(?:^|,)\s*["']?kind["']?\s*:/u.test(object));
+    if (flowResource) return true;
     const containers = new Map();
     const sequences = new Map();
     const keysByScope = new Map();
@@ -52,7 +56,7 @@ function yamlContainsKubernetesResource(text) {
         for (const level of [...sequences.keys()]) if (level >= indentation) sequences.delete(level);
         sequences.set(indentation, nextScope += 1);
       }
-      const entry = /^\s*(?:-\s+)?(apiVersion|kind)\s*:\s*([^#\s][^#]*?)\s*(?:#.*)?$/u.exec(rawLine);
+      const entry = /^\s*(?:-\s+)?["']?(apiVersion|kind)["']?\s*:\s*([^#\s][^#]*?)\s*(?:#.*)?$/u.exec(rawLine);
       const effectiveIndentation = indentation + (sequence ? 2 : 0);
       const scope = [...containers.entries(), ...sequences.entries()]
         .filter(([level]) => level < effectiveIndentation)
@@ -83,67 +87,171 @@ function hasCredentialKey(key) {
   ]).has(normalizedCredentialKey(key));
 }
 
-function typescriptString(node, constants, depth = 0) {
-  if (!node || depth > 16) return undefined;
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isIdentifier(node)) return constants.get(node.text);
-  if (ts.isParenthesizedExpression(node)) return typescriptString(node.expression, constants, depth + 1);
+function looksHardCodedSecret(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (/^(?:identifier|keyword|literal|number|string|token|unknown)$/iu.test(trimmed) ||
+    /(?:example|placeholder|documentation|not-a-secret|replace-me)/iu.test(trimmed)) return false;
+  if (/^(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})$/u.test(trimmed)) return true;
+  if (/^Bearer\s+\S{12,}$/u.test(trimmed)) return true;
+  return trimmed.length >= 16 && !/\s/u.test(trimmed) &&
+    (/[A-Z]/u.test(trimmed) && /[a-z]/u.test(trimmed) && /\d/u.test(trimmed) ||
+      /(?:secret|token|private|credential)/iu.test(trimmed));
+}
+
+function typescriptContainsCredential(text, filename) {
+  if (/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})\b/u.test(text)) return true;
+  const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
+  let found = false;
+  const inspect = (node) => {
+    if (found) return;
+    let key;
+    let expression;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      key = node.name.text;
+      expression = node.initializer;
+    } else if (ts.isPropertyAssignment(node)) {
+      key = ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name) ? node.name.text : undefined;
+      expression = node.initializer;
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      (ts.isIdentifier(node.left) || ts.isPropertyAccessExpression(node.left))) {
+      key = ts.isIdentifier(node.left) ? node.left.text : node.left.name.text;
+      expression = node.right;
+    }
+    if (key && hasCredentialKey(key) &&
+      [...typescriptStrings(expression, new Map())].some(looksHardCodedSecret)) found = true;
+    ts.forEachChild(node, inspect);
+  };
+  inspect(source);
+  return found;
+}
+
+function pythonContainsCredential(text) {
+  if (/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})\b/u.test(text)) return true;
+  return text.split(/\r?\n/u).some((line) => {
+    const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*(?:#.*)?$/u.exec(line);
+    if (!assignment || !hasCredentialKey(assignment[1])) return false;
+    return [...pythonStrings(assignment[2], new Map())].some(looksHardCodedSecret);
+  });
+}
+
+function typescriptStrings(node, constants, depth = 0) {
+  if (!node || depth > 16) return new Set();
+  if (ts.isStringLiteralLike(node)) return new Set([node.text]);
+  if (ts.isIdentifier(node)) return new Set(constants.get(node.text) ?? []);
+  if (ts.isParenthesizedExpression(node)) return typescriptStrings(node.expression, constants, depth + 1);
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const left = typescriptString(node.left, constants, depth + 1);
-    const right = typescriptString(node.right, constants, depth + 1);
-    return left === undefined || right === undefined ? undefined : left + right;
+    const values = new Set();
+    for (const left of typescriptStrings(node.left, constants, depth + 1)) {
+      for (const right of typescriptStrings(node.right, constants, depth + 1)) {
+        if (values.size >= 32) return values;
+        values.add(left + right);
+      }
+    }
+    return values;
   }
   if (ts.isTemplateExpression(node)) {
-    let value = node.head.text;
+    let values = new Set([node.head.text]);
     for (const span of node.templateSpans) {
-      const expression = typescriptString(span.expression, constants, depth + 1);
-      if (expression === undefined) return undefined;
-      value += expression + span.literal.text;
+      const next = new Set();
+      for (const prefix of values) {
+        for (const expression of typescriptStrings(span.expression, constants, depth + 1)) {
+          if (next.size >= 32) break;
+          next.add(prefix + expression + span.literal.text);
+        }
+      }
+      values = next;
     }
-    return value;
+    return values;
   }
-  return undefined;
+  return new Set();
+}
+
+function mergeTypeScriptConstants(...environments) {
+  const merged = new Map();
+  for (const environment of environments) {
+    for (const [name, values] of environment) {
+      const combined = merged.get(name) ?? new Set();
+      for (const value of values) combined.add(value);
+      merged.set(name, combined);
+    }
+  }
+  return merged;
+}
+
+function replaceTypeScriptConstants(target, source) {
+  target.clear();
+  for (const [name, values] of source) target.set(name, new Set(values));
 }
 
 function typescriptDeclaresInfrastructure(text, filename) {
   const kind = filename.endsWith(".tsx") || filename.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, false, kind);
   const constants = new Map();
+  const loaderAliases = new Set();
   let found = false;
 
   const assign = (environment, name, expression, operator = ts.SyntaxKind.EqualsToken) => {
-    const value = typescriptString(expression, environment);
+    const values = typescriptStrings(expression, environment);
     if (operator === ts.SyntaxKind.PlusEqualsToken) {
-      const current = environment.get(name);
-      if (current !== undefined && value !== undefined) environment.set(name, current + value);
+      const current = environment.get(name) ?? new Set();
+      const combined = new Set();
+      for (const left of current) for (const right of values) combined.add(left + right);
+      if (combined.size > 0) environment.set(name, combined);
       else environment.delete(name);
-    } else if (value === undefined) environment.delete(name);
-    else environment.set(name, value);
+    } else if (values.size === 0) environment.delete(name);
+    else environment.set(name, values);
+  };
+
+  const isLoaderAlias = (node) => {
+    if (!node) return false;
+    if (ts.isIdentifier(node)) return node.text === "require" || loaderAliases.has(node.text);
+    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node) || node.parameters.length !== 1 ||
+      !ts.isIdentifier(node.parameters[0].name)) return false;
+    const parameter = node.parameters[0].name.text;
+    const expression = ts.isBlock(node.body) ? node.body.statements.find(ts.isReturnStatement)?.expression : node.body;
+    return Boolean(expression && ts.isCallExpression(expression) &&
+      (expression.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        ts.isIdentifier(expression.expression) && expression.expression.text === "require") &&
+      ts.isIdentifier(expression.arguments[0]) && expression.arguments[0].text === parameter);
   };
 
   const inspect = (node, environment = constants) => {
     if (found) return;
     if (ts.isImportDeclaration(node)) {
-      const value = typescriptString(node.moduleSpecifier, environment);
-      if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+      if ([...typescriptStrings(node.moduleSpecifier, environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-      const value = typescriptString(node.moduleSpecifier, environment);
-      if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+      if ([...typescriptStrings(node.moduleSpecifier, environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       if (node.initializer) inspect(node.initializer, environment);
       assign(environment, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
+      if (isLoaderAlias(node.initializer)) loaderAliases.add(node.name.text);
+      else loaderAliases.delete(node.name.text);
       return;
     } else if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) &&
       [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind)) {
       inspect(node.right, environment);
       assign(environment, node.left.text, node.right, node.operatorToken.kind);
+      if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        if (isLoaderAlias(node.right)) loaderAliases.add(node.left.text);
+        else loaderAliases.delete(node.left.text);
+      }
+      return;
+    } else if (ts.isIfStatement(node)) {
+      inspect(node.expression, environment);
+      const before = mergeTypeScriptConstants(environment);
+      const whenTrue = mergeTypeScriptConstants(before);
+      const whenFalse = mergeTypeScriptConstants(before);
+      inspect(node.thenStatement, whenTrue);
+      if (node.elseStatement) inspect(node.elseStatement, whenFalse);
+      replaceTypeScriptConstants(environment, mergeTypeScriptConstants(whenTrue, whenFalse));
       return;
     } else if (ts.isCallExpression(node)) {
       const loader = node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        ts.isIdentifier(node.expression) && node.expression.text === "require";
+        ts.isIdentifier(node.expression) && (node.expression.text === "require" || loaderAliases.has(node.expression.text));
       if (loader) {
-        const value = typescriptString(node.arguments[0], environment);
-        if (value !== undefined && infrastructureModulePattern.test(value)) found = true;
+        if ([...typescriptStrings(node.arguments[0], environment)].some((value) => infrastructureModulePattern.test(value))) found = true;
       }
     } else if (ts.isFunctionLike(node)) {
       const localConstants = new Map(environment);
@@ -171,12 +279,12 @@ function decodeQuotedText(value) {
   return undefined;
 }
 
-function pythonString(expression, constants, depth = 0) {
+function pythonStrings(expression, constants, depth = 0) {
   const trimmed = expression.trim();
-  if (depth > 16) return undefined;
-  if (/^[A-Za-z_]\w*$/u.test(trimmed)) return constants.get(trimmed);
+  if (depth > 16) return new Set();
+  if (/^[A-Za-z_]\w*$/u.test(trimmed)) return new Set(constants.get(trimmed) ?? []);
   const direct = decodeQuotedText(trimmed);
-  if (direct !== undefined) return direct;
+  if (direct !== undefined) return new Set([direct]);
   let quote;
   let escaped = false;
   let start = 0;
@@ -189,40 +297,61 @@ function pythonString(expression, constants, depth = 0) {
     if (character === '"' || character === "'") { quote = character; continue; }
     if (character === "+") { parts.push(trimmed.slice(start, index)); start = index + 1; }
   }
-  if (quote || parts.length === 0) return undefined;
+  if (quote || parts.length === 0) return new Set();
   parts.push(trimmed.slice(start));
-  const values = parts.map((part) => pythonString(part, constants, depth + 1));
-  return values.some((value) => value === undefined) ? undefined : values.join("");
+  let values = new Set([""]);
+  for (const part of parts) {
+    const next = new Set();
+    for (const prefix of values) for (const suffix of pythonStrings(part, constants, depth + 1)) next.add(prefix + suffix);
+    values = next;
+  }
+  return values;
 }
 
 function pythonDeclaresInfrastructure(text) {
   const constants = new Map();
   const importlibAliases = new Set(["importlib"]);
   const importModuleAliases = new Set();
+  const loaderAliases = new Set(["__import__"]);
   const lines = text.split(/\r?\n/u);
-  for (let pass = 0; pass < 4; pass += 1) {
-    for (const line of lines) {
-      const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/u.exec(line);
-      if (!assignment) continue;
-      const value = pythonString(assignment[2], constants);
-      if (value !== undefined) constants.set(assignment[1], value);
-    }
-  }
+  const conditionals = [];
   for (const line of lines) {
+    const indentation = /^\s*/u.exec(line)[0].length;
+    while (conditionals.length > 0 && indentation <= conditionals.at(-1).indentation && !/^\s*(?:elif|else)\b/u.test(line)) {
+      const conditional = conditionals.pop();
+      replaceTypeScriptConstants(constants, mergeTypeScriptConstants(conditional.before, constants));
+    }
+    if (/^\s*(?:if|elif)\b.*:\s*(?:#.*)?$/u.test(line)) {
+      conditionals.push({ indentation, before: mergeTypeScriptConstants(constants) });
+      continue;
+    }
     const importlib = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/u.exec(line);
     if (importlib) importlibAliases.add(importlib[1] ?? "importlib");
     const importModule = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(line);
-    if (importModule) importModuleAliases.add(importModule[1] ?? "import_module");
+    if (importModule) {
+      importModuleAliases.add(importModule[1] ?? "import_module");
+      loaderAliases.add(importModule[1] ?? "import_module");
+    }
     const directImport = /^\s*(?:from|import)\s+(aws_cdk|cdktf|pulumi(?:_[A-Za-z0-9_]+)?)(?:\b|\.)/u.exec(line);
     if (directImport) return true;
-  }
-  const loaders = ["__import__", ...importModuleAliases, ...[...importlibAliases].map((alias) => `${alias}.import_module`)]
-    .map((loader) => loader.replace(".", "\\."))
-    .join("|");
-  const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
-  for (const match of text.matchAll(calls)) {
-    const value = pythonString(match[1].split(",", 1)[0], constants);
-    if (value !== undefined && /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value)) return true;
+    const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/u.exec(line);
+    if (assignment) {
+      const values = pythonStrings(assignment[2], constants);
+      if (values.size > 0) constants.set(assignment[1], values);
+      else constants.delete(assignment[1]);
+      const loader = assignment[2].trim();
+      if (loaderAliases.has(loader) || importModuleAliases.has(loader) ||
+        [...importlibAliases].some((alias) => loader === `${alias}.import_module`)) loaderAliases.add(assignment[1]);
+      else loaderAliases.delete(assignment[1]);
+    }
+    const loaders = [...loaderAliases, ...importModuleAliases, ...[...importlibAliases].map((alias) => `${alias}.import_module`)]
+      .map((loader) => loader.replace(".", "\\."))
+      .join("|");
+    const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
+    for (const match of line.matchAll(calls)) {
+      const values = pythonStrings(match[1].split(",", 1)[0], constants);
+      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    }
   }
   return false;
 }
@@ -274,7 +403,7 @@ export function repositoryStopReason(filename, content) {
       /^(?:access|auth|github|npm)[-_]?tokens?(?:$|[-_.])/u.test(name) ||
       /^(?:bearer|oauth2?|refresh|session)(?:[-_](?:tokens?|credentials?|secrets?))?\.(?:conf|ini|json|toml|txt|ya?ml)$/u.test(name) ||
       /^id[-_](?:tokens?|credentials?|secrets?)(?:$|[-_.])/u.test(name) ||
-      /^id_[a-z0-9][a-z0-9._-]*$/u.test(name) ||
+      /^id_(?:rsa|dsa|ecdsa|ed25519)(?:$|[.])/u.test(name) ||
       [".npmrc", ".netrc", ".pypirc", ".git-credentials", "application_default_credentials.json", "kubeconfig"].includes(name) ||
       normalized === ".aws/config" || normalized.endsWith("/.aws/config") ||
       credentialDirectories.has(segments.slice(0, -1).join("/")) || segments.some((segment) => credentialDirectories.has(segment)) ||
@@ -286,8 +415,9 @@ export function repositoryStopReason(filename, content) {
       /^private(?:[-_.].*)?\.pem$/u.test(name) ||
       /^(?:google|gcp|azure)[-_.].*credentials?(?:$|[-_.])/u.test(name) ||
       /\.(?:key|p12|pfx|jks|keystore)$/u.test(name)) return "credentials";
-  if (jsonContains(json, (key, value) => hasCredentialKey(key) &&
-      (typeof value === "string" ? value.length >= 8 : value !== undefined && value !== null))) return "credentials";
+  if (jsonContains(json, (key, value) => hasCredentialKey(key) && looksHardCodedSecret(value))) return "credentials";
+  if (/\.(?:[cm]?[jt]sx?)$/u.test(name) && typescriptContainsCredential(text, name) ||
+      name.endsWith(".py") && pythonContainsCredential(text)) return "credentials";
   if (/-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/u.test(text) ||
       text.includes("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----") ||
       /["']type["']\s*:\s*["']service_account["']/u.test(text) && /["']private_key["']\s*:/u.test(text) ||
@@ -297,11 +427,11 @@ export function repositoryStopReason(filename, content) {
       /(?:^|\n)\s*clusters\s*:/u.test(text) && /(?:^|\n)\s*contexts\s*:/u.test(text) &&
         /(?:^|\n)\s*users\s*:/u.test(text) && /(?:^|\n)\s*current-context\s*:/u.test(text) &&
         /(?:token|client-key-data|client-certificate-data|password)\s*:/u.test(text) ||
-      !sourceCode && /(?:^|[,{\n]\s*)["']?(?:access[_-]?token|auth(?:orization)?[_-]?token|api[_-]?key|client[_-]?secret|github[_-]?token|id[_-]?token|npm[_-]?token|private[_-]?key|refresh[_-]?token|secret[_-]?token|session[_-]?token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
-      !sourceCode && /(?:^|[,{\n]\s*)["']?(?:authorization|token)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
+      !sourceCode && !json && /(?:^|[,{\n]\s*)["']?(?:access[_-]?token|auth(?:orization)?[_-]?token|api[_-]?key|client[_-]?secret|github[_-]?token|id[_-]?token|npm[_-]?token|private[_-]?key|refresh[_-]?token|secret[_-]?token|session[_-]?token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
+      !sourceCode && !json && /(?:^|[,{\n]\s*)["']?(?:authorization|token)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{8,}/iu.test(text) ||
       /(?:^|\n)\s*authorization\s*:\s*bearer\s+\S+/iu.test(text) ||
       structuredTextContainsCredential(name, text)) return "credentials";
-  const archiveName = /(?:\.tar\.(?:br|xz)|\.(?:zip|tar|tgz|gz|bz2|xz|zst|7z|rar|jar|war|whl|deb))$/u.test(name);
+  const archiveName = /(?:\.tar\.(?:br|lz4|xz)|\.(?:zip|tar|tgz|gz|bz2|xz|zst|7z|rar|jar|war|whl|deb|rpm|apk|cab|dmg|iso|crate))$/u.test(name);
   const helmPath = segments.length === 1 || segments.some((segment) => ["chart", "charts", "helm"].includes(segment));
   const helmFile = name === "chart.lock" || /^(?:chart)\.ya?ml$/u.test(name) ||
     helmPath && /^(?:values(?:[-_.][a-z0-9-]+)?)\.ya?ml$/u.test(name);
