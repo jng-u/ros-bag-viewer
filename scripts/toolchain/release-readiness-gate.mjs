@@ -156,9 +156,21 @@ function checkReproducibility() {
   }
 }
 
+function validateProtocolSchemaV1() {
+  run("corepack", [
+    "pnpm",
+    "vitest",
+    "run",
+    "packages/protocol/test/index.test.ts",
+    "packages/protocol/test/conformance-v1.test.ts",
+    "packages/extension-api/test/index.test.ts",
+  ]);
+}
+
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 validateEvidence(evidence);
 validateRepositoryStops();
+validateProtocolSchemaV1();
 if (process.argv.includes("--check-reproducibility")) {
   checkReproducibility();
   validateGeneratedSupplyChainArtifacts();

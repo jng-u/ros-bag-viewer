@@ -2,11 +2,11 @@
 
 The workspace-private `@ros-web-viewer/extension-api` package exposes version 1 of the reviewed display lifecycle to statically imported packages. Registration is exact-version and fail-closed. The host grants only requested capabilities from this closed set:
 
-- transient normalized source messages;
+- bounded, source-detached normalized message snapshots;
 - bounded opaque resource handles; and
 - bounded structured diagnostics.
 
-Extensions follow `register -> instantiate -> configure -> attachSource -> update -> render`, with explicit `suspend`, `handleError`, and idempotent `dispose`. A source epoch must advance monotonically. Advancing it disposes all handles from the prior epoch, and stale messages are rejected before an extension callback runs. Callback failures enter the error state and revoke all handles.
+Extensions follow `register -> instantiate -> configure -> attachSource -> update -> render`, with explicit `suspend`, `handleError`, and idempotent `dispose`. A source epoch must advance monotonically. Advancing it disposes all handles from the prior epoch, and stale messages are rejected before an extension callback runs. Each accepted message value is copied under a host-owned byte ceiling (8 MiB by default) before the callback, so retained semantic data cannot alias source-owned storage. Callback failures enter the error state and revoke all handles.
 
 The host surface does not expose WebGL contexts, Worker internals, storage or hosted grants, relay or edge credentials, ROS publish/service/action/parameter/raw-command operations, module loaders, dynamic import, or evaluation functions. Descriptor and lifecycle objects reject extra operations, capability negotiation is immutable, and handles and diagnostics have host-owned ceilings.
 

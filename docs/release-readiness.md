@@ -46,7 +46,23 @@ The M1 benchmark is a deterministic operation-cost and logical-allocation model.
 corepack pnpm install --frozen-lockfile
 corepack pnpm lint
 corepack pnpm typecheck
-corepack pnpm test
+corepack pnpm test:unit
+corepack pnpm test:integration
+corepack pnpm test:e2e
+corepack pnpm check:m0
+corepack pnpm check:m1
+corepack pnpm check:m2
+corepack pnpm check:m3
+corepack pnpm check:m4
+corepack pnpm check:m5
+corepack pnpm test:security
+corepack pnpm test:a11y
+corepack pnpm test:ux
+corepack pnpm test:toolchain
+corepack pnpm exec vitest run packages/render-core/test/index.test.ts packages/source-live/test/index.test.ts packages/source-hosted/test/index.test.ts tests/m4-hosted/lifecycle.test.ts
+corepack pnpm release:readiness
+corepack pnpm evidence:semantic
+corepack pnpm evidence:m3
 corepack pnpm build
 node benchmarks/scenarios/run-m1-dimensional.mjs --check
 corepack pnpm exec vitest run --config benchmarks/scenarios/vitest.config.ts

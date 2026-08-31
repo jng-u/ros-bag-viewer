@@ -176,6 +176,33 @@ describe("TrustedExtensionHost conformance", () => {
     expect(instance.telemetry()).toMatchObject({ activeHandles: 0, resourceBytes: 0 });
   });
 
+  it("delivers bounded source-detached snapshots rather than retaining caller-owned message values", () => {
+    let received: { readonly nested: { value: number } } | undefined;
+    const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes: 32 } });
+    host.register({
+      apiVersion: 1,
+      id: "snapshot-probe",
+      requiredCapabilities: ["source-messages"],
+      create() {
+        return lifecycle({ update: (message) => (received = message.value as { readonly nested: { value: number } }) });
+      },
+    });
+    const instance = host.instantiate("snapshot-probe", "snapshot-instance");
+    const callerOwned = { nested: { value: 1 } };
+    instance.configure({});
+    instance.attachSource(1);
+    instance.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: callerOwned });
+    callerOwned.nested.value = 2;
+    expect(received).toEqual({ nested: { value: 1 } });
+    expect(Object.isFrozen(received)).toBe(true);
+    expect(Object.isFrozen(received?.nested)).toBe(true);
+    instance.attachSource(2);
+    expect(received).toEqual({ nested: { value: 1 } });
+    expect(() =>
+      instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: { oversized: "x".repeat(64) } }),
+    ).toThrow(/snapshot byte budget exceeded/);
+  });
+
   it("bounds resource handles and diagnostics and cleans up after callback failures", () => {
     const handles: TrustedResourceHandle[] = [];
     const host = new TrustedExtensionHost({
@@ -217,6 +244,59 @@ describe("TrustedExtensionHost conformance", () => {
       lastError: "synthetic update failure",
     });
     expect(instance.telemetry().diagnostics).toHaveLength(1);
+  });
+
+  it("revokes handles allocated by a factory that fails during instantiation", () => {
+    let leaked: TrustedResourceHandle | undefined;
+    const host = new TrustedExtensionHost();
+    host.register({
+      apiVersion: 1,
+      id: "failing-factory",
+      requiredCapabilities: ["bounded-resources"],
+      create(context) {
+        leaked = context.allocateResource("text-buffer", 4);
+        throw new Error("factory failed");
+      },
+    });
+
+    expect(() => host.instantiate("failing-factory", "factory-instance")).toThrow(/factory failed/);
+    expect(leaked?.disposed).toBe(true);
+  });
+
+  it("surfaces both an operation failure and a failing error callback", () => {
+    const host = new TrustedExtensionHost();
+    host.register({
+      apiVersion: 1,
+      id: "double-failure",
+      requiredCapabilities: [],
+      create() {
+        return lifecycle({
+          configure: () => {
+            throw new Error("configure failed");
+          },
+          handleError: () => {
+            throw new Error("error callback failed");
+          },
+        });
+      },
+    });
+    const instance = host.instantiate("double-failure", "double-failure-instance");
+
+    let failure: unknown;
+    try {
+      instance.configure({});
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "configure failed" }),
+      expect.objectContaining({ message: "error callback failed" }),
+    ]);
+    expect(instance.telemetry()).toMatchObject({
+      state: "error",
+      lastError: "configure failed; handleError failed: error callback failed",
+    });
   });
 });
 

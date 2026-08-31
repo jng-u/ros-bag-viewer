@@ -1,5 +1,21 @@
 export const TRUSTED_EXTENSION_API_VERSION = 1 as const;
 
+export const TRUSTED_EXTENSION_CAPABILITIES = Object.freeze([
+  "bounded-resources",
+  "diagnostics",
+  "source-messages",
+] as const);
+
+export const TRUSTED_EXTENSION_OPERATIONS = Object.freeze([
+  "attachSource",
+  "configure",
+  "dispose",
+  "handleError",
+  "render",
+  "suspend",
+  "update",
+] as const);
+
 export type TrustedExtensionCapability = "diagnostics" | "bounded-resources" | "source-messages";
 export type TrustedResourceKind = "geometry-buffer" | "texture" | "text-buffer";
 export type TrustedDiagnosticLevel = "info" | "warning" | "error";
@@ -19,6 +35,7 @@ export interface TrustedExtensionLimits {
   readonly maxResourceBytesPerInstance: number;
   readonly maxDiagnosticsPerInstance: number;
   readonly maxDiagnosticLength: number;
+  readonly maxMessageSnapshotBytes: number;
 }
 
 export const DEFAULT_TRUSTED_EXTENSION_LIMITS: TrustedExtensionLimits = Object.freeze({
@@ -27,6 +44,7 @@ export const DEFAULT_TRUSTED_EXTENSION_LIMITS: TrustedExtensionLimits = Object.f
   maxResourceBytesPerInstance: 64 * 1_024 * 1_024,
   maxDiagnosticsPerInstance: 128,
   maxDiagnosticLength: 1_024,
+  maxMessageSnapshotBytes: 8 * 1_024 * 1_024,
 });
 
 export interface TrustedDiagnostic {
@@ -93,16 +111,8 @@ export interface TrustedExtensionTelemetry {
 }
 
 const DEFINITION_KEYS = Object.freeze(["apiVersion", "create", "id", "requiredCapabilities"]);
-const LIFECYCLE_KEYS = Object.freeze([
-  "attachSource",
-  "configure",
-  "dispose",
-  "handleError",
-  "render",
-  "suspend",
-  "update",
-]);
-const CAPABILITIES = new Set<TrustedExtensionCapability>(["diagnostics", "bounded-resources", "source-messages"]);
+const LIFECYCLE_KEYS: readonly string[] = TRUSTED_EXTENSION_OPERATIONS;
+const CAPABILITIES = new Set<TrustedExtensionCapability>(TRUSTED_EXTENSION_CAPABILITIES);
 const RESOURCE_KINDS = new Set<TrustedResourceKind>(["geometry-buffer", "texture", "text-buffer"]);
 const DIAGNOSTIC_LEVELS = new Set<TrustedDiagnosticLevel>(["info", "warning", "error"]);
 const IDENTIFIER = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -129,6 +139,45 @@ function assertEpoch(epoch: number): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const textEncoder = new TextEncoder();
+
+function snapshotBytes(value: unknown, seen = new Set<object>()): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "boolean") return 1;
+  if (typeof value === "number" || typeof value === "bigint") return 8;
+  if (typeof value === "string") return textEncoder.encode(value).byteLength;
+  if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
+  if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated object references");
+  seen.add(value);
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value.byteLength;
+  if (Array.isArray(value)) return value.reduce((total, item) => total + snapshotBytes(item, seen), 0);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error("extension message snapshot must contain only plain data");
+  }
+  return Object.entries(value).reduce(
+    (total, [key, item]) => total + textEncoder.encode(key).byteLength + snapshotBytes(item, seen),
+    0,
+  );
+}
+
+function freezeSnapshot<T>(value: T, seen = new Set<object>()): T {
+  if (typeof value !== "object" || value === null || ArrayBuffer.isView(value)) return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  for (const item of Object.values(value)) freezeSnapshot(item, seen);
+  return Object.freeze(value);
+}
+
+function boundedSnapshot<T>(value: T, maxBytes: number): T {
+  if (snapshotBytes(value) > maxBytes) throw new Error("extension message snapshot byte budget exceeded");
+  try {
+    return freezeSnapshot(structuredClone(value));
+  } catch (error) {
+    throw new Error(`extension message snapshot is not cloneable: ${errorMessage(error)}`, { cause: error });
+  }
 }
 
 class ResourceHandle implements TrustedResourceHandle {
@@ -212,13 +261,18 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
         this.#diagnostics.push(Object.freeze({ sequence: this.#nextDiagnostic++, level, code, message }));
       },
     });
-    const implementation = create(context);
-    if (implementation === null || typeof implementation !== "object") throw new Error("extension create must return a lifecycle");
-    assertExactKeys(implementation, LIFECYCLE_KEYS, "extension lifecycle");
-    if (LIFECYCLE_KEYS.some((key) => typeof Reflect.get(implementation, key) !== "function")) {
-      throw new Error("extension lifecycle operations must be functions");
+    try {
+      const implementation = create(context);
+      if (implementation === null || typeof implementation !== "object") throw new Error("extension create must return a lifecycle");
+      assertExactKeys(implementation, LIFECYCLE_KEYS, "extension lifecycle");
+      if (LIFECYCLE_KEYS.some((key) => typeof Reflect.get(implementation, key) !== "function")) {
+        throw new Error("extension lifecycle operations must be functions");
+      }
+      this.#implementation = implementation;
+    } catch (error) {
+      this.#disposeResources();
+      throw error;
     }
-    this.#implementation = implementation;
   }
 
   get state(): TrustedExtensionState {
@@ -249,7 +303,13 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
     }
     assertEpoch(message.sourceEpoch);
     if (message.sourceEpoch !== this.#sourceEpoch) throw new Error("stale source epoch");
-    this.#invoke(() => this.#implementation.update(Object.freeze(message)));
+    const snapshot = Object.freeze({
+      sourceEpoch: message.sourceEpoch,
+      topic: message.topic,
+      schemaName: message.schemaName,
+      value: boundedSnapshot(message.value, this.limits.maxMessageSnapshotBytes),
+    });
+    this.#invoke(() => this.#implementation.update(snapshot));
     this.#transition("rendering");
   }
 
@@ -314,10 +374,19 @@ export class TrustedExtensionInstance<TConfig = unknown, TMessage = unknown> {
       this.#lastError = errorMessage(error);
       this.#disposeResources();
       if (this.#state !== "error") this.#transition("error");
+      const operationError = error instanceof Error ? error : new Error(String(error));
       try {
-        this.#implementation?.handleError(error instanceof Error ? error : new Error(String(error)));
-      } catch {
-        // The original failure remains authoritative.
+        this.#implementation.handleError(operationError);
+      } catch (handlerError) {
+        const normalizedHandlerError = handlerError instanceof Error ? handlerError : new Error(String(handlerError));
+        this.#lastError = `${errorMessage(error)}; handleError failed: ${normalizedHandlerError.message}`;
+        throw new AggregateError(
+          [operationError, normalizedHandlerError],
+          "extension operation and handleError both failed",
+          { cause: handlerError },
+        );
+      } finally {
+        this.#disposeResources();
       }
       throw error;
     }

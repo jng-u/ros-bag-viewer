@@ -2,6 +2,14 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  TRUSTED_EXTENSION_CAPABILITIES,
+  TRUSTED_EXTENSION_OPERATIONS,
+} from "../../packages/extension-api/src/index.js";
+import {
+  V1_FROZEN_EXTENSION_CAPABILITIES,
+  V1_FROZEN_EXTENSION_OPERATIONS,
+} from "../../packages/protocol/src/conformance-v1.js";
 
 const root = process.cwd();
 const evidence = JSON.parse(readFileSync(join(root, "docs/evidence/m5-release-readiness.json"), "utf8")) as {
@@ -26,6 +34,11 @@ const evidence = JSON.parse(readFileSync(join(root, "docs/evidence/m5-release-re
 };
 
 describe("M5 release hardening", () => {
+  it("freezes the protocol fixture to the exact extension API surface", () => {
+    expect(V1_FROZEN_EXTENSION_OPERATIONS).toEqual(TRUSTED_EXTENSION_OPERATIONS);
+    expect(V1_FROZEN_EXTENSION_CAPABILITIES).toEqual(TRUSTED_EXTENSION_CAPABILITIES);
+  });
+
   it("maps AC-01 through AC-17 to machine evidence without converting limitations into certification", () => {
     expect(evidence.acceptanceCriteria.map(({ id }) => id)).toEqual(
       Array.from({ length: 17 }, (_, index) => `AC-${String(index + 1).padStart(2, "0")}`),

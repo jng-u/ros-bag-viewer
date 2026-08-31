@@ -20,6 +20,8 @@ jobs:
       - run: pnpm check:m2
       - run: pnpm check:m3
       - run: pnpm check:m4
+      - run: pnpm check:m5
+      - run: pnpm test:toolchain
       - run: pnpm evidence:m3
       - run: pnpm evidence:semantic
       - run: pnpm test:security
@@ -28,7 +30,8 @@ jobs:
       - run: pnpm build
       - run: pnpm bench:micro
       - run: pnpm bench:corpus
+      - run: pnpm exec vitest run --config benchmarks/scenarios/vitest.config.ts
       - run: pnpm audit:dependencies
       - run: pnpm report:licenses
       - run: pnpm sbom
-      - run: test -z "$(git status --porcelain)"
+      - run: pnpm release:readiness:full
