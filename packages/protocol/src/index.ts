@@ -351,6 +351,7 @@ export function parseBrowserFrameJson(
   text: string,
   limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): BrowserFrame {
+  if (typeof text !== "string") throw new ProtocolViolation("invalid-frame", "frame must be bounded serialized JSON text");
   const canonicalProtocolLimits = canonicalLimits(limits);
   if (exceedsUtf8Bytes(text, canonicalProtocolLimits.maxFrameBytes)) {
     throw new ProtocolViolation("frame-too-large", "frame exceeds the configured byte ceiling");
@@ -362,12 +363,19 @@ export function parseBrowserFrameJson(
   } catch {
     throw new ProtocolViolation("invalid-frame", "frame is not valid JSON");
   }
-  return parseBrowserFrame(value, canonicalProtocolLimits);
+  return parseBrowserFrameRecord(value, canonicalProtocolLimits);
 }
 
 export function parseBrowserFrame(
-  value: unknown,
+  text: string,
   limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
+): BrowserFrame {
+  return parseBrowserFrameJson(text, limits);
+}
+
+function parseBrowserFrameRecord(
+  value: unknown,
+  limits: ProtocolLimits,
 ): BrowserFrame {
   const canonicalProtocolLimits = canonicalLimits(limits);
   const frame = canonicalRecord(value, "frame", canonicalProtocolLimits.maxFrameBytes);

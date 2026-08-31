@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   HostedAccessError,
@@ -60,7 +60,7 @@ async function hosted(service: HostedSharingService, bytes = Uint8Array.from({ l
     ],
     relations: [{ fromEntryId: "metadata", toEntryId: "part", kind: "metadata-for" }],
   });
-  const bundle = verifyHostedManifest(descriptor.manifest, descriptor.manifestVerificationKey);
+  const bundle = verifyHostedManifest(JSON.stringify(descriptor.manifest), descriptor.manifestVerificationKey);
   return { descriptor, bundle, capability: capability(descriptor.capabilityUrl), bytes };
 }
 
@@ -99,7 +99,14 @@ describe("provider-neutral hosted sharing core", () => {
     upload.fill(99);
 
     const manifest = service.openHostedSession(capability(descriptor.capabilityUrl));
-    const bundle = verifyHostedManifest(manifest, descriptor.manifestVerificationKey);
+    const bundle = verifyHostedManifest(JSON.stringify(manifest), descriptor.manifestVerificationKey);
+    const ownKeys = vi.fn(Reflect.ownKeys);
+    const get = vi.fn(Reflect.get);
+    const hostile = new Proxy(manifest, { get, ownKeys });
+    expect(() => verifyHostedManifest(hostile as unknown as string, descriptor.manifestVerificationKey))
+      .toThrow(/bounded serialized JSON text/);
+    expect(get).not.toHaveBeenCalled();
+    expect(ownKeys).not.toHaveBeenCalled();
     expect(bundle.entries).toHaveLength(1);
     expect(bundle.entries[0]).toMatchObject({
       relativePath: "recordings/source.mcap",
@@ -132,24 +139,24 @@ describe("provider-neutral hosted sharing core", () => {
     const changedPath = tamper(manifest, (copy) => {
       (copy.payload.entries[0] as { relativePath: string }).relativePath = "recordings/other.mcap";
     });
-    expect(() => verifyHostedManifest(changedPath, descriptor.manifestVerificationKey)).toThrow(/signature/);
+    expect(() => verifyHostedManifest(JSON.stringify(changedPath), descriptor.manifestVerificationKey)).toThrow(/signature/);
     const changedSize = tamper(manifest, (copy) => {
       (copy.payload.entries[0] as { sizeBytes: string }).sizeBytes = "7";
     });
-    expect(() => verifyHostedManifest(changedSize, descriptor.manifestVerificationKey)).toThrow();
+    expect(() => verifyHostedManifest(JSON.stringify(changedSize), descriptor.manifestVerificationKey)).toThrow();
     const changedSession = tamper(manifest, (copy) => {
       (copy.payload as { sessionId: string }).sessionId = "D".repeat(43);
     });
-    expect(() => verifyHostedManifest(changedSession, descriptor.manifestVerificationKey)).toThrow(/signature/);
+    expect(() => verifyHostedManifest(JSON.stringify(changedSession), descriptor.manifestVerificationKey)).toThrow(/signature/);
     const oversizedKey = tamper(manifest, (copy) => {
       (copy as { publicKeySpki: string }).publicKeySpki = "A".repeat(1_000_000);
     });
-    expect(() => verifyHostedManifest(oversizedKey, descriptor.manifestVerificationKey)).toThrow(/public key encoding/);
+    expect(() => verifyHostedManifest(JSON.stringify(oversizedKey), descriptor.manifestVerificationKey)).toThrow(/public key encoding/);
     const oversizedSignature = tamper(manifest, (copy) => {
       (copy as { signature: string }).signature = "A".repeat(1_000_000);
     });
-    expect(() => verifyHostedManifest(oversizedSignature, descriptor.manifestVerificationKey)).toThrow(/signature encoding/);
-    expect(() => verifyHostedManifest(manifest, "AA")).toThrow(/trusted/);
+    expect(() => verifyHostedManifest(JSON.stringify(oversizedSignature), descriptor.manifestVerificationKey)).toThrow(/signature encoding/);
+    expect(() => verifyHostedManifest(JSON.stringify(manifest), "AA")).toThrow(/trusted/);
   });
 
   it("fails unauthorized, enumerated, expired, cross-session, cross-object, cross-version, and cross-range access closed", async () => {
@@ -252,7 +259,7 @@ describe("provider-neutral hosted sharing core", () => {
       const descriptor = await service.createHostedSession({
         entries: [{ entryId: "bag", relativePath: "recording.bag", bytes: Uint8Array.of(1, 2, 3, 4) }],
       });
-      const bundle = verifyHostedManifest(descriptor.manifest, descriptor.manifestVerificationKey);
+      const bundle = verifyHostedManifest(JSON.stringify(descriptor.manifest), descriptor.manifestVerificationKey);
       const sessionCapability = capability(descriptor.capabilityUrl);
       const entry = bundle.entries[0]!;
       const manifestEntry = descriptor.manifest.payload.entries[0]!;

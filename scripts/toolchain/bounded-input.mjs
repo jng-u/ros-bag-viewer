@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { TextDecoder } from "node:util";
 
 const READ_CHUNK_BYTES = 64 * 1024;
@@ -29,10 +29,17 @@ export function utf8ByteLengthAtMost(value, maxBytes, label = "text") {
 
 export function readBoundedBytes(path, maxBytes, label = path) {
   assertByteCeiling(maxBytes, label);
-  const descriptor = openSync(path, "r");
+  const pathBefore = lstatSync(path);
+  if (!pathBefore.isFile()) throw new Error(`${label} must be a regular non-symlink file`);
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const before = fstatSync(descriptor);
-    if (!before.isFile()) throw new Error(`${label} must be a regular file`);
+    const pathAfterOpen = lstatSync(path);
+    if (!before.isFile() || !pathAfterOpen.isFile() ||
+        pathBefore.dev !== before.dev || pathBefore.ino !== before.ino ||
+        pathAfterOpen.dev !== before.dev || pathAfterOpen.ino !== before.ino) {
+      throw new Error(`${label} must be one stable regular non-symlink file`);
+    }
     if (before.size > maxBytes) throw new Error(`${label} exceeds the byte ceiling`);
     const chunks = [];
     let total = 0;
@@ -44,7 +51,9 @@ export function readBoundedBytes(path, maxBytes, label = path) {
       total += count;
     }
     const after = fstatSync(descriptor);
+    const pathAfterRead = lstatSync(path);
     if (total > maxBytes || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+        !pathAfterRead.isFile() || pathAfterRead.dev !== after.dev || pathAfterRead.ino !== after.ino ||
         before.mtimeMs !== after.mtimeMs || total !== after.size) {
       throw new Error(`${label} changed while being read or exceeds the byte ceiling`);
     }

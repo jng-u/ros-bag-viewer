@@ -33,6 +33,7 @@ const privilegedNames = new Set([
   "global", "self", "WebAssembly", "Atomics",
   "XMLHttpRequest", "EventSource", "BroadcastChannel", "MessageChannel", "SharedWorker", "WorkerGlobalScope",
   "caches", "cookieStore", "location", "history", "crypto", "performance", "console",
+  "Proxy", "Promise", "URL", "postMessage",
 ]);
 const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect"]);
 const deniedRuntimeProperties = new Set([
@@ -70,6 +71,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKind);
   if (file.parseDiagnostics.length > 0) fail(`${filename} contains TypeScript parse errors`);
   const bound = new Set();
+  const declaredLocals = new Set();
   const bindName = (name) => {
     if (ts.isIdentifier(name)) bound.add(name.text);
     else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
@@ -81,7 +83,16 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
     if (ts.isImportClause(node) && node.name) bindName(node.name);
     if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) ||
         ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
-      if (node.name) bindName(node.name);
+      if (node.name) {
+        bindName(node.name);
+        const collectLocal = (name) => {
+          if (ts.isIdentifier(name)) declaredLocals.add(name.text);
+          else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+            for (const element of name.elements) if (ts.isBindingElement(element)) collectLocal(element.name);
+          }
+        };
+        collectLocal(node.name);
+      }
     }
     ts.forEachChild(node, collectBindings);
   };
@@ -94,6 +105,8 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   };
   let extensionApiImport = false;
   let extensionDefinitionExports = 0;
+  let trustedLifecycleCalls = 0;
+  const importedSymbols = new Map();
   const visit = (node) => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier !== undefined) {
       if (!ts.isStringLiteral(node.moduleSpecifier)) fail(`${filename} has a non-literal module specifier`);
@@ -107,6 +120,11 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         for (const element of clause.namedBindings.elements) {
           const imported = element.propertyName?.text ?? element.name.text;
           if (!allowedExtensionImports.has(imported)) fail(`${filename} imports unsupported extension-api symbol ${imported}`);
+          if (importedSymbols.has(element.name.text)) fail(`${filename} duplicates extension-api binding ${element.name.text}`);
+          importedSymbols.set(element.name.text, imported);
+          if (["defineTrustedExtension", "defineTrustedLifecycle"].includes(imported) && (clause.isTypeOnly || element.isTypeOnly)) {
+            fail(`${filename} imports runtime builder ${imported} as type-only`);
+          }
         }
         extensionApiImport = true;
       }
@@ -119,6 +137,9 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       assertModule(reference.expression.text, filename, resolveRelative);
     }
     if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression) && importedSymbols.get(node.expression.text) === "defineTrustedLifecycle") {
+        trustedLifecycleCalls += 1;
+      }
       if (ts.isIdentifier(node.expression) && !bound.has(node.expression.text) && !safeStandardGlobals.has(node.expression.text)) {
         fail(`${filename} calls unbound ambient ${node.expression.text}`);
       }
@@ -168,19 +189,33 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         fail(`${filename} accesses denied computed property ${property}`);
       }
     }
-    if (!filename.endsWith(".d.ts") && ts.isVariableStatement(node) && node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword)) {
-      for (const declaration of node.declarationList.declarations) {
-        if (declaration.initializer && ts.isCallExpression(declaration.initializer) &&
-            ts.isIdentifier(declaration.initializer.expression) && declaration.initializer.expression.text === "defineTrustedExtension") {
+    const exported = node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword) ?? false;
+    if (!filename.endsWith(".d.ts") && exported) {
+      if (ts.isVariableStatement(node)) {
+        if (node.declarationList.declarations.length !== 1) fail(`${filename} exports multiple runtime bindings`);
+        const declaration = node.declarationList.declarations[0];
+        if (declaration?.initializer && ts.isCallExpression(declaration.initializer) &&
+            ts.isIdentifier(declaration.initializer.expression) &&
+            importedSymbols.get(declaration.initializer.expression.text) === "defineTrustedExtension") {
           extensionDefinitionExports += 1;
         } else fail(`${filename} exports unsupported runtime state`);
+      } else if (!ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node)) {
+        fail(`${filename} exports unsupported runtime declaration`);
       }
+    }
+    if (!filename.endsWith(".d.ts") && (ts.isExportAssignment(node) ||
+        ts.isExportDeclaration(node) && node.moduleSpecifier === undefined)) {
+      fail(`${filename} uses an unsupported runtime export`);
     }
     ts.forEachChild(node, visit);
   };
   visit(file);
-  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1)) {
-    fail(`${filename} must import the exact extension API and export one defineTrustedExtension result`);
+  if ([...importedSymbols.keys()].some((name) => declaredLocals.has(name))) {
+    fail(`${filename} shadows an imported extension-api symbol`);
+  }
+  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 || trustedLifecycleCalls === 0 ||
+      ![...importedSymbols.values()].includes("defineTrustedExtension") || ![...importedSymbols.values()].includes("defineTrustedLifecycle"))) {
+    fail(`${filename} must call the exact imported builders and export one defineTrustedExtension result`);
   }
 }
 

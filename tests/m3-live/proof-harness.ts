@@ -213,14 +213,14 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
       const subscriptions = [...active.subscriptions.values()];
       active.subscriptions.clear();
       for (const subscription of subscriptions) {
-        const response = await relay.handleHostFrame({
+        const response = await relay.handle(JSON.stringify({
           version: 1,
           operation: "unsubscribe",
           sessionId: "m3-session",
           sequence: this.#nextRequestSequence,
           requestId: `live-request-${this.#nextRequestSequence++}`,
           subscriptionId: subscription.subscriptionId,
-        });
+        }));
         if (response.kind === "error" && response.code !== "closed") {
           throw new Error("relay rejected a bounded live unsubscribe");
         }
@@ -230,13 +230,13 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
     return {
       binding: { browserOrigin: credentials.browserOrigin, sessionId: "m3-session" },
       discoverTopics: async (): Promise<readonly LiveTopic[]> => {
-        const response = await relay.handleHostFrame({
+        const response = await relay.handle(JSON.stringify({
           version: 1,
           operation: "discover",
           sessionId: "m3-session",
           sequence: this.#nextRequestSequence,
           requestId: `live-request-${this.#nextRequestSequence++}`,
-        });
+        }));
         if (response.kind !== "discovery") throw new Error("relay rejected bounded live discovery");
         return Object.freeze(response.topics.map((topic) => Object.freeze({
           id: topic.topic,
@@ -255,7 +255,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
             const topic = liveTopics.find((candidate) => candidate.topic === topicId);
             if (!topic) throw new Error("live source requested a topic outside the relay catalog");
             const subscriptionId = `live-subscription-${this.#nextRequestSequence}`;
-            const response = await relay.handleHostFrame({
+            const response = await relay.handle(JSON.stringify({
               version: 1,
               operation: "subscribe",
               sessionId: "m3-session",
@@ -266,7 +266,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
               type: topic.type,
               maxRateHz: topic.maxRateHz,
               maxMessageBytes: topic.maxMessageBytes,
-            });
+            }));
             if (response.kind !== "ack") throw new Error("relay rejected a bounded live subscription");
             const subscription = { subscriptionId, topic, onFrame };
             active.subscriptions.set(subscriptionId, subscription);
@@ -283,14 +283,14 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
             closed = true;
             for (const subscription of opened) {
               if (!active.subscriptions.delete(subscription.subscriptionId)) continue;
-              const response = await relay.handleHostFrame({
+              const response = await relay.handle(JSON.stringify({
                 version: 1,
                 operation: "unsubscribe",
                 sessionId: "m3-session",
                 sequence: this.#nextRequestSequence,
                 requestId: `live-request-${this.#nextRequestSequence++}`,
                 subscriptionId: subscription.subscriptionId,
-              });
+              }));
               if (response.kind !== "ack") throw new Error("relay rejected a bounded live unsubscribe");
             }
           },
@@ -385,7 +385,7 @@ export async function runSyntheticLoadProof(generation: RosGeneration): Promise<
   const fixture = createSyntheticFixture(generation);
   const connection = await fixture.connect(`${generation}-connection-1`);
   for (const [index, topic] of liveTopics.entries()) {
-    const response = await connection.handleHostFrame(subscribeFrame(index, `subscription-${index}`, topic));
+    const response = await connection.handle(JSON.stringify(subscribeFrame(index, `subscription-${index}`, topic)));
     if (response.kind !== "ack") throw new Error(`failed to subscribe ${topic.topic}`);
   }
 

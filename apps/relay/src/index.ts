@@ -483,11 +483,6 @@ export class RelayConnection {
     }
   }
 
-  /** Serializes a host-owned frame before it crosses the untrusted wire boundary. */
-  async handleHostFrame(input: Readonly<Record<string, unknown>>): Promise<RelayResponse> {
-    return this.handle(JSON.stringify(input));
-  }
-
   async #discover(frame: Extract<BrowserFrame, { operation: "discover" }>): Promise<RelayResponse> {
     const reply = await this.#service.requestEdge(this.#plan({ operation: "discover" }));
     if (reply.kind !== "discovery") throw new RelayDenied("edge-unavailable", "request was rejected");

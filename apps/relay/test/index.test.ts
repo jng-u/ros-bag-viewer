@@ -140,7 +140,7 @@ describe("secure live relay", () => {
       connectionId: "connection-1",
     });
 
-    const discovery = await connection.handleHostFrame(frame(0, "discover"));
+    const discovery = await connection.handle(JSON.stringify(frame(0, "discover")));
     expect(discovery).toMatchObject({ kind: "discovery", topics: [topic] });
     expect(edge.requests[0]).toMatchObject({
       identity: { identityId: "relay-edge-1", credential: "edge-only-secret" },
@@ -158,7 +158,7 @@ describe("secure live relay", () => {
     });
     expect(JSON.stringify(edge.requests[0])).not.toContain("browser-secret");
 
-    expect(await connection.handleHostFrame(subscribe(1))).toMatchObject({ kind: "ack", operation: "subscribe" });
+    expect(await connection.handle(JSON.stringify(subscribe(1)))).toMatchObject({ kind: "ack", operation: "subscribe" });
     expect(edge.requests[1]!.plan).toMatchObject({
       operation: "subscribe",
       subscriptionId: "subscription-1",
@@ -170,7 +170,7 @@ describe("secure live relay", () => {
 
     const writes = ["publish", "call_service", "action", "set_parameter", "raw"];
     for (const operation of writes) {
-      const response = await connection.handleHostFrame({ ...frame(2), operation, payload: { dangerous: true } });
+      const response = await connection.handle(JSON.stringify({ ...frame(2), operation, payload: { dangerous: true } }));
       expect(response).toMatchObject({ kind: "error", code: "invalid-request", message: "request was rejected" });
     }
     expect(edge.requests).toHaveLength(2);
@@ -189,9 +189,9 @@ describe("secure live relay", () => {
       sessionId: "session-1",
       connectionId: "connection-1",
     });
-    expect(await first.handleHostFrame(frame(4))).toMatchObject({ kind: "health" });
-    expect(await first.handleHostFrame(frame(4))).toMatchObject({ kind: "error", code: "replayed-request" });
-    expect(await first.handleHostFrame(subscribe(5, { topic: "/not-allowed" }))).toMatchObject({ kind: "error", code: "policy-denied" });
+    expect(await first.handle(JSON.stringify(frame(4)))).toMatchObject({ kind: "health" });
+    expect(await first.handle(JSON.stringify(frame(4)))).toMatchObject({ kind: "error", code: "replayed-request" });
+    expect(await first.handle(JSON.stringify(subscribe(5, { topic: "/not-allowed" })))).toMatchObject({ kind: "error", code: "policy-denied" });
     expect(edge.requests).toHaveLength(0);
     await first.close();
 
@@ -202,9 +202,9 @@ describe("secure live relay", () => {
       connectionId: "connection-2",
     });
     expect(second.connectionEpoch).toBe(2);
-    expect(await second.handleHostFrame(frame(3))).toMatchObject({ kind: "error", code: "replayed-request" });
+    expect(await second.handle(JSON.stringify(frame(3)))).toMatchObject({ kind: "error", code: "replayed-request" });
     setNow(20_000);
-    expect(await second.handleHostFrame(frame(6))).toMatchObject({ kind: "error", code: "unauthorized" });
+    expect(await second.handle(JSON.stringify(frame(6)))).toMatchObject({ kind: "error", code: "unauthorized" });
     expect(relay.telemetry()).toMatchObject({ replayedFrames: 2, edgeRequests: 0 });
   });
 
@@ -225,9 +225,9 @@ describe("secure live relay", () => {
       origin: "https://viewer.example",
       sessionId: "session-1",
     });
-    expect(await connection.handleHostFrame(frame(0))).toMatchObject({ kind: "health" });
-    expect(await connection.handleHostFrame(frame(1))).toMatchObject({ kind: "health" });
-    expect(await connection.handleHostFrame(frame(2))).toMatchObject({ kind: "error", code: "quota-exceeded" });
+    expect(await connection.handle(JSON.stringify(frame(0)))).toMatchObject({ kind: "health" });
+    expect(await connection.handle(JSON.stringify(frame(1)))).toMatchObject({ kind: "health" });
+    expect(await connection.handle(JSON.stringify(frame(2)))).toMatchObject({ kind: "error", code: "quota-exceeded" });
     expect(requestLimited.edge.requests).toHaveLength(0);
 
     const subscriptionLimited = fixture();
@@ -236,8 +236,8 @@ describe("secure live relay", () => {
       origin: "https://viewer.example",
       sessionId: "session-1",
     });
-    expect(await second.handleHostFrame(subscribe(0))).toMatchObject({ kind: "ack" });
-    expect(await second.handleHostFrame(subscribe(1, { subscriptionId: "subscription-2" }))).toMatchObject({
+    expect(await second.handle(JSON.stringify(subscribe(0)))).toMatchObject({ kind: "ack" });
+    expect(await second.handle(JSON.stringify(subscribe(1, { subscriptionId: "subscription-2" })))).toMatchObject({
       kind: "error",
       code: "quota-exceeded",
     });
@@ -252,7 +252,7 @@ describe("secure live relay", () => {
       sessionId: "session-1",
       connectionId: "connection-1",
     });
-    expect(await connection.handleHostFrame(subscribe(0, { maxRateHz: 4, maxMessageBytes: 300 }))).toMatchObject({ kind: "ack" });
+    expect(await connection.handle(JSON.stringify(subscribe(0, { maxRateHz: 4, maxMessageBytes: 300 })))).toMatchObject({ kind: "ack" });
 
     for (let sequence = 0; sequence < 6; sequence += 1) {
       connection.pushFromEdge({

@@ -134,7 +134,7 @@ class CoreManifestVerifier implements HostedManifestVerifier {
     ) {
       throw new Error("signed manifest envelope mismatch");
     }
-    verifyHostedManifest(this.#manifest, this.#trustedKey);
+    verifyHostedManifest(JSON.stringify(this.#manifest), this.#trustedKey);
     return Object.freeze({
       verification: "verified-signature" as const,
       bundleId: this.#manifest.payload.bundleId,
@@ -342,7 +342,7 @@ class HostedMcapRuntime implements HostedSourceRuntimePort {
   async open(capabilityValue: string, signal: AbortSignal): Promise<OpenHostedResult> {
     if (capabilityValue !== this.#fixture.capability || signal.aborted) throw Object.assign(new Error("denied"), { code: "invalid" });
     const manifest = this.#fixture.service.openHostedSession(capabilityValue);
-    verifyHostedManifest(manifest, this.#fixture.descriptor.manifestVerificationKey);
+    verifyHostedManifest(JSON.stringify(manifest), this.#fixture.descriptor.manifestVerificationKey);
     const session = await McapSourceSession.open(reader(this.#fixture.source.entrySource(manifest.payload.entries[0]!.entryId)), {
       limits: {
         sequentialReadBytes: 64 * 1_024,
@@ -508,8 +508,8 @@ describe("M4 hosted cross-boundary proof", () => {
     const fixture = await hostedFixture(encoder.encode("SENSITIVE_SYNTHETIC_PAYLOAD"), { value: 300_000 });
     const tampered = JSON.parse(JSON.stringify(fixture.manifest)) as SignedHostedManifest;
     (tampered.payload.entries[0] as { relativePath: string }).relativePath = "recordings/other.mcap";
-    expect(() => verifyHostedManifest(tampered, fixture.descriptor.manifestVerificationKey)).toThrow(/signature/);
-    expect(() => verifyHostedManifest(fixture.manifest, "AA")).toThrow(/trusted/);
+    expect(() => verifyHostedManifest(JSON.stringify(tampered), fixture.descriptor.manifestVerificationKey)).toThrow(/signature/);
+    expect(() => verifyHostedManifest(JSON.stringify(fixture.manifest), "AA")).toThrow(/trusted/);
 
     const scope = rangeScope(fixture, 0n, 4n);
     const grant = fixture.service.issueRangeGrant(fixture.capability, scope);

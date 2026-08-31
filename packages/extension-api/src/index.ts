@@ -101,18 +101,11 @@ export interface TrustedExtensionNegotiation {
   readonly grantedCapabilities: readonly TrustedExtensionCapability[];
 }
 
-const trustedBrandRegistryKey = Symbol.for("@ros-web-viewer/extension-api/trusted-brand-registry/v1");
-interface TrustedBrandRegistry { readonly definitions: WeakSet<object>; readonly lifecycles: WeakSet<object> }
-const brandGlobal = globalThis as typeof globalThis & { [trustedBrandRegistryKey]?: TrustedBrandRegistry };
-const trustedBrandRegistry = brandGlobal[trustedBrandRegistryKey] ?? Object.freeze({
-  definitions: new WeakSet<object>(),
-  lifecycles: new WeakSet<object>(),
-});
-if (brandGlobal[trustedBrandRegistryKey] === undefined) {
-  Object.defineProperty(brandGlobal, trustedBrandRegistryKey, { value: trustedBrandRegistry });
-}
-const trustedDefinitions = trustedBrandRegistry.definitions;
-const trustedLifecycles = trustedBrandRegistry.lifecycles;
+// Module-private identity is the admission token. Never publish these registries
+// through globalThis or the symbol registry: doing so would let same-realm callers
+// add arbitrary objects before the host's pre-enumeration membership check.
+const trustedDefinitions = new WeakSet<object>();
+const trustedLifecycles = new WeakSet<object>();
 
 /**
  * Builds the exact lifecycle object accepted by the trusted same-realm extension host.

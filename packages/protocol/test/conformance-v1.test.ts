@@ -191,7 +191,7 @@ describe("protocol/schema v1 conformance freeze", () => {
   it("keeps write/service/action/parameter/raw command widening denied by the executable parser", () => {
     const base = { version: 1, sessionId: "s", sequence: 0, requestId: "r" } as const;
     for (const operation of ["publish", "service", "action", "set_parameter", "raw-command"]) {
-      expect(() => parseBrowserFrame({ ...base, operation })).toThrowError(/not permitted/);
+      expect(() => parseBrowserFrame(JSON.stringify({ ...base, operation }))).toThrowError(/not permitted/);
     }
   });
 

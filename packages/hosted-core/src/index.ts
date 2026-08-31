@@ -27,6 +27,7 @@ const MAX_SAFE_COUNTER = Number.MAX_SAFE_INTEGER;
 const MAX_MANIFEST_ENTRIES = 1_024;
 const MAX_MANIFEST_RELATIONS = 65_536;
 const MAX_RELATIVE_PATH_LENGTH = 4_096;
+const MAX_SIGNED_MANIFEST_BYTES = 2 * 1024 * 1024;
 
 export interface HostedCoreLimits {
   readonly maxEntriesPerSession: number;
@@ -414,7 +415,14 @@ function assertManifestShape(manifest: SignedHostedManifest): void {
   }
 }
 
-export function verifyHostedManifest(manifest: SignedHostedManifest, trustedPublicKeySpki: string): SourceBundle {
+export function verifyHostedManifest(serializedManifest: string, trustedPublicKeySpki: string): SourceBundle {
+  if (typeof serializedManifest !== "string" || serializedManifest.length > MAX_SIGNED_MANIFEST_BYTES ||
+      Buffer.byteLength(serializedManifest, "utf8") > MAX_SIGNED_MANIFEST_BYTES) {
+    throw new Error("hosted manifest must be bounded serialized JSON text");
+  }
+  let manifest: SignedHostedManifest;
+  try { manifest = JSON.parse(serializedManifest) as SignedHostedManifest; }
+  catch { throw new Error("hosted manifest is not valid JSON"); }
   assertManifestShape(manifest);
   if (manifest.publicKeySpki !== trustedPublicKeySpki) throw new Error("hosted manifest signer is not trusted");
   const publicKeyBytes = decodeCanonicalBase64Url(manifest.publicKeySpki, 128, "public key encoding");
@@ -592,7 +600,7 @@ export class HostedSharingService {
         relations,
       });
       const manifest = signManifest(payload, this.#privateKey, this.#publicKeySpki);
-      verifyHostedManifest(manifest, this.#publicKeySpki);
+      verifyHostedManifest(JSON.stringify(manifest), this.#publicKeySpki);
       const capabilityDigest = digestToken(capability);
       this.#sessions.set(Buffer.from(capabilityDigest).toString("hex"), {
         capabilityDigest,

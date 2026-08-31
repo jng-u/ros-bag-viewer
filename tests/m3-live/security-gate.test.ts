@@ -123,13 +123,13 @@ describe("M3 negative protocol and boundary proof", () => {
     const connection = await fixture.connect("negative-connection");
     const forbiddenOperations = ["publish", "call-service", "send-action", "set-parameter", "raw-command"];
     for (const [index, operation] of forbiddenOperations.entries()) {
-      const response = await connection.handleHostFrame({
+      const response = await connection.handle(JSON.stringify({
         version: 1,
         operation,
         sessionId: "m3-session",
         sequence: index,
         requestId: `forbidden-${index}`,
-      });
+      }));
       expect(response).toMatchObject({ kind: "error", code: "invalid-request" });
     }
     const deniedSubscriptions = [
@@ -139,7 +139,7 @@ describe("M3 negative protocol and boundary proof", () => {
       { topic: liveTopics[0]!.topic, type: liveTopics[0]!.type, maxRateHz: 1, maxMessageBytes: 513 },
     ];
     for (const [index, denied] of deniedSubscriptions.entries()) {
-      const response = await connection.handleHostFrame({
+      const response = await connection.handle(JSON.stringify({
         version: 1,
         operation: "subscribe",
         sessionId: "m3-session",
@@ -147,7 +147,7 @@ describe("M3 negative protocol and boundary proof", () => {
         requestId: `denied-${index}`,
         subscriptionId: `denied-${index}`,
         ...denied,
-      });
+      }));
       expect(response).toMatchObject({ kind: "error" });
     }
     const replaySequence = forbiddenOperations.length + deniedSubscriptions.length;
@@ -158,8 +158,8 @@ describe("M3 negative protocol and boundary proof", () => {
       sequence: replaySequence,
       requestId: "health",
     } as const;
-    expect(await connection.handleHostFrame(health)).toMatchObject({ kind: "health" });
-    expect(await connection.handleHostFrame(health)).toMatchObject({ kind: "error", code: "replayed-request" });
+    expect(await connection.handle(JSON.stringify(health))).toMatchObject({ kind: "health" });
+    expect(await connection.handle(JSON.stringify(health))).toMatchObject({ kind: "error", code: "replayed-request" });
     expect(await connection.handle("x".repeat(20_000))).toMatchObject({ kind: "error" });
     expect(fixture.relay.telemetry().edgeRequests).toBe(0);
   });
@@ -197,7 +197,7 @@ describe("M3 negative protocol and boundary proof", () => {
       origin: "https://viewer.example",
       sessionId: "m3-session",
     });
-    expect(await connection.handleHostFrame({
+    expect(await connection.handle(JSON.stringify({
       version: 1,
       operation: "subscribe",
       sessionId: "m3-session",
@@ -205,8 +205,8 @@ describe("M3 negative protocol and boundary proof", () => {
       requestId: "subscribe-0",
       subscriptionId: "subscription-0",
       ...liveTopics[0],
-    })).toMatchObject({ kind: "ack" });
-    expect(await connection.handleHostFrame({
+    }))).toMatchObject({ kind: "ack" });
+    expect(await connection.handle(JSON.stringify({
       version: 1,
       operation: "subscribe",
       sessionId: "m3-session",
@@ -214,14 +214,14 @@ describe("M3 negative protocol and boundary proof", () => {
       requestId: "subscribe-1",
       subscriptionId: "subscription-1",
       ...liveTopics[1],
-    })).toMatchObject({ kind: "error", code: "quota-exceeded" });
-    expect(await connection.handleHostFrame({
+    }))).toMatchObject({ kind: "error", code: "quota-exceeded" });
+    expect(await connection.handle(JSON.stringify({
       version: 1,
       operation: "health",
       sessionId: "m3-session",
       sequence: 2,
       requestId: "health-2",
-    })).toMatchObject({ kind: "error", code: "quota-exceeded" });
+    }))).toMatchObject({ kind: "error", code: "quota-exceeded" });
     expect(edgeRequests).toBe(1);
   });
 

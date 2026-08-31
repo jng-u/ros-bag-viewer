@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+vi.mock("@ros-web-viewer/extension-api", async () => import("../src/index.js"));
+
 import { emitV1SemanticEvent } from "../../../tests/support/v1-conformance-event.js";
 import { rangeSummaryExtension } from "../../../examples/range-summary-extension/src/index.js";
 import {
@@ -45,6 +47,10 @@ function harness(capabilities: readonly TrustedExtensionCapability[] = ["source-
 }
 
 describe("TrustedExtensionHost conformance", () => {
+  it("keeps same-realm admission registries module-private", () => {
+    const registryKey = Symbol.for("@ros-web-viewer/extension-api/trusted-brand-registry/v1");
+    expect((globalThis as Record<symbol, unknown>)[registryKey]).toBeUndefined();
+  });
   it("negotiates an exact immutable v1 capability set and snapshots registration", () => {
     const requested: TrustedExtensionCapability[] = ["source-messages", "diagnostics"];
     const value = harness(requested);
@@ -581,6 +587,10 @@ describe("out-of-core range summary example", () => {
     expect(audit.status).toBe(0);
     expect(audit.stdout).toMatch(/extension example audit: ok/);
 
+    const validDefinition = `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const safe = defineTrustedExtension("safe", () => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`;
     for (const source of [
       'import/*comment*/"node:fs";',
       'export/*comment*/{readFile}from"node:fs";',
@@ -615,6 +625,17 @@ describe("out-of-core range summary example", () => {
       'queueMicrotask(() => {});',
       'new XMLHttpRequest();',
       'export const harmless = 1;',
+      `${validDefinition}\nconst Ambient = Proxy;`,
+      `${validDefinition}\nconst Deferred = Promise;`,
+      `${validDefinition}\nconst Parsed = URL;`,
+      `${validDefinition}\nconst send = postMessage;`,
+      `${validDefinition}\nexport function extra() {}`,
+      `${validDefinition}\nexport class Extra {}`,
+      `import { defineTrustedExtension as realDefinition, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+const defineTrustedExtension = () => ({});
+export const fake = defineTrustedExtension("fake", () => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
@@ -626,10 +647,7 @@ describe("out-of-core range summary example", () => {
     const allowed = spawnSync(process.execPath, [
       "scripts/toolchain/audit-extension-examples.mjs",
       "--source-base64",
-      Buffer.from(`import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
-export const safe = defineTrustedExtension("safe", () => defineTrustedLifecycle(
-  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
-));`).toString("base64"),
+      Buffer.from(validDefinition).toString("base64"),
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
     expect(allowed.stderr).toBe("");
     expect(allowed.status).toBe(0);

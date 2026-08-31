@@ -151,6 +151,9 @@ function caseRecord(root, fixtureDigest, source, category, row) {
   const command = commandForCase(caseId);
   const { reporterRawBase64, reporterRawDigest, assertion, receipt } = runReporter(root, command);
   const { probe, semanticEvent } = validateSemanticReceipt(receipt, caseId, row.semanticEvent);
+  if (receipt.productionReporterRawBase64 !== reporterRawBase64 || receipt.productionReporterRawDigest !== reporterRawDigest) {
+    fail(`${caseId} reporter did not forward the exact production bytes`);
+  }
   if (semanticEvent.result !== row.result) fail(`${caseId} observed result does not match the fixture expectation`);
   const productionCommand = command;
   const evidenceArtifact = artifact(root, row.evidence);
@@ -240,6 +243,8 @@ export function verifyConformanceExecutionManifest(root, envelope) {
     reporters.add(canonical(assertion));
     const { probe, semanticEvent } = validateSemanticReceipt(candidate.semanticReceipt, caseId, row.semanticEvent);
     if (candidate.semanticReceiptDigest !== digest(canonical(candidate.semanticReceipt)) ||
+        candidate.semanticReceipt.productionReporterRawBase64 !== candidate.reporterRawBase64 ||
+        candidate.semanticReceipt.productionReporterRawDigest !== candidate.reporterRawDigest ||
         candidate.observedResult !== semanticEvent.result || canonicalSemantic(candidate.semanticEvent) !== canonicalSemantic(semanticEvent) ||
         canonical(candidate.productionProbe) !== canonical(probe)) {
       fail(`case[${index}] semantic receipt mismatch`);

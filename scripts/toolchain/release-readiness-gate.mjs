@@ -127,7 +127,14 @@ function validateRepositoryStops() {
     let bytes;
     try { bytes = readBoundedBytes(path, repositoryFileMaxBytes, repositoryPath); }
     catch (error) { fail(`oversized or unstable unallowlisted repository file ${repositoryPath}: ${error.message}`); }
-    const stopReason = repositoryStopReason(repositoryPath, bytes);
+    const authorizedGeneratedArtifact = [
+      "artifacts/licenses.json",
+      "artifacts/sbom.cdx.json",
+      "artifacts/v1-conformance-execution.json",
+      "artifacts/test-receipt.json",
+      "benchmarks/artifacts/m1-dimensional-model.json",
+    ].includes(repositoryPath) || /^artifacts\/v1-conformance-receipts\/[a-f0-9]{64}\.json(?:\.event)?$/u.test(repositoryPath);
+    const stopReason = authorizedGeneratedArtifact ? undefined : repositoryStopReason(repositoryPath, bytes);
     if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
     const packageJson = readBoundedJson(path, jsonCaps.package, relative(root, path));

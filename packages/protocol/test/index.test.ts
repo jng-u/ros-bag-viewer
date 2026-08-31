@@ -25,7 +25,7 @@ describe("secure live protocol", () => {
     expect(EDGE_OPERATIONS).toEqual(["discover", "subscribe", "unsubscribe"]);
 
     for (const operation of ["publish", "call_service", "service", "action", "set_parameter", "raw", "advertise"]) {
-      expect(() => parseBrowserFrame({ ...base, operation })).toThrowError(
+      expect(() => parseBrowserFrame(JSON.stringify({ ...base, operation }))).toThrowError(
         expect.objectContaining<Partial<ProtocolViolation>>({ code: "operation-denied" }),
       );
     }
@@ -41,28 +41,29 @@ describe("secure live protocol", () => {
       maxRateHz: 30,
       maxMessageBytes: 1_000_000,
     } as const;
-    expect(parseBrowserFrame(valid)).toEqual(valid);
-    const canonical = parseBrowserFrame(valid);
+    expect(parseBrowserFrame(JSON.stringify(valid))).toEqual(valid);
+    const canonical = parseBrowserFrame(JSON.stringify(valid));
     expect(canonical).not.toBe(valid);
     expect(Object.isFrozen(canonical)).toBe(true);
 
-    expect(() => parseBrowserFrame({ ...valid, topic: "/camera/*" })).toThrow(/without wildcards/);
-    expect(() => parseBrowserFrame({ ...valid, type: "not-a-type" })).toThrow(/exact ROS type/);
-    expect(() => parseBrowserFrame({ ...valid, publish: { data: "arbitrary" } })).toThrow(/unexpected fields/);
-    expect(() => parseBrowserFrame({ ...valid, maxRateHz: Number.POSITIVE_INFINITY })).toThrow(/allowed range|non-finite/);
-    expect(() => parseBrowserFrame({ ...valid, maxMessageBytes: 16 * 1024 * 1024 + 1 })).toThrow(/allowed range/);
+    expect(() => parseBrowserFrame(JSON.stringify({ ...valid, topic: "/camera/*" }))).toThrow(/without wildcards/);
+    expect(() => parseBrowserFrame(JSON.stringify({ ...valid, type: "not-a-type" }))).toThrow(/exact ROS type/);
+    expect(() => parseBrowserFrame(JSON.stringify({ ...valid, publish: { data: "arbitrary" } }))).toThrow(/unexpected fields/);
+    expect(() => parseBrowserFrame(JSON.stringify({ ...valid, maxRateHz: Number.POSITIVE_INFINITY }))).toThrow(/allowed range|non-finite/);
+    expect(() => parseBrowserFrame(JSON.stringify({ ...valid, maxMessageBytes: 16 * 1024 * 1024 + 1 }))).toThrow(/allowed range/);
   });
 
-  it("rejects accessors before execution and returns only host-owned canonical records", () => {
-    const accessor = { ...base, operation: "health" } as Record<string, unknown>;
+  it("admits only serialized frames and returns host-owned canonical records", () => {
     const getter = vi.fn(() => 1);
-    Object.defineProperty(accessor, "version", { enumerable: true, get: getter });
-    expect(() => parseBrowserFrame(accessor)).toThrow(/hidden or accessor/);
+    const ownKeys = vi.fn(Reflect.ownKeys);
+    const hostile = new Proxy({ ...base, operation: "health" }, { get: getter, ownKeys });
+    expect(() => parseBrowserFrame(hostile as unknown as string)).toThrow(/serialized JSON text/);
     expect(getter).not.toHaveBeenCalled();
+    expect(ownKeys).not.toHaveBeenCalled();
 
     const limits = { ...DEFAULT_PROTOCOL_LIMITS } as Record<string, unknown>;
     Object.defineProperty(limits, "maxFrameBytes", { enumerable: true, get: getter });
-    expect(() => parseBrowserFrame({ ...base, operation: "health" }, limits as unknown as typeof DEFAULT_PROTOCOL_LIMITS))
+    expect(() => parseBrowserFrame(JSON.stringify({ ...base, operation: "health" }), limits as unknown as typeof DEFAULT_PROTOCOL_LIMITS))
       .toThrow(/hidden or accessor/);
     expect(getter).not.toHaveBeenCalled();
 

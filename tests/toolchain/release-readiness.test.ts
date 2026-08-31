@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +52,9 @@ describe("M5 release hardening", () => {
       const oversized = join(directory, "oversized.json");
       writeFileSync(oversized, `${" ".repeat(11)}{`);
       expect(() => readBoundedJson(oversized, 11, "oversized fixture")).toThrow(/byte ceiling/);
+      const symlink = join(directory, "linked.json");
+      symlinkSync(exact, symlink);
+      expect(() => readBoundedJson(symlink, 11, "symlink fixture")).toThrow(/non-symlink/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -148,6 +151,8 @@ describe("M5 release hardening", () => {
         'client-secret.json', 'client_secret.apps.googleusercontent.com.json', '.kube/config', 'kubeconfig.prod',
         'deploy/id_custom', 'deploy/private-key', 'deploy/private_key', 'deploy/private.pem', 'template.yaml', 'template.yml',
         'stack.yaml', 'packaged.yaml', 'sam-template.yaml', '.aws-sam/build/template.yaml', 'infra/cdk-stack.ts',
+        'dist/index.js', 'artifacts/output.json', 'dist/deployment.zip', 'infra/main.bicep',
+        'google-credentials.json', '.serverless/cloudformation-template-update-stack.json',
       ];
       const deniedContent = [
         ['notes.txt', '-----BEGIN ' + 'PRIVATE KEY-----'],
@@ -156,6 +161,14 @@ describe("M5 release hardening", () => {
         ['deployment.json', '{"Resources":{"Queue":{"Type":"AWS' + '::SQS::Queue"}}}'],
         ['deployment.yaml', 'Resources:\\n  Queue:\\n    Type: AWS' + '::SQS::Queue'],
         ['infra/app.ts', "import { Stack } from 'aws-" + "cdk-lib';"],
+        ['infra/bucket.ts', "import { Bucket } from '@aws-cdk/" + "aws-s3';"],
+        ['infra/dynamic.ts', "await import('aws-" + "cdk-lib');"],
+        ['infra/app.py', 'from aws_' + 'cdk import App'],
+        ['deployment.yaml', 'apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: viewer'],
+        ['config.ini', 'aws_' + 'access_key_id=AKIAEXAMPLE1234'],
+        ['package.json', '{"private":true,"dependencies":{"@pulumi/' + 'aws":"1"}}'],
+        ['package.json', '{"license":"M' + 'IT"}'],
+        ['secret.json', '{"private_' + 'key":"super-secret-material"}'],
         ['large.txt', 'x'.repeat(1024 * 1024 + 8) + '\\n-----BEGIN ' + 'PRIVATE KEY-----'],
       ];
       const allowed = [
@@ -211,8 +224,10 @@ describe("M5 release hardening", () => {
     }
     const tamper = spawnSync(process.execPath, ["--input-type=module", "--eval", `
       import { readFileSync } from 'node:fs';
+      import { createHash } from 'node:crypto';
       import { verifyConformanceExecutionManifest } from './scripts/toolchain/conformance-execution-manifest.mjs';
       const source = readFileSync('./artifacts/v1-conformance-execution.json', 'utf8');
+      const digest = value => 'sha256:' + createHash('sha256').update(value).digest('hex');
       const mutations = [
         value => { value.manifest.cases[0].reporterRawBase64 = Buffer.from('tampered').toString('base64'); },
         value => { value.manifest.cases[0].normalizedAssertionDigest = 'sha256:' + '0'.repeat(64); },
@@ -229,6 +244,19 @@ describe("M5 release hardening", () => {
         try { verifyConformanceExecutionManifest(process.cwd(), value); } catch { rejected = true; }
         if (!rejected) process.exit(1);
       }
+      const byteSubstitution = JSON.parse(source);
+      const candidate = byteSubstitution.manifest.cases[0];
+      const normalized = JSON.parse(Buffer.from(candidate.semanticReceipt.productionReporterRawBase64, 'base64').toString('utf8'));
+      const alteredRaw = Buffer.from(JSON.stringify(normalized, null, 2) + '\\n');
+      candidate.semanticReceipt.productionReporterRawBase64 = alteredRaw.toString('base64');
+      candidate.semanticReceipt.productionReporterRawDigest = digest(alteredRaw);
+      candidate.semanticReceiptDigest = digest(JSON.stringify(candidate.semanticReceipt));
+      const { caseDigest: ignored, ...caseCore } = candidate; void ignored;
+      candidate.caseDigest = digest(JSON.stringify(caseCore));
+      byteSubstitution.manifestDigest = digest(JSON.stringify(byteSubstitution.manifest));
+      let rawRejected = false;
+      try { verifyConformanceExecutionManifest(process.cwd(), byteSubstitution); } catch { rawRejected = true; }
+      if (!rawRejected) process.exit(2);
     `], { cwd: root, encoding: "utf8" });
     expect(tamper.stderr).toBe("");
     expect(tamper.status).toBe(0);
