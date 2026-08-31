@@ -16,10 +16,26 @@ const privilegedNames = new Set([
   "publish", "callService", "sendAction", "setParameter", "rawCommand",
   "global", "self", "WebAssembly", "Atomics",
 ]);
-const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect", "constructor", "prototype", "__proto__"]);
+const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect"]);
+const deniedRuntimeProperties = new Set([
+  "constructor", "prototype", "__proto__", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors",
+  "defineProperty", "defineProperties", "setPrototypeOf", "getPrototypeOf",
+]);
 
 function fail(message) { throw new Error(`extension example audit: ${message}`); }
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
+
+function constantString(node) {
+  if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isNumericLiteral(node)) return node.text;
+  if (ts.isParenthesizedExpression(node)) return constantString(node.expression);
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = constantString(node.left);
+    const right = constantString(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
+}
 
 function assertModule(specifier, label, resolveRelative) {
   if (specifier === allowedModule) return;
@@ -60,19 +76,29 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Reflect") {
         fail(`${filename} uses computed reflection`);
       }
-      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "getOwnPropertyDescriptor") {
+      if (ts.isPropertyAccessExpression(node.expression) && deniedRuntimeProperties.has(node.expression.name.text)) {
         fail(`${filename} acquires a runtime descriptor`);
       }
     }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "Function") {
       fail(`${filename} constructs Function`);
     }
-    if (ts.isPropertyAccessExpression(node) && ["constructor", "prototype", "__proto__"].includes(node.name.text)) {
+    if (ts.isPropertyAccessExpression(node) && deniedRuntimeProperties.has(node.name.text)) {
       fail(`${filename} accesses denied runtime property ${node.name.text}`);
+    }
+    if (ts.isBindingElement(node) && node.propertyName !== undefined) {
+      const property = constantString(node.propertyName);
+      if (property === undefined || deniedRuntimeProperties.has(property)) fail(`${filename} destructures a denied or computed runtime property`);
     }
     if (ts.isIdentifier(node) && privilegedNames.has(node.text)) fail(`${filename} references privileged ${node.text}`);
     if (ts.isIdentifier(node) && deniedRuntimeNames.has(node.text)) fail(`${filename} references denied runtime ${node.text}`);
-    if (ts.isElementAccessExpression(node)) fail(`${filename} uses computed ambient access`);
+    if (ts.isElementAccessExpression(node)) {
+      const property = node.argumentExpression === undefined ? undefined : constantString(node.argumentExpression);
+      if (property === undefined) fail(`${filename} uses unresolved computed access`);
+      if (deniedRuntimeProperties.has(property) || deniedRuntimeNames.has(property) || privilegedNames.has(property)) {
+        fail(`${filename} accesses denied computed property ${property}`);
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(file);

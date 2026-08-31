@@ -82,7 +82,7 @@ interface FixtureMessage {
   readonly data: readonly number[];
 }
 
-function createDatabase(path: string, messages: readonly FixtureMessage[], schemaVersion = 4): void {
+function createDatabase(path: string, messages: readonly FixtureMessage[], schemaVersion = 4, includeDefinition = true): void {
   const database = new DatabaseSync(path);
   database.exec(`
     CREATE TABLE schema(schema_version INTEGER PRIMARY KEY, ros_distro TEXT NOT NULL);
@@ -109,9 +109,11 @@ function createDatabase(path: string, messages: readonly FixtureMessage[], schem
   database.prepare(
     "INSERT INTO topics(id, name, type, serialization_format, offered_qos_profiles, type_description_hash) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(1, "/points", "example_msgs/msg/Point", "cdr", "", "RIHS01_fixture");
-  database.prepare(
-    "INSERT INTO message_definitions(id, topic_type, encoding, encoded_message_definition, type_description_hash) VALUES (?, ?, ?, ?, ?)",
-  ).run(1, "example_msgs/msg/Point", "ros2msg", "float64 x\n", "RIHS01_fixture");
+  if (includeDefinition) {
+    database.prepare(
+      "INSERT INTO message_definitions(id, topic_type, encoding, encoded_message_definition, type_description_hash) VALUES (?, ?, ?, ?, ?)",
+    ).run(1, "example_msgs/msg/Point", "ros2msg", "float64 x\n", "RIHS01_fixture");
+  }
   const insert = database.prepare("INSERT INTO messages(topic_id, timestamp, data) VALUES (?, ?, ?)");
   for (const message of messages) insert.run(1, message.timestamp, Uint8Array.from(message.data));
   database.close();
@@ -211,6 +213,21 @@ describe("ROS2 SQLite SourceBundle adapter", () => {
     expect(() => parseRos2MetadataYaml(new TextEncoder().encode(metadata(["bag_0.db3.zstd"], 1, { compression: "zstd" })))).toThrowError(
       expect.objectContaining({ code: "UNSUPPORTED_COMPRESSION" }),
     );
+  });
+
+  it("exposes metadata-only schemas as schema-resolvable", async () => {
+    const directory = await makeDirectory();
+    createDatabase(join(directory, "bag.db3"), [{ timestamp: 10n, data: [1] }], 4, false);
+    const access = await fixtureBundle(directory, ["bag.db3"], metadata(["bag.db3"], 1));
+    const session = await Ros2SqliteSourceSession.open(access, new NodeQueryProvider(directory), new TestEpoch());
+    expect(session.schemas()).toEqual([{
+      name: "example_msgs/msg/Point",
+      capability: "schema-resolvable",
+      typeDescriptionHash: "RIHS01_fixture",
+      provenance: [{ kind: "metadata-yaml", metadataVersion: 9 }],
+      diagnostic: "SQLite bag does not embed this message definition; an external schema provider is required",
+    }]);
+    await session.close();
   });
 
   it("opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries", async () => {

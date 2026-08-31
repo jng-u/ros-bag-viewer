@@ -50,8 +50,8 @@
       "id": "local-ros2-sqlite",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:2d03389202d731a7a9ad34bb4cc6a6efc3fc6833db077b7e03d769a4a6bb07e9",
-      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86",
+      "resultDigest": "sha256:feaa8fe41092bf490b1e4a70ee482b6e1bdc6320c02fe490731563f3b1d3284e",
+      "evidenceDigest": "sha256:931a94c37e2d47561a32bc4cbb8468a7963da433189a044fc131f04cccfcf924",
       "testName": "ROS2 SQLite SourceBundle adapter opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries"
     },
     {
@@ -92,9 +92,9 @@
       "id": "schema-resolvable",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:866615056401fb3d9f3d5096e69be735057e0f7907b324dee1b7b2165f64ba39",
-      "evidenceDigest": "sha256:45a9ef060f7a716fae1d0916c53883b4982b9c96a0983c1c554b75096a934f86",
-      "testName": "ROS2 SQLite SourceBundle adapter parses versioned metadata and rejects unsupported capabilities explicitly"
+      "resultDigest": "sha256:8ef0568b09969b19aca8288593e6c7b45c09dbb72409ef18411756085badb19b",
+      "evidenceDigest": "sha256:931a94c37e2d47561a32bc4cbb8468a7963da433189a044fc131f04cccfcf924",
+      "testName": "ROS2 SQLite SourceBundle adapter exposes metadata-only schemas as schema-resolvable"
     },
     {
       "id": "opaque",
@@ -176,72 +176,72 @@
       "id": "register",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:f0a42665829e78366163e01e57cfc6f87c25e027e8a257811b208033d4e7e59f",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:0cd3f30193d7a259b253a5cba5562550c52fbcfddbbfbda58c3fd52de94c536e",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance negotiates an exact immutable v1 capability set and snapshots registration"
     },
     {
       "id": "instantiate",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:0e9304829a3fe878d63a79dd2acf8806ad9f5f001b63c1cbcadfd16354251ecc",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:1025ad3a6f106969d2d84aa490c549cca868a68f6ada302a71cdadecbb76c2fd",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance exposes only the frozen bounded host surface and validates lifecycle operations exactly"
     },
     {
       "id": "configure",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:e29973020029c4ce473e9f01a1ba5bd5e790e8615fe5aeca1782bde9279703e9",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:7f20e7d8d0138236521a801890d93e3f98ebbe682819909053d4c9b7c72f4f8c",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance revokes retained context access and requires a successful configuration"
     },
     {
       "id": "attach",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:b8874a8c720158a0410378a4b47dd86588e3d9105864aed6e5acbd17e4bf2883",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:3a723ab80d74c7eeb9fecdcaac726ff10b3819abdbf18eb34b434092fd1ca2e0",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance"
     },
     {
       "id": "update",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:5d7868e41521bf475f971d83f86a641fb515eed7abc10f102875344ec82a3d04",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:6159d3b844e7c5540a4f7834e4a466bed71b0c1fda27714e1bb1eb407452b21e",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance captures exact descriptor-safe contracts and canonicalizes the complete message once"
     },
     {
       "id": "render",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:428b44ff1c3bc953244c4f5981f96da092768c89d690514ff894bb1e78c81b69",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:18621a4c3e550eae2cc1d03778aa11e79c0e03b75411f08e4949cce94504211f",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "out-of-core range summary example renders through the v1 host with a bounded handle"
     },
     {
       "id": "suspend",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:dea5715a6cd3ba4d79d74e36ebe1f7d0d9ebe8c3761fa1f1dd793d06e8859297",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
-      "testName": "TrustedExtensionHost conformance bounds resource handles and diagnostics and cleans up after callback failures"
+      "resultDigest": "sha256:d64cd9507e107b694f1254d05bb6846c86ec9b85d2c03d31035b653fb49a28f0",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
+      "testName": "TrustedExtensionHost conformance suspends an attached source and records the lifecycle transition"
     },
     {
       "id": "error",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:23f26078dfc4d01cd29b1ead7e5991bc9ed065cb726f26058473a3068556ad97",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:df4435741a80b60d969236b15e0f39daff7b79f99b1bab24d7841b9c6e7a5240",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "TrustedExtensionHost conformance surfaces both an operation failure and a failing error callback"
     },
     {
       "id": "dispose",
       "result": "pass",
       "evidence": "packages/extension-api/test/index.test.ts",
-      "resultDigest": "sha256:821da6f7d10e8025f378483bb1248054e39a6d9fcfbebf555669213e3a30cf37",
-      "evidenceDigest": "sha256:c4c861fb6f4802ea9fa3c51fa3a0dac8475bde3dda4bcef4b8fb4b134bbdd92a",
+      "resultDigest": "sha256:e2db97958e748e1010a8b050193f9ce0cda2f900f2164bdc5ac8af39e06519c2",
+      "evidenceDigest": "sha256:52d22cc3ffa0863bc98635cb04be4dc443e06f180b686130f1af77c8bc2e8a39",
       "testName": "out-of-core range summary example disposes its bounded handle idempotently"
     }
   ],

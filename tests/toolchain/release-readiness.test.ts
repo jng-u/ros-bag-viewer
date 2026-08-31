@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -10,6 +11,7 @@ import {
   V1_FROZEN_EXTENSION_CAPABILITIES,
   V1_FROZEN_EXTENSION_OPERATIONS,
 } from "../../packages/protocol/src/conformance-v1.js";
+import { readBoundedJson } from "../../scripts/toolchain/bounded-input.mjs";
 
 const root = process.cwd();
 const evidence = JSON.parse(readFileSync(join(root, "docs/evidence/m5-release-readiness.json"), "utf8")) as {
@@ -41,6 +43,19 @@ const evidence = JSON.parse(readFileSync(join(root, "docs/evidence/m5-release-re
 };
 
 describe("M5 release hardening", () => {
+  it("rejects fixture bytes before JSON decoding", () => {
+    const directory = mkdtempSync(join(tmpdir(), "bounded-json-"));
+    try {
+      const exact = join(directory, "exact.json");
+      writeFileSync(exact, '{"ok":true}');
+      expect(readBoundedJson(exact, 11, "exact fixture")).toEqual({ ok: true });
+      const oversized = join(directory, "oversized.json");
+      writeFileSync(oversized, `${" ".repeat(11)}{`);
+      expect(() => readBoundedJson(oversized, 11, "oversized fixture")).toThrow(/byte ceiling/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("freezes the protocol fixture to the exact extension API surface", () => {
     expect(V1_FROZEN_EXTENSION_OPERATIONS).toEqual(TRUSTED_EXTENSION_OPERATIONS);
     expect(V1_FROZEN_EXTENSION_CAPABILITIES).toEqual(TRUSTED_EXTENSION_CAPABILITIES);
@@ -130,7 +145,8 @@ describe("M5 release hardening", () => {
         'Dockerfile.production', 'docker-compose.yaml', 'compose.prod.yml', 'cloudformation-template.json',
         'cfn-stack.yaml', 'samconfig.toml', 'cdk.json', 'cdk.out/manifest.json',
         '.git-credentials', '.pypirc', '.docker/config.json', 'application_default_credentials.json',
-        'client-secret.json', 'kubeconfig', 'deploy/id_custom', 'deploy/private.pem', 'template.yaml', 'template.yml',
+        'client-secret.json', 'client_secret.apps.googleusercontent.com.json', '.kube/config', 'kubeconfig.prod',
+        'deploy/id_custom', 'deploy/private-key', 'deploy/private_key', 'deploy/private.pem', 'template.yaml', 'template.yml',
         'stack.yaml', 'packaged.yaml', 'sam-template.yaml', '.aws-sam/build/template.yaml', 'infra/cdk-stack.ts',
       ];
       const deniedContent = [
@@ -138,6 +154,9 @@ describe("M5 release hardening", () => {
         ['config.json', '{"type":"service_' + 'account","private_' + 'key":"secret"}'],
         ['registry.conf', '//registry.example/:_auth' + 'Token=secret'],
         ['deployment.json', '{"Resources":{"Queue":{"Type":"AWS' + '::SQS::Queue"}}}'],
+        ['deployment.yaml', 'Resources:\\n  Queue:\\n    Type: AWS' + '::SQS::Queue'],
+        ['infra/app.ts', "import { Stack } from 'aws-" + "cdk-lib';"],
+        ['large.txt', 'x'.repeat(1024 * 1024 + 8) + '\\n-----BEGIN ' + 'PRIVATE KEY-----'],
       ];
       const allowed = [
         ['LICENSES.md', ''], ['environment.md', ''], ['.env-example', ''],
@@ -194,11 +213,12 @@ describe("M5 release hardening", () => {
       import { verifyConformanceExecutionManifest } from './scripts/toolchain/conformance-execution-manifest.mjs';
       const source = readFileSync('./artifacts/v1-conformance-execution.json', 'utf8');
       const mutations = [
-        value => { value.manifest.cases[0].reporterRaw += ' '; },
+        value => { value.manifest.cases[0].reporterRawBase64 = Buffer.from('tampered').toString('base64'); },
         value => { value.manifest.cases[0].normalizedAssertionDigest = 'sha256:' + '0'.repeat(64); },
         value => { value.manifest.cases[0].command.env.TZ = 'Asia/Seoul'; },
-        value => { value.manifest.cases[0].semanticReceipt.productionReporterRaw += ' '; },
+        value => { value.manifest.cases[0].semanticReceipt.productionReporterRawBase64 = Buffer.from('tampered').toString('base64'); },
         value => { value.manifest.cases[0].semanticReceipt.observedResult = 'rejected'; },
+        value => { value.manifest.cases[0].productionCommand.env.TZ = 'Asia/Seoul'; },
         value => { value.manifest.cases[0].executionArtifacts[0].digest = 'sha256:' + '0'.repeat(64); },
       ];
       for (const mutate of mutations) {

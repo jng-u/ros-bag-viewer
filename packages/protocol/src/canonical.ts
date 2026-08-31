@@ -8,28 +8,27 @@ export class CanonicalDataError extends Error {
   }
 }
 
-function jsonStringByteLength(value: string): number {
-  let length = 2;
+function chargeJsonString(value: string, charge: (amount: number) => void): void {
+  charge(2);
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code === 0x22 || code === 0x5c || code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) {
-      length += 2;
+      charge(2);
     } else if (code < 0x20) {
-      length += 6;
+      charge(6);
     } else if (code < 0x80) {
-      length += 1;
+      charge(1);
     } else if (code < 0x800) {
-      length += 2;
+      charge(2);
     } else if (code >= 0xd800 && code <= 0xdbff) {
       const low = value.charCodeAt(index + 1);
-      if (low >= 0xdc00 && low <= 0xdfff) { length += 4; index += 1; } else length += 6;
+      if (low >= 0xdc00 && low <= 0xdfff) { charge(4); index += 1; } else charge(6);
     } else if (code >= 0xdc00 && code <= 0xdfff) {
-      length += 6;
+      charge(6);
     } else {
-      length += 3;
+      charge(3);
     }
   }
-  return length;
 }
 
 export function canonicalizePlainData(
@@ -57,7 +56,7 @@ export function canonicalizePlainData(
     if (++counter.value > maxItems) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
     if (depth > maxDepth) throw new CanonicalDataError("depth-limit", `${options.label} exceeds the depth limit`);
     if (item === null) { charge(4); return item; }
-    if (typeof item === "string") { charge(jsonStringByteLength(item)); return item; }
+    if (typeof item === "string") { chargeJsonString(item, charge); return item; }
     if (typeof item === "boolean") { charge(item ? 4 : 5); return item; }
     if (typeof item === "number") {
       if (!Number.isFinite(item)) throw new CanonicalDataError("invalid-data", `${label} contains a non-finite number`);
@@ -77,10 +76,10 @@ export function canonicalizePlainData(
       }
       if (length > maxItems - counter.value) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
       const keys = Reflect.ownKeys(item);
-      if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
       if (keys.length !== length + 1 || !(keys as string[]).includes("length")) {
         throw new CanonicalDataError("invalid-data", `${label} must be dense and unaugmented`);
       }
+      if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
       for (const key of keys as string[]) {
         if (key === "length") continue;
         const index = Number(key);
@@ -103,16 +102,17 @@ export function canonicalizePlainData(
     }
     const prototype = Object.getPrototypeOf(item);
     if (prototype !== Object.prototype && prototype !== null) throw new CanonicalDataError("invalid-data", `${label} must contain plain data`);
+    charge(2);
     const keys = Reflect.ownKeys(item);
-    if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
     if (keys.length > maxItems - counter.value) throw new CanonicalDataError("item-limit", `${options.label} exceeds the item limit`);
-    charge(2 + Math.max(0, keys.length - 1));
+    if (keys.some((key) => typeof key !== "string")) throw new CanonicalDataError("invalid-data", `${label} contains symbols`);
+    charge(Math.max(0, keys.length - 1));
     const output: Record<string, unknown> = {};
     for (const key of (keys as string[]).sort()) {
       if (key === "__proto__") throw new CanonicalDataError("invalid-data", `${label} contains a __proto__ field`);
       const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
       if (!descriptor.enumerable || !("value" in descriptor)) throw new CanonicalDataError("invalid-data", `${label}.${key} contains hidden or accessor data`);
-      charge(jsonStringByteLength(key));
+      chargeJsonString(key, charge);
       charge(1);
       Object.defineProperty(output, key, {
         value: visit(descriptor.value, `${label}.${key}`, depth + 1),

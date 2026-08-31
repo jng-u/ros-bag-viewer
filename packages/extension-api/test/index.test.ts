@@ -148,6 +148,19 @@ describe("TrustedExtensionHost conformance", () => {
     expect(() => instance.configure({ enabled: false })).toThrow(/disposed/);
   });
 
+  it("suspends an attached source and records the lifecycle transition", () => {
+    const value = harness();
+    const host = new TrustedExtensionHost();
+    host.register(value.definition);
+    const instance = host.instantiate("harness", "suspend-transition");
+    instance.configure({ enabled: true });
+    instance.attachSource(1);
+    instance.suspend();
+    expect(value.calls).toEqual(["configure", "attach:1", "suspend"]);
+    expect(instance.telemetry()).toMatchObject({ state: "suspended", sourceEpoch: 1 });
+    expect(instance.telemetry().lifecycle).toEqual(["registered", "instantiated", "configured", "attached", "suspended"]);
+  });
+
   it("rejects stale or rolled-back epochs before callbacks and invalidates old handles on advance", () => {
     const handles: TrustedResourceHandle[] = [];
     let updates = 0;
@@ -487,10 +500,16 @@ describe("TrustedExtensionHost conformance", () => {
       expect(hugeValue.instance.state).toBe("instantiated");
       expect(charCodeAt).not.toHaveBeenCalled();
 
-      const hugeKey = configure({ ["x".repeat(1_000_000)]: null }, 24);
+    const hugeKey = configure({ ["x".repeat(1_000_000)]: null }, 24);
       expect(hugeKey.run).toThrow(/byte budget/);
       expect(hugeKey.calls).not.toHaveBeenCalled();
       expect(charCodeAt).not.toHaveBeenCalled();
+
+      const ownKeys = vi.fn(Reflect.ownKeys);
+      const hostileObject = new Proxy({}, { ownKeys });
+      const hostile = configure(hostileObject, 1);
+      expect(hostile.run).toThrow(/byte budget/);
+      expect(ownKeys).not.toHaveBeenCalled();
 
       const boundedScan = configure("😀😀aaaa", 8);
       expect(boundedScan.run).toThrow(/byte budget/);
@@ -566,7 +585,14 @@ describe("out-of-core range summary example", () => {
       '(function(){}).constructor`return 1`;',
       'const C=(function(){}).constructor; C("return 1")();',
       'const {constructor:C}=function(){}; C("return 1")();',
+      'const {["con"+"structor"]:C}=function(){}; C("return 1")();',
+      '(function(){})["con"+"structor"]("return 1")();',
+      '(function(){})[`constructor`]`return 1`;',
       'Object.getOwnPropertyDescriptor(function(){}, "constructor").value("return 1")();',
+      'const {getOwnPropertyDescriptors:g}=Object; g(function(){}).constructor.value("return 1")();',
+      'Object.getOwnPropertyDescriptors(function(){}).constructor.value`return 1`;',
+      '(function*(){}).constructor`return 1`;',
+      '(async function(){}).constructor("return 1")();',
       'const R=Reflect; R.get(function(){}, "constructor");',
     ]) {
       const probe = spawnSync(process.execPath, [
@@ -579,7 +605,7 @@ describe("out-of-core range summary example", () => {
     const allowed = spawnSync(process.execPath, [
       "scripts/toolchain/audit-extension-examples.mjs",
       "--source-base64",
-      Buffer.from("class Safe { constructor() {} }").toString("base64"),
+      Buffer.from("class Safe { constructor() {} } const a=[1]; a[0]; const tag=(s:TemplateStringsArray)=>s; tag`safe`;").toString("base64"),
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
     expect(allowed.stderr).toBe("");
     expect(allowed.status).toBe(0);

@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import { repositoryStopReason } from "./repository-stop-policy.mjs";
+import { readBoundedBytes, readBoundedJson, readBoundedText } from "./bounded-input.mjs";
 import {
   generateConformanceExecutionManifest,
   verifyConformanceExecutionManifest,
@@ -13,6 +14,7 @@ import {
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const evidencePath = join(root, "docs/evidence/m5-release-readiness.json");
+const jsonCaps = Object.freeze({ evidence: 2 * 1024 * 1024, fixture: 256 * 1024, manifest: 16 * 1024 * 1024, package: 1024 * 1024, supplyChain: 16 * 1024 * 1024 });
 
 function fail(message) {
   throw new Error(`release readiness gate: ${message}`);
@@ -119,23 +121,23 @@ function validateRepositoryStops() {
     const stopReason = repositoryStopReason(repositoryPath, readFileSync(path));
     if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
-    const packageJson = JSON.parse(readFileSync(path, "utf8"));
+    const packageJson = readBoundedJson(path, jsonCaps.package, relative(root, path));
     if (packageJson.private !== true) fail(`${relative(root, path)} must remain private`);
     if (packageJson.publishConfig !== undefined || packageJson.homepage !== undefined) fail(`${relative(root, path)} configures unauthorized publication`);
   }
 
   if (!existsSync(join(root, "pnpm-lock.yaml"))) fail("frozen lockfile is missing");
-  const rootPackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const rootPackage = readBoundedJson(join(root, "package.json"), jsonCaps.package, "package.json");
   if (!/^pnpm@\d+\.\d+\.\d+$/.test(rootPackage.packageManager ?? "")) fail("packageManager must pin an exact pnpm version");
   run(process.execPath, ["scripts/toolchain/audit-extension-examples.mjs"]);
 }
 
 function validateGeneratedSupplyChainArtifacts() {
-  const licenses = JSON.parse(readFileSync(join(root, "artifacts/licenses.json"), "utf8"));
+  const licenses = readBoundedJson(join(root, "artifacts/licenses.json"), jsonCaps.supplyChain, "artifacts/licenses.json");
   if (licenses.schemaVersion !== 1 || !Array.isArray(licenses.packages) || licenses.packages.length === 0) fail("generated license inventory is incomplete");
   if (licenses.packages.some(({ name, version, license }) => !name || !version || !license)) fail("generated license inventory contains an incomplete package");
 
-  const sbom = JSON.parse(readFileSync(join(root, "artifacts/sbom.cdx.json"), "utf8"));
+  const sbom = readBoundedJson(join(root, "artifacts/sbom.cdx.json"), jsonCaps.supplyChain, "artifacts/sbom.cdx.json");
   if (sbom.bomFormat !== "CycloneDX" || sbom.specVersion !== "1.5" || !Array.isArray(sbom.components) || sbom.components.length === 0) {
     fail("generated CycloneDX SBOM is incomplete");
   }
@@ -160,19 +162,19 @@ function checkReproducibility() {
     { generator: "scripts/toolchain/sbom-report.mjs", artifact: "artifacts/sbom.cdx.json" },
   ]) {
     run(process.execPath, [generator]);
-    const first = readFileSync(join(root, artifact), "utf8");
+    const first = readBoundedText(join(root, artifact), jsonCaps.supplyChain, artifact);
     run(process.execPath, [generator]);
-    const second = readFileSync(join(root, artifact), "utf8");
+    const second = readBoundedText(join(root, artifact), jsonCaps.supplyChain, artifact);
     if (first !== second) fail(`${artifact} is not byte-for-byte deterministic across consecutive generations`);
   }
 }
 
 function validateProtocolSchemaV1() {
-  const fixture = JSON.parse(readFileSync(join(root, "packages/protocol/fixtures/v1-conformance.json"), "utf8"));
+  const fixture = readBoundedJson(join(root, "packages/protocol/fixtures/v1-conformance.json"), jsonCaps.fixture, "v1 conformance fixture");
   const rows = ["sources", "schemas", "timeTf", "displayExtensionLifecycle", "rejections"]
     .flatMap((key) => fixture[key]);
   for (const row of rows) {
-    const evidenceBytes = readFileSync(join(root, row.evidence));
+    const evidenceBytes = readBoundedBytes(join(root, row.evidence), 8 * 1024 * 1024, row.evidence);
     const evidenceDigest = `sha256:${createHash("sha256").update(evidenceBytes).digest("hex")}`;
     if (row.evidenceDigest !== evidenceDigest) fail(`stale conformance evidence digest for ${row.id}`);
     const resultDigest = `sha256:${createHash("sha256")
@@ -182,7 +184,7 @@ function validateProtocolSchemaV1() {
   }
   const generated = generateConformanceExecutionManifest(root);
   const path = writeConformanceExecutionManifest(root, generated);
-  const consumed = JSON.parse(readFileSync(path, "utf8"));
+  const consumed = readBoundedJson(path, jsonCaps.manifest, "v1 conformance execution manifest");
   verifyConformanceExecutionManifest(root, consumed);
   if (process.argv.includes("--check-reproducibility")) {
     const repeated = generateConformanceExecutionManifest(root);
@@ -190,7 +192,7 @@ function validateProtocolSchemaV1() {
   }
 }
 
-const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+const evidence = readBoundedJson(evidencePath, jsonCaps.evidence, "M5 release readiness evidence");
 validateEvidence(evidence);
 validateRepositoryStops();
 validateProtocolSchemaV1();

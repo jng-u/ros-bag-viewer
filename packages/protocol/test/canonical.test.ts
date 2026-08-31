@@ -39,4 +39,21 @@ describe("plain-data canonicalization bounds", () => {
         .toThrowError(expect.objectContaining<Partial<CanonicalDataError>>({ code: "byte-limit" }));
     }
   });
+
+  it("stops UTF-8 and object admission before attacker-controlled tails", () => {
+    const charCodeAt = vi.spyOn(String.prototype, "charCodeAt");
+    try {
+      expect(() => canonicalizePlainData("x".repeat(1_000_000), { label: "bytes", maxBytes: 1 }))
+        .toThrowError(expect.objectContaining<Partial<CanonicalDataError>>({ code: "byte-limit" }));
+      expect(charCodeAt).not.toHaveBeenCalled();
+    } finally {
+      charCodeAt.mockRestore();
+    }
+
+    const ownKeys = vi.fn(Reflect.ownKeys);
+    const hostile = new Proxy({}, { ownKeys });
+    expect(() => canonicalizePlainData(hostile, { label: "hostile", maxBytes: 1 }))
+      .toThrowError(expect.objectContaining<Partial<CanonicalDataError>>({ code: "byte-limit" }));
+    expect(ownKeys).not.toHaveBeenCalled();
+  });
 });

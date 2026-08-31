@@ -127,6 +127,7 @@ function captureExactObject(value: unknown, allowed: readonly string[], label: s
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) throw new Error(`${label} must be a plain object`);
   const keys = Reflect.ownKeys(value);
+  if (keys.length !== allowed.length) throw new Error(`${label} contains missing or unsupported operations`);
   if (keys.some((key) => typeof key !== "string")) throw new Error(`${label} must not contain symbol fields`);
   const actual = (keys as string[]).sort();
   if (actual.length !== allowed.length || actual.some((key, index) => key !== allowed[index])) {
@@ -149,6 +150,7 @@ function captureExactArray<T>(value: unknown, label: string, maxLength = 100_000
     throw new Error(`${label} exceeds the item limit`);
   }
   const keys = Reflect.ownKeys(value);
+  if (keys.length !== length + 1) throw new Error(`${label} must be dense and unaugmented`);
   if (keys.some((key) => typeof key !== "string")) throw new Error(`${label} must not contain symbol fields`);
   if (keys.length !== length + 1 || !(keys as string[]).includes("length")) {
     throw new Error(`${label} must be dense and unaugmented`);
@@ -250,10 +252,12 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) throw new Error("extension message snapshot must contain only plain data");
+  chargeSnapshot(budget, 16);
   const keys = Reflect.ownKeys(value);
+  if (keys.length > 100_000 - budget.items) throw new Error("extension message snapshot item limit exceeded");
+  if (keys.length > Math.floor((budget.maxBytes - budget.bytes) / 8)) throw new Error("extension message snapshot byte budget exceeded");
   if (keys.some((key) => typeof key !== "string")) throw new Error("extension message snapshot must not contain symbols");
   const output: Record<string, unknown> = Object.create(prototype === null ? null : Object.prototype) as Record<string, unknown>;
-  chargeSnapshot(budget, 16);
   for (const key of (keys as string[]).sort()) {
     if (key === "__proto__") throw new Error("extension message snapshot must not contain __proto__ fields");
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
