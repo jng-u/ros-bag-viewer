@@ -252,7 +252,7 @@ describe("M0 forbidden-scope guard", () => {
     expect(violations).toEqual([]);
   });
 
-  it("does not lock M1 runtime technology through production dependencies", () => {
+  it("locks only the approved M1 source dependency and no hosted/live runtime", () => {
     const locked: string[] = [];
     for (const path of packageFiles()) {
       const packageJson = JSON.parse(readFileSync(path, "utf8")) as { dependencies?: Record<string, string> };
@@ -260,6 +260,12 @@ describe("M0 forbidden-scope guard", () => {
         locked.push(`${basename(join(path, ".."))}:${dependency}`);
       }
     }
-    expect(locked, "M0 may define contracts but must not lock renderer/live/hosted runtime dependencies").toEqual([]);
+    expect(locked, "M1 may pin only the approved official MCAP adapter dependency").toEqual([
+      "source-mcap:@mcap/core",
+    ]);
+    const sourceMcap = JSON.parse(readFileSync(join(root, "packages/source-mcap/package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(sourceMcap.dependencies["@mcap/core"]).toBe("2.2.1");
   });
 });

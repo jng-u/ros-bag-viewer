@@ -1,1 +1,1 @@
-{"files":[],"references":[{"path":"./apps/web"},{"path":"./apps/relay"},{"path":"./packages/core-model"}]}
+{"files":[],"references":[{"path":"./packages/core-model"},{"path":"./packages/worker-runtime"},{"path":"./packages/source-mcap"},{"path":"./packages/timeline"},{"path":"./packages/tf"},{"path":"./packages/render-core"},{"path":"./packages/displays-core"},{"path":"./packages/m1-integration"},{"path":"./apps/web"},{"path":"./apps/relay"}]}
