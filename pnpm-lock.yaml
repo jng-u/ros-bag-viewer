@@ -54,6 +54,15 @@ importers:
 
   packages/edge-runtime: {}
 
+  packages/hosted-core:
+    dependencies:
+      '@ros-web-viewer/core-model':
+        specifier: workspace:*
+        version: link:../core-model
+      '@ros-web-viewer/worker-runtime':
+        specifier: workspace:*
+        version: link:../worker-runtime
+
   packages/m1-integration:
     dependencies:
       '@ros-web-viewer/source-mcap':
@@ -66,6 +75,8 @@ importers:
   packages/protocol: {}
 
   packages/render-core: {}
+
+  packages/source-hosted: {}
 
   packages/source-live: {}
 

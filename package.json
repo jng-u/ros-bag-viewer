@@ -21,6 +21,7 @@
     "check:m1": "vitest run tests/m1",
     "check:m2": "vitest run packages/m2-recorded-gate/test/index.test.ts packages/source-ros1bag/test/index.test.ts packages/source-ros2-sqlite/test/index.test.ts packages/displays-core/test/index.test.ts",
     "check:m3": "vitest run tests/m3-live",
+    "check:m4:hosted-core": "vitest run packages/hosted-core/test/index.test.ts",
     "evidence:m3": "UPDATE_M3_EVIDENCE=1 vitest run tests/m3-live/generate-evidence.test.ts",
     "audit:dependencies": "corepack pnpm audit --audit-level high",
     "report:licenses": "node scripts/toolchain/licenses-report.mjs",

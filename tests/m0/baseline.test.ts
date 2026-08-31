@@ -252,7 +252,7 @@ describe("M0 forbidden-scope guard", () => {
     expect(violations).toEqual([]);
   });
 
-  it("locks only the approved local source, display, and secure-live dependency chain", () => {
+  it("locks only the approved local source, display, secure-live, and hosted dependency chain", () => {
     const locked: string[] = [];
     for (const path of packageFiles()) {
       const packageJson = JSON.parse(readFileSync(path, "utf8")) as { dependencies?: Record<string, string> };
@@ -260,10 +260,12 @@ describe("M0 forbidden-scope guard", () => {
         locked.push(`${basename(join(path, ".."))}:${dependency}`);
       }
     }
-    expect(locked, "M3 may add only reviewed private workspace links to the M2 dependency chain").toEqual([
+    expect(locked, "M4 may add only reviewed private workspace links to the M3 dependency chain").toEqual([
       "relay:@ros-web-viewer/protocol",
       "web:@ros-web-viewer/core-model",
       "web:@ros-web-viewer/m1-integration",
+      "hosted-core:@ros-web-viewer/core-model",
+      "hosted-core:@ros-web-viewer/worker-runtime",
       "m1-integration:@ros-web-viewer/source-mcap",
       "m1-integration:@ros-web-viewer/worker-runtime",
       "source-mcap:@mcap/core",

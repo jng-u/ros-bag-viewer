@@ -9,6 +9,7 @@
     { "path": "./packages/source-live" },
     { "path": "./packages/protocol" },
     { "path": "./packages/edge-runtime" },
+    { "path": "./packages/hosted-core" },
     { "path": "./packages/timeline" },
     { "path": "./packages/tf" },
     { "path": "./packages/render-core" },
