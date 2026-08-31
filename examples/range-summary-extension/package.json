@@ -1,0 +1,13 @@
+{
+  "name": "@ros-web-viewer/example-range-summary-extension",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "dependencies": {
+    "@ros-web-viewer/extension-api": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

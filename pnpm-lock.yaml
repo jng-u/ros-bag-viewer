@@ -48,11 +48,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/m1-integration
 
+  examples/range-summary-extension:
+    dependencies:
+      '@ros-web-viewer/extension-api':
+        specifier: workspace:*
+        version: link:../../packages/extension-api
+
   packages/core-model: {}
 
   packages/displays-core: {}
 
   packages/edge-runtime: {}
+
+  packages/extension-api: {}
 
   packages/hosted-core:
     dependencies:

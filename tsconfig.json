@@ -15,7 +15,9 @@
     { "path": "./packages/tf" },
     { "path": "./packages/render-core" },
     { "path": "./packages/displays-core" },
+    { "path": "./packages/extension-api" },
     { "path": "./packages/m1-integration" },
+    { "path": "./examples/range-summary-extension" },
     { "path": "./apps/web" },
     { "path": "./apps/relay" }
   ]
