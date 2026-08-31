@@ -170,7 +170,15 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (!symbol && !safeStandardGlobals.has(node.text)) fail(`${filename} references unbound ambient ${node.text}`);
     }
     if (ts.isElementAccessExpression(node)) { const property = node.argumentExpression === undefined ? undefined : constantString(node.argumentExpression); if (property === undefined || deniedRuntimeProperties.has(property) || deniedRuntimeNames.has(property) || privilegedNames.has(property)) fail(`${filename} accesses denied computed property`); }
-    if (ts.isBindingElement(node) && ts.isIdentifier(node.name) && deniedRuntimeProperties.has(node.name.text)) fail(`${filename} destructures a denied runtime property`);
+    if (ts.isBindingElement(node)) {
+      const property = node.propertyName;
+      const propertyName = property === undefined && ts.isIdentifier(node.name) ? node.name.text :
+        property && ts.isComputedPropertyName(property) ? constantString(property.expression) :
+          property && (ts.isIdentifier(property) || ts.isStringLiteralLike(property) || ts.isNumericLiteral(property)) ? property.text : undefined;
+      if (propertyName && (deniedRuntimeProperties.has(propertyName) || deniedRuntimeNames.has(propertyName))) {
+        fail(`${filename} destructures a denied runtime property`);
+      }
+    }
     const exported = node.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword) ?? false;
     if (!filename.endsWith(".d.ts") && exported) {
       if (ts.isVariableStatement(node)) {

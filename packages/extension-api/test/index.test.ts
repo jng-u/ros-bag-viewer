@@ -703,6 +703,21 @@ export const unsafe = defineTrustedExtension("unsafe", () => {
   count = 1;
   return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
 });`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => { const { constructor } = function () {}; constructor("return globalThis")(); },
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => { const { constructor: recovered } = function () {}; recovered("return globalThis")(); },
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => { const { ["con" + "structor"]: recovered } = function () {}; recovered("return globalThis")(); },
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
