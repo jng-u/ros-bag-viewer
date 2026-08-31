@@ -35,16 +35,46 @@ function jsonContainsKubernetesResource(value) {
   return apiVersion && kind || entries.some(([, nested]) => jsonContainsKubernetesResource(nested));
 }
 
+function stripYamlBlockScalars(text) {
+  const lines = text.split(/\r?\n/u);
+  const kept = [];
+  let payloadIndent;
+  let scalarHeaderIndent;
+  for (const rawLine of lines) {
+    const indentation = /^\s*/u.exec(rawLine)[0].length;
+    if (scalarHeaderIndent !== undefined) {
+      if (/^\s*$/u.test(rawLine)) continue;
+      if (payloadIndent === undefined && indentation > scalarHeaderIndent) payloadIndent = indentation;
+      if (payloadIndent !== undefined && indentation >= payloadIndent) continue;
+      payloadIndent = undefined;
+      scalarHeaderIndent = undefined;
+    }
+    const header = /^\s*(?:-\s+)?(?:[^:#]+:\s*)?[|>](?:[1-9])?[+-]?\s*(?:#.*)?$/u.exec(rawLine);
+    if (header) {
+      // Determine the effective scalar indentation from its first payload line;
+      // this preserves later sequence/mapping siblings at their own indentation.
+      scalarHeaderIndent = indentation;
+      payloadIndent = undefined;
+      kept.push(rawLine);
+      continue;
+    }
+    kept.push(rawLine);
+  }
+  return kept.join("\n");
+}
+
 function yamlContainsKubernetesResource(text) {
   return text.split(/^\s*(?:---|\.\.\.)\s*$/gmu).some((document) => {
-    const flowResource = yamlFlowCollections(document).some(jsonContainsKubernetesResource);
+    const sanitized = stripYamlBlockScalars(document);
+    if (/^\s*-\s+[^:#]+:\s*[|>].*\n(?:(?!^\s*-\s).)*^\s+apiVersion\s*:\s*[^#\s].*\n(?:(?!^\s*-\s).)*^\s+kind\s*:\s*[^#\s].*$/msu.test(sanitized)) return true;
+    const flowResource = yamlFlowCollections(sanitized).some(jsonContainsKubernetesResource);
     if (flowResource) return true;
     const containers = new Map();
     const sequences = new Map();
     const keysByScope = new Map();
     let nextScope = 0;
     let blockScalarIndent;
-    for (const rawLine of document.split(/\r?\n/u)) {
+    for (const rawLine of sanitized.split(/\r?\n/u)) {
       const indentation = /^\s*/u.exec(rawLine)[0].length;
       if (blockScalarIndent !== undefined) {
         if (/^\s*$/u.test(rawLine) || indentation > blockScalarIndent) continue;
@@ -336,8 +366,6 @@ function typescriptDeclaresInfrastructure(text, filename) {
     const symbol = checker.getSymbolAtLocation(node);
     return !symbol || !symbol.declarations || symbol.declarations.length === 0;
   };
-  const isUndefinedReceiver = (node) => node.kind === ts.SyntaxKind.NullKeyword || isUnshadowed(node, "undefined") ||
-    ts.isVoidExpression(node) && ts.isNumericLiteral(node.expression) && node.expression.text === "0";
   const propertyName = (node, environment) => {
     if (ts.isPropertyAccessExpression(node)) return node.name.text;
     if (ts.isElementAccessExpression(node)) return [...typescriptStrings(node.argumentExpression, environment.constants)][0];
@@ -351,7 +379,7 @@ function typescriptDeclaresInfrastructure(text, filename) {
     node = transparentTypeScriptExpression(node);
     if (!node) return false;
     if (loaderReference(node, environment)) return true;
-    if (ts.isCallExpression(node) && node.arguments.length === 1 && isUndefinedReceiver(transparentTypeScriptExpression(node.arguments[0]))) {
+    if (ts.isCallExpression(node) && node.arguments.length >= 1) {
       const bind = transparentTypeScriptExpression(node.expression);
       if ((ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind)) && propertyName(bind, environment) === "bind" &&
         loaderReference(bind.expression, environment)) return true;
@@ -372,10 +400,17 @@ function typescriptDeclaresInfrastructure(text, filename) {
     const callee = transparentTypeScriptExpression(node.expression);
     if (callee.kind === ts.SyntaxKind.ImportKeyword) return node.arguments[0];
     if (isLoaderAlias(callee, environment)) return node.arguments[0];
+    if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Reflect" &&
+      callee.name.text === "apply" && isLoaderAlias(node.arguments[0], environment)) {
+      const args = transparentTypeScriptExpression(node.arguments[2]);
+      return args && ts.isArrayLiteralExpression(args) ? args.elements[0] : undefined;
+    }
     if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) return undefined;
     const method = propertyName(callee, environment);
-    if (!loaderReference(callee.expression, environment) || !["call", "apply"].includes(method) ||
-      !isUndefinedReceiver(transparentTypeScriptExpression(node.arguments[0]))) return undefined;
+    const memberLoader = method === "require" && ts.isIdentifier(callee.expression) && callee.expression.text === "module" &&
+      isUnshadowed(callee.expression, "module");
+    if (memberLoader) return node.arguments[0];
+    if ((!memberLoader && !loaderReference(callee.expression, environment)) || !["call", "apply"].includes(method)) return undefined;
     if (method === "call") return node.arguments[1];
     const args = transparentTypeScriptExpression(node.arguments[1]);
     return args && ts.isArrayLiteralExpression(args) ? args.elements[0] : undefined;
@@ -501,7 +536,7 @@ function pythonStrings(expression, constants, depth = 0) {
 function pythonDeclaresInfrastructure(text) {
   let state = {
     constants: new Map(), importlibAliases: new Set(["importlib"]),
-    importModuleAliases: new Set(), loaderAliases: new Set(["__import__"]),
+    importModuleAliases: new Set(), loaderAliases: new Set(["__import__", "builtins.__import__"]),
   };
   const copyState = (source) => ({
     constants: mergeTypeScriptConstants(source.constants), importlibAliases: new Set(source.importlibAliases),
@@ -544,7 +579,7 @@ function pythonDeclaresInfrastructure(text) {
     const getattr = /^getattr\s*\(\s*(.+?)\s*,\s*(.+)\s*\)$/u.exec(normalized);
     if (getattr) {
       const receiver = normalizeLoaderExpression(getattr[1]);
-      const attributes = pythonStrings(getattr[2], state.constants);
+      const attributes = pythonStrings(getattr[2].split(",", 1)[0], state.constants);
       if (/^[A-Za-z_]\w*$/u.test(receiver) && attributes.has("import_module")) return `${receiver}.import_module`;
     }
     const dictionary = /^(.*?)\s*\.\s*__dict__\s*(?:\[\s*(.+)\s*\]|\.get\s*\(\s*(.+)\s*\))$/u.exec(normalized);
@@ -557,7 +592,7 @@ function pythonDeclaresInfrastructure(text) {
   };
   const isLoaderExpression = (expression) => {
     const loader = normalizeLoaderExpression(expression);
-    if (state.loaderAliases.has(loader) || state.importModuleAliases.has(loader) ||
+    if (loader === "builtins.__import__" || state.loaderAliases.has(loader) || state.importModuleAliases.has(loader) ||
       [...state.importlibAliases].some((alias) => loader === `${alias}.import_module`)) return true;
     const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*(.+)\s*\(\s*\1\s*\)$/u.exec(loader);
     return Boolean(lambda && isLoaderExpression(lambda[2]));
@@ -575,7 +610,8 @@ function pythonDeclaresInfrastructure(text) {
       state = mergeStates(...context.branches);
     }
   };
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const indentation = /^\s*/u.exec(line)[0].length;
     const branch = /^\s*(elif\b.*|else)\s*:\s*(?:#.*)?$/u.exec(line);
     while (contexts.length > 0 && indentation <= contexts.at(-1).indentation &&
@@ -596,13 +632,25 @@ function pythonDeclaresInfrastructure(text) {
     const definition = /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:\s*(?:#.*)?$/u.exec(line);
     if (definition) {
       const parameters = definition[2].split(",").map((parameter) => /^\s*\*{0,2}([A-Za-z_]\w*)/u.exec(parameter)?.[1]).filter(Boolean);
-      contexts.push({ type: "function", indentation, before: copyState(state), name: definition[1], parameter: parameters[0], wrapper: false });
+      const localBindings = new Set(parameters);
+      for (let bodyIndex = lineIndex + 1; bodyIndex < lines.length; bodyIndex += 1) {
+        const bodyLine = lines[bodyIndex];
+        const bodyIndentation = /^\s*/u.exec(bodyLine)[0].length;
+        if (bodyLine.trim() && bodyIndentation <= indentation) break;
+        const assignmentBinding = /^\s*([A-Za-z_]\w*)\s*=/u.exec(bodyLine);
+        if (assignmentBinding) localBindings.add(assignmentBinding[1]);
+        const importBinding = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(bodyLine);
+        if (importBinding) localBindings.add(importBinding[1] ?? "importlib");
+        const fromBinding = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(bodyLine);
+        if (fromBinding) localBindings.add(fromBinding[1] ?? "import_module");
+      }
+      contexts.push({ type: "function", indentation, before: copyState(state), name: definition[1], parameter: parameters[0], wrapper: false, localBindings });
       state = copyState(state);
-      for (const parameter of parameters) {
-        state.constants.delete(parameter);
-        state.loaderAliases.delete(parameter);
-        state.importlibAliases.delete(parameter);
-        state.importModuleAliases.delete(parameter);
+      for (const binding of localBindings) {
+        state.constants.delete(binding);
+        state.loaderAliases.delete(binding);
+        state.importlibAliases.delete(binding);
+        state.importModuleAliases.delete(binding);
       }
       continue;
     }
