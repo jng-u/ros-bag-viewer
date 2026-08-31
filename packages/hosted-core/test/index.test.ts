@@ -369,3 +369,15 @@ describe("provider-neutral hosted sharing core", () => {
     expect("listObjects" in service).toBe(false);
   });
 });
+
+describe("serialized hosted admission", () => {
+  it("rejects hostile Proxy inputs before any trap", async () => {
+    const service = new HostedSharingService();
+    const traps = { get: vi.fn(), getPrototypeOf: vi.fn(), ownKeys: vi.fn(), toJSON: vi.fn() };
+    const hostile = new Proxy({}, { get: traps.get, getPrototypeOf: traps.getPrototypeOf, ownKeys: traps.ownKeys, getOwnPropertyDescriptor: traps.get });
+    await expect(service.createHostedSessionSerialized(hostile as unknown as string)).rejects.toThrow(/serialized JSON/);
+    expect(traps.get).not.toHaveBeenCalled(); expect(traps.getPrototypeOf).not.toHaveBeenCalled(); expect(traps.ownKeys).not.toHaveBeenCalled();
+    expect(() => service.issueRangeGrantSerialized("cap", hostile as unknown as string)).toThrow(/serialized JSON/);
+    await expect(service.readGrantedRangeSerialized(hostile as unknown as string, new AbortController().signal)).rejects.toThrow(/serialized JSON/);
+  });
+});

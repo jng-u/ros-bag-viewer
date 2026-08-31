@@ -18,6 +18,7 @@ import {
   type SourceRelation,
 } from "@ros-web-viewer/core-model";
 import { GrantedRangeSource } from "@ros-web-viewer/worker-runtime";
+import { decodeBoundedBase64, parseBoundedJsonText, utf8ByteLengthAtMost } from "../../../scripts/toolchain/bounded-input.mjs";
 
 const TOKEN_BYTES = 32;
 const MANIFEST_CHUNK_BYTES = 64 * 1024;
@@ -489,6 +490,24 @@ function signManifest(payload: HostedManifestPayload, privateKey: KeyObject, pub
   });
 }
 
+
+const HOSTED_SERIALIZED_MAX_BYTES = 2 * 1024 * 1024;
+function parseSerializedRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "string") throw new Error(`${label} requires bounded serialized JSON text`);
+  utf8ByteLengthAtMost(value, HOSTED_SERIALIZED_MAX_BYTES, label);
+  const parsed = parseBoundedJsonText(value, HOSTED_SERIALIZED_MAX_BYTES, label);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
+  return parsed as Record<string, unknown>;
+}
+export function serializeHostedSessionInput(input: CreateHostedSessionInput): string {
+  return JSON.stringify({ ...input, entries: input.entries.map((entry) => ({ ...entry, bytes: Buffer.from(entry.bytes).toString("base64") })) });
+}
+export function serializeRangeGrantRequest(input: RangeGrantRequest): string {
+  return JSON.stringify({ ...input, offset: input.offset.toString(), length: input.length.toString() });
+}
+export function serializeGrantedRangeRead(input: GrantedRangeRead): string {
+  return JSON.stringify({ ...input, offset: input.offset.toString(), length: input.length.toString() });
+}
 export class HostedSharingService {
   readonly #store: ImmutableObjectStore;
   readonly #clock: () => number;
@@ -528,6 +547,18 @@ export class HostedSharingService {
 
   get manifestVerificationKey(): string {
     return this.#publicKeySpki;
+  }
+
+  async createHostedSessionSerialized(serialized: string): Promise<HostedSessionDescriptor> {
+    const parsed = parseSerializedRecord(serialized, "hosted session");
+    const rawEntries = parsed.entries;
+    if (!Array.isArray(rawEntries)) throw new Error("hosted session entries must be an array");
+    const entries = rawEntries.map((entry) => {
+      const record = parseSerializedRecord(JSON.stringify(entry), "hosted upload entry");
+      if (typeof record.bytes !== "string") throw new Error("hosted upload bytes must be base64 text");
+      return { entryId: String(record.entryId), relativePath: String(record.relativePath), bytes: decodeBoundedBase64(record.bytes, this.#limits.maxSessionBytes, "hosted upload bytes") };
+    });
+    return this.createHostedSession({ entries, relations: Array.isArray(parsed.relations) ? parsed.relations as HostedUploadRelation[] : undefined, sessionTtlMs: typeof parsed.sessionTtlMs === "number" ? parsed.sessionTtlMs : undefined, retentionMs: typeof parsed.retentionMs === "number" ? parsed.retentionMs : undefined });
   }
 
   async createHostedSession(input: CreateHostedSessionInput): Promise<HostedSessionDescriptor> {
@@ -645,6 +676,11 @@ export class HostedSharingService {
     return cloneFrozen(session.manifest);
   }
 
+  issueRangeGrantSerialized(sessionCapability: string, serialized: string): IssuedRangeGrant {
+    const parsed = parseSerializedRecord(serialized, "range grant request");
+    return this.issueRangeGrant(sessionCapability, { sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) });
+  }
+
   issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
     try {
       if (this.#grants.size >= this.#limits.maxActiveGrants) throw new HostedAccessError();
@@ -683,6 +719,11 @@ export class HostedSharingService {
       if (error instanceof HostedAccessError) this.#deny();
       throw error instanceof HostedAccessError ? error : new HostedAccessError();
     }
+  }
+
+  async readGrantedRangeSerialized(serialized: string, signal: AbortSignal): Promise<Uint8Array> {
+    const parsed = parseSerializedRecord(serialized, "granted range read");
+    return this.readGrantedRange({ sessionCapability: String(parsed.sessionCapability), grantToken: String(parsed.grantToken), sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
   }
 
   async readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
@@ -728,24 +769,15 @@ export class HostedSharingService {
     }
     return new GrantedRangeSource(entry.object.sizeBytes, entry.object.immutableVersion, async (range, signal) => {
       if (signal.aborted) throw abortError(signal.reason);
-      const grant = this.issueRangeGrant(sessionCapability, {
-        sessionId: session.manifest.payload.sessionId,
-        entryId,
-        objectId: entry.manifest.objectId,
-        immutableVersion: entry.object.immutableVersion,
-        offset: range.offset,
-        length: range.length,
-      });
-      return this.readGrantedRange({
-        sessionCapability,
-        grantToken: grant.token,
-        sessionId: session.manifest.payload.sessionId,
-        entryId,
-        objectId: entry.manifest.objectId,
-        immutableVersion: entry.object.immutableVersion,
-        offset: range.offset,
-        length: range.length,
-      }, signal);
+      const grant = this.issueRangeGrantSerialized(sessionCapability, serializeRangeGrantRequest({
+        sessionId: session.manifest.payload.sessionId, entryId, objectId: entry.manifest.objectId,
+        immutableVersion: entry.object.immutableVersion, offset: range.offset, length: range.length,
+      }));
+      return this.readGrantedRangeSerialized(serializeGrantedRangeRead({
+        sessionCapability, grantToken: grant.token, sessionId: session.manifest.payload.sessionId,
+        entryId, objectId: entry.manifest.objectId, immutableVersion: entry.object.immutableVersion,
+        offset: range.offset, length: range.length,
+      }), signal);
     });
   }
 
