@@ -208,6 +208,10 @@ describe("TrustedExtensionHost conformance", () => {
     expect(() =>
       instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: Array.from({ length: 100 }, () => ({})) }),
     ).toThrow(/snapshot byte budget exceeded/);
+    const backing = new ArrayBuffer(256);
+    expect(() =>
+      instance.update({ sourceEpoch: 2, topic: "/x", schemaName: "X", value: new Uint8Array(backing, 0, 1) }),
+    ).toThrow(/snapshot byte budget exceeded/);
   });
 
   it("bounds resource handles and diagnostics and cleans up after callback failures", () => {
@@ -324,6 +328,48 @@ describe("TrustedExtensionHost conformance", () => {
     expect(() => failed.configure({})).toThrow(/bad config/);
     expect(() => failed.attachSource(1)).toThrow(/successfully configured/);
   });
+
+  it("rejects lifecycle re-entry and deeply nested snapshots without state resurrection", () => {
+    const holder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
+    const host = new TrustedExtensionHost();
+    host.register({ apiVersion: 1, id: "reentry", requiredCapabilities: ["source-messages"], create: () => lifecycle({ update: () => holder.instance?.dispose() }) });
+    const instance = host.instantiate("reentry", "reentry-instance"); holder.instance = instance;
+    instance.configure({}); instance.attachSource(1);
+    expect(() => instance.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: {} })).toThrow(/re-entry/);
+    expect(instance.state).toBe("error");
+
+    const nestedHolder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
+    const nestedHost = new TrustedExtensionHost();
+    nestedHost.register({
+      apiVersion: 1,
+      id: "nested-configure",
+      requiredCapabilities: [],
+      create: () => lifecycle({ configure: () => nestedHolder.instance?.configure({}) }),
+    });
+    const nested = nestedHost.instantiate("nested-configure", "nested-instance"); nestedHolder.instance = nested;
+    expect(() => nested.configure({})).toThrow(/re-entry/);
+    expect(nested.state).toBe("error");
+    expect(() => nested.attachSource(1)).toThrow(/successfully configured/);
+
+    const epochHolder: { instance?: ReturnType<TrustedExtensionHost["instantiate"]> } = {};
+    const epochHost = new TrustedExtensionHost();
+    epochHost.register({
+      apiVersion: 1,
+      id: "nested-attach",
+      requiredCapabilities: [],
+      create: () => lifecycle({ attachSource: () => epochHolder.instance?.attachSource(1) }),
+    });
+    const epoch = epochHost.instantiate("nested-attach", "nested-epoch"); epochHolder.instance = epoch;
+    epoch.configure({});
+    expect(() => epoch.attachSource(2)).toThrow(/re-entry/);
+    expect(epoch.telemetry()).not.toHaveProperty("sourceEpoch");
+
+    const safe = harness(); const bounded = new TrustedExtensionHost(); bounded.register(safe.definition);
+    const target = bounded.instantiate("harness", "deep-instance"); target.configure({}); target.attachSource(1);
+    let deep: unknown = "leaf"; for (let index = 0; index < 20_000; index += 1) deep = { nested: deep };
+    expect(() => target.update({ sourceEpoch: 1, topic: "/x", schemaName: "X", value: deep })).toThrow(/depth limit/);
+    expect(target.state).toBe("attached");
+  });
 });
 
 describe("out-of-core range summary example", () => {
@@ -350,19 +396,39 @@ describe("out-of-core range summary example", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../../../examples/range-summary-extension/package.json", import.meta.url), "utf8"),
     ) as { readonly private?: boolean; readonly dependencies?: Record<string, string> };
-    const source = readFileSync(new URL("../../../examples/range-summary-extension/src/index.ts", import.meta.url), "utf8");
     expect(packageJson.private).toBe(true);
     expect(packageJson.dependencies).toEqual({ "@ros-web-viewer/extension-api": "workspace:*" });
-    expect(source).not.toMatch(/@ros-web-viewer\/(?:displays-core|render-core|worker-runtime|source-|hosted-core|protocol)/);
-    expect(source).not.toMatch(/\b(?:eval|Function)\s*\(|\bimport\s*\(/);
     const examples = new URL("../../../examples/", import.meta.url);
     for (const directory of readdirSync(examples, { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
       const manifest = JSON.parse(readFileSync(new URL(`${directory.name}/package.json`, examples), "utf8")) as {
         private?: boolean;
         dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        bundledDependencies?: string[];
       };
       expect(manifest.private, directory.name).toBe(true);
       expect(Object.keys(manifest.dependencies ?? {}), directory.name).toEqual(["@ros-web-viewer/extension-api"]);
+      expect(Object.keys(manifest.devDependencies ?? {}), directory.name).toEqual([]);
+      expect(Object.keys(manifest.optionalDependencies ?? {}), directory.name).toEqual([]);
+      expect(Object.keys(manifest.peerDependencies ?? {}), directory.name).toEqual([]);
+      expect(manifest.bundledDependencies ?? [], directory.name).toEqual([]);
+      const sourceDirectory = new URL(`${directory.name}/src/`, examples);
+      const pending = [sourceDirectory];
+      while (pending.length > 0) {
+        const current = pending.pop()!;
+        for (const entry of readdirSync(current, { withFileTypes: true })) {
+          const path = new URL(entry.name, current);
+          if (entry.isDirectory()) { pending.push(new URL(`${entry.name}/`, current)); continue; }
+          if (!entry.name.endsWith(".ts")) continue;
+          const source = readFileSync(path, "utf8");
+          expect(source, `${directory.name}/${entry.name}`).not.toMatch(
+            /@ros-web-viewer\/(?:displays-core|render-core|worker-runtime|source-|hosted-core|protocol)/,
+          );
+          expect(source, `${directory.name}/${entry.name}`).not.toMatch(/\b(?:eval|Function)\s*\(|\bimport\s*\(/);
+        }
+      }
     }
   });
 });

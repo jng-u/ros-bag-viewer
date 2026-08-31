@@ -29,12 +29,11 @@ function validSchemaAdmission(): Record<string, unknown> {
   return {
     version: 1,
     typeName: "sensor_msgs/msg/Image",
-    schema: { fields: [{ name: "data", type: "uint8[]" }] },
     providers: [
       {
         providerId: "embedded",
         providerVersion: "1",
-        contentHash: `sha256:${"a".repeat(64)}`,
+        schema: { fields: [{ name: "data", type: "uint8[]" }] },
       },
     ],
   };
@@ -68,6 +67,24 @@ describe("protocol/schema v1 conformance freeze", () => {
     }
   });
 
+  it("rejects accessor-driven freeze changes and executable schema serialization hooks", () => {
+    const accessor = cloneFixture();
+    Object.defineProperty(accessor, "protocolVersion", { enumerable: true, get: () => 1 });
+    expect(() => freezeV1Conformance(accessor)).toThrow(/accessor/);
+    const admission = validSchemaAdmission();
+    admission.providers = [{ providerId: "x", providerVersion: "1", schema: { toJSON: () => ({ hidden: true }) } }];
+    expect(() => validateV1SchemaAdmission(admission)).toThrow(/executable|unsupported/);
+    const binary = validSchemaAdmission();
+    binary.providers = [{ providerId: "x", providerVersion: "1", schema: new ArrayBuffer(2 * 1_024 * 1_024) }];
+    expect(() => validateV1SchemaAdmission(binary)).toThrow(/plain data/);
+    const hidden = cloneFixture();
+    Object.defineProperty(hidden, "hidden", { value: true });
+    expect(() => freezeV1Conformance(hidden)).toThrow(/hidden/);
+    const symbol = cloneFixture();
+    Object.defineProperty(symbol, Symbol("hidden"), { value: true, enumerable: true });
+    expect(() => freezeV1Conformance(symbol)).toThrow(/symbols/);
+  });
+
   it("locks the conformance operation snapshot to the implemented live protocol", () => {
     expect(BROWSER_OPERATIONS).toEqual(V1_FROZEN_BROWSER_OPERATIONS);
     expect(EDGE_OPERATIONS).toEqual(V1_FROZEN_EDGE_OPERATIONS);
@@ -81,6 +98,9 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(() => parseV1ConformanceFixture({ ...cloneFixture(), surprise: true })).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }),
     );
+    const substitutedEvidence = cloneFixture();
+    (substitutedEvidence.sources as Array<Record<string, unknown>>)[0]!.evidence = "packages/protocol/test/conformance-v1.test.ts";
+    expect(() => parseV1ConformanceFixture(substitutedEvidence)).toThrow(/frozen case evidence/);
 
     const widenedOperations = cloneFixture();
     widenedOperations.browserOperations = [...V1_FROZEN_BROWSER_OPERATIONS, "publish"];
@@ -117,18 +137,20 @@ describe("protocol/schema v1 conformance freeze", () => {
     const conflict = validSchemaAdmission();
     conflict.providers = [
       ...(conflict.providers as object[]),
-      { providerId: "schema-pack", providerVersion: "1", contentHash: `sha256:${"b".repeat(64)}` },
+      { providerId: "schema-pack", providerVersion: "1", schema: { fields: [{ name: "other", type: "string" }] } },
     ];
     expect(() => validateV1SchemaAdmission(conflict)).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-conflict" }),
     );
-    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }))
+    const oversized = validSchemaAdmission(); oversized.providers = [{ providerId: "x", providerVersion: "1", schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }];
+    expect(() => validateV1SchemaAdmission(oversized))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
     let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
-    expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), schema: deep }))
+    const tooDeep = validSchemaAdmission(); tooDeep.providers = [{ providerId: "x", providerVersion: "1", schema: deep }];
+    expect(() => validateV1SchemaAdmission(tooDeep))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
     const oversizedProvider = validSchemaAdmission();
-    oversizedProvider.providers = [{ providerId: "x".repeat(257), providerVersion: "1", contentHash: `sha256:${"a".repeat(64)}` }];
+    oversizedProvider.providers = [{ providerId: "x".repeat(257), providerVersion: "1", schema: {} }];
     expect(() => validateV1SchemaAdmission(oversizedProvider)).toThrowError(/provider/);
     expect(() => validateV1SchemaAdmission({ ...validSchemaAdmission(), version: 2 }))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "unsupported-version" }));

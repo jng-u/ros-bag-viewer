@@ -147,32 +147,59 @@ function errorMessage(error: unknown): string {
 
 const textEncoder = new TextEncoder();
 
-function snapshotBytes(value: unknown, seen = new Set<object>()): number {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === "boolean") return 1;
-  if (typeof value === "number" || typeof value === "bigint") return 8;
-  if (typeof value === "string") return textEncoder.encode(value).byteLength;
-  if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
-  if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated object references");
-  seen.add(value);
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return 16 + value.byteLength;
-  if (Array.isArray(value)) return 16 + value.reduce((total, item) => total + 8 + snapshotBytes(item, seen), 0);
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error("extension message snapshot must contain only plain data");
+function snapshotBytes(value: unknown): number {
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new Set<object>();
+  let bytes = 0;
+  let items = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (++items > 100_000) throw new Error("extension message snapshot item limit exceeded");
+    if (current.depth > 64) throw new Error("extension message snapshot depth limit exceeded");
+    const item = current.value;
+    if (item === null || item === undefined) continue;
+    if (typeof item === "boolean") { bytes += 1; continue; }
+    if (typeof item === "number" || typeof item === "bigint") { bytes += 8; continue; }
+    if (typeof item === "string") { bytes += textEncoder.encode(item).byteLength; continue; }
+    if (typeof item !== "object") throw new Error("extension message snapshot contains an unsupported value");
+    if (seen.has(item)) throw new Error("extension message snapshot must not contain cycles or repeated object references");
+    seen.add(item);
+    if (item instanceof ArrayBuffer) { bytes += 16 + item.byteLength; continue; }
+    if (ArrayBuffer.isView(item)) { bytes += 16 + item.buffer.byteLength; continue; }
+    const prototype = Object.getPrototypeOf(item);
+    if (Array.isArray(item)) {
+      if (Reflect.ownKeys(item).some((key) => key !== "length" && (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key)))) {
+        throw new Error("extension message arrays must not contain augmented fields");
+      }
+      bytes += 16 + item.length * 8;
+      for (const nested of item) stack.push({ value: nested, depth: current.depth + 1 });
+      continue;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error("extension message snapshot must contain only plain data");
+    const descriptors = Object.getOwnPropertyDescriptors(item);
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("extension message snapshot must contain plain enumerable data");
+      bytes += 8 + textEncoder.encode(key).byteLength;
+      stack.push({ value: descriptor.value, depth: current.depth + 1 });
+    }
+    if (Reflect.ownKeys(item).some((key) => typeof key !== "string")) throw new Error("extension message snapshot must not contain symbols");
+    bytes += 16;
   }
-  return Object.entries(value).reduce(
-    (total, [key, item]) => total + 8 + textEncoder.encode(key).byteLength + snapshotBytes(item, seen),
-    16,
-  );
+  return bytes;
 }
 
-function freezeSnapshot<T>(value: T, seen = new Set<object>()): T {
-  if (typeof value !== "object" || value === null || ArrayBuffer.isView(value)) return value;
-  if (seen.has(value)) return value;
-  seen.add(value);
-  for (const item of Object.values(value)) freezeSnapshot(item, seen);
-  return Object.freeze(value);
+function freezeSnapshot<T>(value: T): T {
+  const stack: object[] = [];
+  const pending: object[] = typeof value === "object" && value !== null ? [value] : [];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const item = pending.pop()!;
+    if (seen.has(item) || ArrayBuffer.isView(item)) continue;
+    seen.add(item); stack.push(item);
+    for (const nested of Object.values(item)) if (typeof nested === "object" && nested !== null) pending.push(nested);
+  }
+  for (let index = stack.length - 1; index >= 0; index -= 1) Object.freeze(stack[index]);
+  return value;
 }
 
 function boundedSnapshot<T>(value: T, maxBytes: number): T {

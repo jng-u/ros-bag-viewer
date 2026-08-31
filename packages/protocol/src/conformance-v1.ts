@@ -52,6 +52,45 @@ export const V1_CONFORMANCE_REJECTION_IDS = Object.freeze([
   "lifetime-stale-epoch",
 ] as const);
 
+const V1_CONFORMANCE_EVIDENCE: Readonly<Record<string, string>> = Object.freeze({
+  "local-mcap": "packages/source-mcap/test/index.test.ts",
+  "local-ros1-bag": "packages/source-ros1bag/test/index.test.ts",
+  "local-ros2-sqlite": "packages/source-ros2-sqlite/test/index.test.ts",
+  "hosted-source-bundle": "packages/source-hosted/test/index.test.ts",
+  "ros1-live": "tests/m3-live/security-gate.test.ts",
+  "ros2-live": "tests/m3-live/security-gate.test.ts",
+  "schema-present": "packages/source-mcap/test/index.test.ts",
+  "schema-resolvable": "packages/source-ros2-sqlite/test/index.test.ts",
+  opaque: "packages/displays-core/test/index.test.ts",
+  "record-time": "packages/timeline/test/index.test.ts",
+  "header-time": "packages/timeline/test/index.test.ts",
+  "receipt-time": "packages/source-live/test/index.test.ts",
+  "clock-time": "packages/timeline/test/index.test.ts",
+  "source-epoch-invalidation": "packages/core-model/test/index.test.ts",
+  "tf-interpolation": "packages/tf/test/index.test.ts",
+  "tf-missing": "packages/tf/test/index.test.ts",
+  "tf-extrapolation": "packages/tf/test/index.test.ts",
+  register: "packages/extension-api/test/index.test.ts",
+  instantiate: "packages/extension-api/test/index.test.ts",
+  configure: "packages/extension-api/test/index.test.ts",
+  attach: "packages/extension-api/test/index.test.ts",
+  update: "packages/extension-api/test/index.test.ts",
+  render: "packages/extension-api/test/index.test.ts",
+  suspend: "packages/extension-api/test/index.test.ts",
+  error: "packages/extension-api/test/index.test.ts",
+  dispose: "packages/extension-api/test/index.test.ts",
+  "unknown-version": "packages/protocol/test/conformance-v1.test.ts",
+  "extra-key": "packages/protocol/test/conformance-v1.test.ts",
+  "operation-widening": "packages/protocol/test/conformance-v1.test.ts",
+  "capability-escalation": "packages/protocol/test/conformance-v1.test.ts",
+  "schema-conflict": "packages/protocol/test/conformance-v1.test.ts",
+  "schema-oversize": "packages/protocol/test/conformance-v1.test.ts",
+  "schema-depth": "packages/protocol/test/conformance-v1.test.ts",
+  "lifetime-use-after-release": "packages/protocol/test/conformance-v1.test.ts",
+  "lifetime-double-release": "packages/protocol/test/conformance-v1.test.ts",
+  "lifetime-stale-epoch": "packages/protocol/test/conformance-v1.test.ts",
+});
+
 export const V1_FROZEN_BROWSER_OPERATIONS = Object.freeze([
   "discover",
   "subscribe",
@@ -141,18 +180,16 @@ export interface FrozenV1Conformance extends V1ConformanceFixture {
 export interface V1SchemaProviderCandidate {
   readonly providerId: string;
   readonly providerVersion: string;
-  readonly contentHash: string;
+  readonly schema: unknown;
 }
 
 export interface V1SchemaAdmission {
   readonly version: 1;
   readonly typeName: string;
-  readonly schema: unknown;
   readonly providers: readonly V1SchemaProviderCandidate[];
 }
 
 const encoder = new TextEncoder();
-const digestPattern = /^sha256:[a-f0-9]{64}$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -204,8 +241,8 @@ function assertConformanceCases(
     if (candidate.id !== expectedIds[index] || candidate.result !== result) {
       throw new V1ConformanceViolation("incomplete-conformance", `${label}[${index}] did not produce the required result`);
     }
-    if (typeof candidate.evidence !== "string" || candidate.evidence.length === 0 || !candidate.evidence.endsWith(".test.ts")) {
-      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] requires a deterministic test evidence path`);
+    if (candidate.evidence !== V1_CONFORMANCE_EVIDENCE[expectedIds[index]!]) {
+      throw new V1ConformanceViolation("invalid-fixture", `${label}[${index}] does not name its frozen case evidence`);
     }
   });
 }
@@ -214,6 +251,33 @@ function deepFreeze<T>(value: T): T {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
   for (const nested of Object.values(value)) deepFreeze(nested);
   return Object.freeze(value);
+}
+
+function canonicalPlainData(value: unknown, label: string, depth = 0, counter = { value: 0 }): unknown {
+  if (++counter.value > 100_000) throw new V1ConformanceViolation("invalid-fixture", `${label} exceeds the item limit`);
+  if (depth > V1_SCHEMA_LIMITS.maxDepth) throw new V1ConformanceViolation("schema-depth", `${label} exceeds the depth limit`);
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new V1ConformanceViolation("invalid-fixture", `${label} contains a non-finite number`);
+    return value;
+  }
+  if (typeof value !== "object") throw new V1ConformanceViolation("invalid-fixture", `${label} contains executable or unsupported data`);
+  if (Array.isArray(value)) {
+    const expected = ["length", ...value.map((_, index) => String(index))].sort();
+    const actual = Reflect.ownKeys(value).map(String).sort();
+    if (actual.join() !== expected.join()) throw new V1ConformanceViolation("invalid-fixture", `${label} contains augmented array fields`);
+    return value.map((item, index) => canonicalPlainData(item, `${label}[${index}]`, depth + 1, counter));
+  }
+  if (!isRecord(value)) throw new V1ConformanceViolation("invalid-fixture", `${label} must contain plain data`);
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) throw new V1ConformanceViolation("invalid-fixture", `${label} contains symbols`);
+  const output: Record<string, unknown> = {};
+  for (const key of (keys as string[]).sort()) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!descriptor.enumerable || !("value" in descriptor)) throw new V1ConformanceViolation("invalid-fixture", `${label} contains hidden or accessor data`);
+    output[key] = canonicalPlainData(descriptor.value, `${label}.${key}`, depth + 1, counter);
+  }
+  return output;
 }
 
 export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture {
@@ -270,52 +334,44 @@ export function parseV1ConformanceFixture(value: unknown): V1ConformanceFixture 
 }
 
 export function freezeV1Conformance(value: unknown): FrozenV1Conformance {
-  const fixture = parseV1ConformanceFixture(value);
-  const frozen = JSON.parse(JSON.stringify({ ...fixture, frozen: true })) as FrozenV1Conformance;
+  const canonical = canonicalPlainData(value, "v1 conformance fixture");
+  const fixture = parseV1ConformanceFixture(canonical);
+  const frozen = { ...fixture, frozen: true } as FrozenV1Conformance;
   return deepFreeze(frozen);
 }
 
 export function validateV1SchemaAdmission(value: unknown): V1SchemaAdmission {
-  assertExactKeys(value, ["version", "typeName", "schema", "providers"], "schema admission");
-  if (value.version !== 1) throw new V1ConformanceViolation("unsupported-version", "only schema admission version 1 is supported");
+  const canonical = canonicalPlainData(value, "schema admission") as Record<string, unknown>;
+  assertExactKeys(canonical, ["version", "typeName", "providers"], "schema admission");
+  const admission = canonical;
+  if (admission.version !== 1) throw new V1ConformanceViolation("unsupported-version", "only schema admission version 1 is supported");
   if (
-    typeof value.typeName !== "string" ||
-    value.typeName.length === 0 ||
-    encoder.encode(value.typeName).byteLength > V1_SCHEMA_LIMITS.maxTypeNameBytes
+    typeof admission.typeName !== "string" ||
+    admission.typeName.length === 0 ||
+    encoder.encode(admission.typeName).byteLength > V1_SCHEMA_LIMITS.maxTypeNameBytes
   ) {
     throw new V1ConformanceViolation("invalid-fixture", "schema type name is invalid or oversized");
   }
-  let encoded: string;
-  try { encoded = JSON.stringify(value.schema); } catch { throw new V1ConformanceViolation("invalid-fixture", "schema content is not serializable"); }
-  if (typeof encoded !== "string" || encoder.encode(encoded).byteLength > V1_SCHEMA_LIMITS.maxBytes) {
-    throw new V1ConformanceViolation("schema-oversize", "schema exceeds the frozen v1 byte limit");
-  }
-  const depth = (item: unknown, seen = new Set<object>()): number => {
-    if (typeof item !== "object" || item === null) return 0;
-    if (seen.has(item)) throw new V1ConformanceViolation("invalid-fixture", "schema content contains a cycle");
-    seen.add(item); return 1 + Math.max(0, ...Object.values(item).map((nested) => depth(nested, seen)));
-  };
-  if (depth(value.schema) > V1_SCHEMA_LIMITS.maxDepth) {
-    throw new V1ConformanceViolation("schema-depth", "schema exceeds the frozen v1 depth limit");
-  }
-  if (!Array.isArray(value.providers) || value.providers.length === 0 || value.providers.length > V1_SCHEMA_LIMITS.maxProviders) {
+  if (!Array.isArray(admission.providers) || admission.providers.length === 0 || admission.providers.length > V1_SCHEMA_LIMITS.maxProviders) {
     throw new V1ConformanceViolation("invalid-fixture", "schema providers are missing or exceed the frozen v1 limit");
   }
 
-  const hashes = new Set<string>();
-  value.providers.forEach((provider, index) => {
-    assertExactKeys(provider, ["providerId", "providerVersion", "contentHash"], `schema provider[${index}]`);
+  const schemas = new Set<string>();
+  admission.providers.forEach((provider, index) => {
+    assertExactKeys(provider, ["providerId", "providerVersion", "schema"], `schema provider[${index}]`);
+    if (encoder.encode(JSON.stringify(provider.schema)).byteLength > V1_SCHEMA_LIMITS.maxBytes) {
+      throw new V1ConformanceViolation("schema-oversize", `schema provider[${index}] exceeds the byte limit`);
+    }
     if (
       typeof provider.providerId !== "string" || provider.providerId.length === 0 ||
       typeof provider.providerVersion !== "string" || provider.providerVersion.length === 0 ||
       encoder.encode(provider.providerId as string).byteLength > V1_SCHEMA_LIMITS.maxProviderMetadataBytes ||
-      encoder.encode(provider.providerVersion as string).byteLength > V1_SCHEMA_LIMITS.maxProviderMetadataBytes ||
-      typeof provider.contentHash !== "string" || !digestPattern.test(provider.contentHash)
+      encoder.encode(provider.providerVersion as string).byteLength > V1_SCHEMA_LIMITS.maxProviderMetadataBytes
     ) {
       throw new V1ConformanceViolation("invalid-fixture", `schema provider[${index}] is invalid`);
     }
-    hashes.add(provider.contentHash);
+    schemas.add(JSON.stringify(provider.schema));
   });
-  if (hashes.size > 1) throw new V1ConformanceViolation("schema-conflict", "schema providers disagree on content hash");
-  return value as unknown as V1SchemaAdmission;
+  if (schemas.size > 1) throw new V1ConformanceViolation("schema-conflict", "schema providers disagree on canonical content");
+  return deepFreeze(admission as unknown as V1SchemaAdmission);
 }
