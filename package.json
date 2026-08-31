@@ -1,0 +1,24 @@
+{
+  "name": "ros-web-viewer",
+  "private": true,
+  "packageManager": "pnpm@9.15.5",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -b",
+    "test": "vitest run --passWithNoTests",
+    "test:toolchain": "vitest run tests/toolchain/smoke.test.ts",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:integration": "node scripts/toolchain/skip-integration.mjs",
+    "build": "tsc -b",
+    "check:m0": "vitest run tests/m0/**/*.test.ts",
+    "audit:dependencies": "pnpm audit --audit-level high",
+    "report:licenses": "node scripts/toolchain/licenses.mjs",
+    "sbom": "node scripts/toolchain/sbom.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

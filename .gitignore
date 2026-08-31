@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+*.tsbuildinfo
+
+licenses.json
+sbom.cdx.json
