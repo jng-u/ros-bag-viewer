@@ -64,6 +64,32 @@ export interface PayloadLeasePort {
   release(): void;
 }
 
+function assertSemanticDecodeLimits(limits: SemanticDecodeLimits): void {
+  const names = [
+    "maxMessageBytes",
+    "maxStringBytes",
+    "maxPointFields",
+    "maxPointDataBytes",
+    "maxPoints",
+    "maxPathPoses",
+  ] as const;
+  for (const name of names) {
+    const value = limits[name];
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`${name} must be a positive safe integer`);
+    }
+    if (value > DEFAULT_SEMANTIC_DECODE_LIMITS[name]) {
+      throw new Error(`${name} cannot exceed the hard semantic decode limit`);
+    }
+  }
+  if (limits.maxStringBytes > limits.maxMessageBytes) {
+    throw new Error("maxStringBytes cannot exceed maxMessageBytes");
+  }
+  if (limits.maxPointDataBytes > limits.maxMessageBytes) {
+    throw new Error("maxPointDataBytes cannot exceed maxMessageBytes");
+  }
+}
+
 class CdrReader {
   readonly #view: DataView;
   readonly #bytes: Uint8Array;
@@ -159,14 +185,18 @@ function normalizedSchemaName(name: string): string {
   return name.replace("/msg/", "/");
 }
 
-export function availableDisplaysForSchema(schemaName: string): readonly ("point-cloud" | "path" | "raw")[] {
+export function availableDisplaysForSchema(
+  schemaName: string,
+  capability: "schema-present" | "opaque" = "schema-present",
+): readonly ("point-cloud" | "path" | "raw")[] {
+  if (capability === "opaque") return [];
   switch (normalizedSchemaName(schemaName)) {
     case "sensor_msgs/PointCloud2":
       return ["point-cloud", "raw"];
     case "nav_msgs/Path":
       return ["path", "raw"];
     default:
-      return [];
+      return ["raw"];
   }
 }
 
@@ -174,6 +204,7 @@ export function decodeSemanticMessage(
   input: SemanticMcapMessage,
   limits: SemanticDecodeLimits = DEFAULT_SEMANTIC_DECODE_LIMITS,
 ): DecodedSemanticMessage {
+  assertSemanticDecodeLimits(limits);
   if (input.channel.schema.capability !== "schema-present") throw new Error("semantic decoding requires a present schema");
   const reader = new CdrReader(input.data, limits);
   const schema = normalizedSchemaName(input.channel.schema.name);

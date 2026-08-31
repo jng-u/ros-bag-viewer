@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import { ReferenceCountedPayloadLease, type SourceEpoch } from "../../packages/core-model/src/index.js";
 import { PathDisplay, PointCloud2Display, type SemanticSceneSummary } from "../../packages/displays-core/src/index.js";
 import {
+  DEFAULT_SEMANTIC_DECODE_LIMITS,
   availableDisplaysForSchema,
   decodeRenderAndRelease,
   decodeSemanticMessage,
+  type SemanticDecodeLimits,
 } from "../../packages/m1-integration/src/index.js";
 import { WebGl2Renderer, type CanvasContextSource } from "../../packages/render-core/src/index.js";
 import { McapSourceSession, type McapMessage } from "../../packages/source-mcap/src/index.js";
@@ -289,7 +291,8 @@ describe("complete M1 MCAP vertical slice", () => {
   it("maps only supported schemas into truthful shell display choices and fails bounded", () => {
     expect(availableDisplaysForSchema("sensor_msgs/msg/PointCloud2")).toEqual(["point-cloud", "raw"]);
     expect(availableDisplaysForSchema("nav_msgs/msg/Path")).toEqual(["path", "raw"]);
-    expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown")).toEqual([]);
+    expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown")).toEqual(["raw"]);
+    expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown", "opaque")).toEqual([]);
     const oversized = { channel: { schema: { name: "nav_msgs/msg/Path", capability: "schema-present" as const } }, data: pathCdr() };
     expect(() => decodeSemanticMessage(oversized, {
       maxMessageBytes: 16 * 1024,
@@ -299,5 +302,60 @@ describe("complete M1 MCAP vertical slice", () => {
       maxPoints: 16,
       maxPathPoses: 2,
     })).toThrow(/pose count exceeds limits/);
+  });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["negative", -1],
+    ["zero", 0],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1],
+  ])("rejects %s semantic limits before reading allocation counts", (_label, invalid) => {
+    const input = {
+      channel: { schema: { name: "nav_msgs/msg/Path", capability: "schema-present" as const } },
+      data: pathCdr(),
+    };
+    for (const field of Object.keys(DEFAULT_SEMANTIC_DECODE_LIMITS) as Array<keyof typeof DEFAULT_SEMANTIC_DECODE_LIMITS>) {
+      expect(() => decodeSemanticMessage(input, { ...DEFAULT_SEMANTIC_DECODE_LIMITS, [field]: invalid })).toThrow(
+        new RegExp(`${field} must be a positive safe integer`),
+      );
+    }
+  });
+
+  it("rejects incoherent nested byte limits before decoding", () => {
+    const input = {
+      channel: { schema: { name: "nav_msgs/msg/Path", capability: "schema-present" as const } },
+      data: pathCdr(),
+    };
+    expect(() => decodeSemanticMessage(input, {
+      ...DEFAULT_SEMANTIC_DECODE_LIMITS,
+      maxMessageBytes: 64,
+      maxPointDataBytes: 65,
+      maxStringBytes: 32,
+    })).toThrow(/maxPointDataBytes cannot exceed maxMessageBytes/);
+    expect(() => decodeSemanticMessage(input, {
+      ...DEFAULT_SEMANTIC_DECODE_LIMITS,
+      maxMessageBytes: 64,
+      maxPointDataBytes: 32,
+      maxStringBytes: 65,
+    })).toThrow(/maxStringBytes cannot exceed maxMessageBytes/);
+  });
+
+  it("rejects missing fields and caller limits above hard allocation ceilings", () => {
+    const input = {
+      channel: { schema: { name: "nav_msgs/msg/Path", capability: "schema-present" as const } },
+      data: pathCdr(),
+    };
+    const missing: Record<string, number> = { ...DEFAULT_SEMANTIC_DECODE_LIMITS };
+    delete missing["maxPathPoses"];
+    expect(() => decodeSemanticMessage(input, missing as unknown as SemanticDecodeLimits)).toThrow(
+      /maxPathPoses must be a positive safe integer/,
+    );
+    for (const field of Object.keys(DEFAULT_SEMANTIC_DECODE_LIMITS) as Array<keyof SemanticDecodeLimits>) {
+      expect(() => decodeSemanticMessage(input, {
+        ...DEFAULT_SEMANTIC_DECODE_LIMITS,
+        [field]: DEFAULT_SEMANTIC_DECODE_LIMITS[field] + 1,
+      })).toThrow(new RegExp(`${field} cannot exceed the hard semantic decode limit`));
+    }
   });
 });
