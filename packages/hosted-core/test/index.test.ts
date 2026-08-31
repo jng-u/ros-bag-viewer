@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HostedAccessError,
   HostedSharingService,
+  serializeGrantedRangeRead,
   serializeHostedManifestPayload,
+  serializeHostedSessionInput,
+  serializeRangeGrantRequest,
   verifyHostedManifest,
   type ImmutableObjectRef,
   type ImmutableObjectStore,
@@ -53,8 +56,32 @@ function fixture(now: { value: number }, overrides: Record<string, number> = {})
   return service;
 }
 
+function createHostedSession(
+  service: HostedSharingService,
+  input: Parameters<typeof serializeHostedSessionInput>[0],
+) {
+  return service.createHostedSessionSerialized(serializeHostedSessionInput(input));
+}
+
+function issueRangeGrant(
+  service: HostedSharingService,
+  sessionCapability: string,
+  request: Parameters<typeof serializeRangeGrantRequest>[0],
+) {
+  return service.issueRangeGrantSerialized(sessionCapability, serializeRangeGrantRequest(request));
+}
+
+async function readGrantedRange(
+  service: HostedSharingService,
+  request: Parameters<typeof serializeGrantedRangeRead>[0],
+  signal: AbortSignal,
+) {
+  const bytes = await service.readGrantedRangeSerialized(serializeGrantedRangeRead(request), signal);
+  return Uint8Array.from(bytes);
+}
+
 async function hosted(service: HostedSharingService, bytes = Uint8Array.from({ length: 256 }, (_, index) => index)) {
-  const descriptor = await service.createHostedSession({
+  const descriptor = await createHostedSession(service, {
     entries: [
       { entryId: "metadata", relativePath: "metadata.yaml", bytes: new TextEncoder().encode("version: 5\n") },
       { entryId: "part", relativePath: "recordings/part-0.db3", bytes },
@@ -94,7 +121,7 @@ describe("provider-neutral hosted sharing core", () => {
     const now = { value: 10_000 };
     const service = fixture(now);
     const upload = Uint8Array.of(1, 2, 3, 4, 5, 6);
-    const descriptor = await service.createHostedSession({
+    const descriptor = await createHostedSession(service, {
       entries: [{ entryId: "recording", relativePath: "recordings/source.mcap", bytes: upload }],
     });
     upload.fill(99);
@@ -134,8 +161,8 @@ describe("provider-neutral hosted sharing core", () => {
       offset: 0n,
       length: entry.sizeBytes,
     } as const;
-    const grant = service.issueRangeGrant(capability(descriptor.capabilityUrl), scope);
-    await expect(service.readGrantedRange({
+    const grant = issueRangeGrant(service, capability(descriptor.capabilityUrl), scope);
+    await expect(readGrantedRange(service, {
       ...scope,
       sessionCapability: capability(descriptor.capabilityUrl),
       grantToken: grant.token,
@@ -171,7 +198,7 @@ describe("provider-neutral hosted sharing core", () => {
     const second = await hosted(service, Uint8Array.of(7, 8, 9));
     const otherEntry = first.bundle.entries[0]!;
     const scope = rangeScope(first, 1, 10n, 8n);
-    const grant = service.issueRangeGrant(first.capability, scope);
+    const grant = issueRangeGrant(service, first.capability, scope);
     const valid = {
       ...scope,
       sessionCapability: first.capability,
@@ -180,24 +207,24 @@ describe("provider-neutral hosted sharing core", () => {
     const signal = new AbortController().signal;
 
     expect(() => service.openHostedSession("A".repeat(43))).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, immutableVersion: "sha256:" + "0".repeat(64) })).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, entryId: otherEntry.entryId })).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, objectId: second.descriptor.manifest.payload.entries[1]!.objectId })).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, sessionId: second.descriptor.manifest.payload.sessionId })).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, length: 65n })).toThrow(HostedAccessError);
-    expect(() => service.issueRangeGrant(first.capability, { ...valid, offset: -1n })).toThrow(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, sessionCapability: second.capability }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, grantToken: "B".repeat(43) }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, entryId: otherEntry.entryId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, objectId: second.descriptor.manifest.payload.entries[1]!.objectId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, sessionId: second.descriptor.manifest.payload.sessionId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, immutableVersion: otherEntry.immutableVersion }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, offset: 11n }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange({ ...valid, length: 7n }, signal)).rejects.toBeInstanceOf(HostedAccessError);
-    await expect(service.readGrantedRange(valid, signal)).resolves.toEqual(first.bytes.slice(10, 18));
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, immutableVersion: "sha256:" + "0".repeat(64) })).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, entryId: otherEntry.entryId })).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, objectId: second.descriptor.manifest.payload.entries[1]!.objectId })).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, sessionId: second.descriptor.manifest.payload.sessionId })).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, length: 65n })).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, first.capability, { ...valid, offset: -1n })).toThrow(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, sessionCapability: second.capability }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, grantToken: "B".repeat(43) }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, entryId: otherEntry.entryId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, objectId: second.descriptor.manifest.payload.entries[1]!.objectId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, sessionId: second.descriptor.manifest.payload.sessionId }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, immutableVersion: otherEntry.immutableVersion }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, offset: 11n }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, { ...valid, length: 7n }, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, valid, signal)).resolves.toEqual(first.bytes.slice(10, 18));
 
     now.value = grant.expiresAtMs;
-    await expect(service.readGrantedRange(valid, signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, valid, signal)).rejects.toBeInstanceOf(HostedAccessError);
     now.value = first.descriptor.expiresAtMs;
     expect(() => service.openHostedSession(first.capability)).toThrow(HostedAccessError);
   });
@@ -207,20 +234,20 @@ describe("provider-neutral hosted sharing core", () => {
     const service = fixture(now);
     const opened = await hosted(service);
     const scope = rangeScope(opened, 1, 2n, 4n);
-    const grant = service.issueRangeGrant(opened.capability, scope);
+    const grant = issueRangeGrant(service, opened.capability, scope);
     const read = {
       ...scope,
       sessionCapability: opened.capability,
       grantToken: grant.token,
     } as const;
     service.revokeSession(opened.capability);
-    expect(() => service.issueRangeGrant(opened.capability, read)).toThrow(HostedAccessError);
+    expect(() => issueRangeGrant(service, opened.capability, read)).toThrow(HostedAccessError);
     expect(() => service.openHostedSession(opened.capability)).toThrow(HostedAccessError);
 
     now.value = grant.expiresAtMs - 1;
-    await expect(service.readGrantedRange(read, new AbortController().signal)).resolves.toEqual(opened.bytes.slice(2, 6));
+    await expect(readGrantedRange(service, read, new AbortController().signal)).resolves.toEqual(opened.bytes.slice(2, 6));
     now.value = grant.expiresAtMs;
-    await expect(service.readGrantedRange(read, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
+    await expect(readGrantedRange(service, read, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
     expect(grant.expiresAtMs - 30_000).toBe(100);
   });
 
@@ -229,16 +256,16 @@ describe("provider-neutral hosted sharing core", () => {
     const service = fixture(now);
     const deleted = await hosted(service);
     const scope = rangeScope(deleted, 1, 0n, 4n);
-    const grant = service.issueRangeGrant(deleted.capability, scope);
+    const grant = issueRangeGrant(service, deleted.capability, scope);
     await service.deleteSession(deleted.capability);
     expect(() => service.openHostedSession(deleted.capability)).toThrow(HostedAccessError);
-    await expect(service.readGrantedRange({
+    await expect(readGrantedRange(service, {
       ...scope,
       sessionCapability: deleted.capability,
       grantToken: grant.token,
     }, new AbortController().signal)).rejects.toBeInstanceOf(HostedAccessError);
 
-    const retained = await service.createHostedSession({
+    const retained = await createHostedSession(service, {
       entries: [{ entryId: "bag", relativePath: "recording.bag", bytes: Uint8Array.of(1, 2, 3) }],
       sessionTtlMs: 200,
       retentionMs: 300,
@@ -261,7 +288,7 @@ describe("provider-neutral hosted sharing core", () => {
       limits: { sessionTtlMs: 1_000, grantTtlMs: 100, retentionMs: 2_000, maxRangeBytes: 64 },
     });
     const create = async () => {
-      const descriptor = await service.createHostedSession({
+      const descriptor = await createHostedSession(service, {
         entries: [{ entryId: "bag", relativePath: "recording.bag", bytes: Uint8Array.of(1, 2, 3, 4) }],
       });
       const bundle = verifyHostedManifest(JSON.stringify(descriptor.manifest), descriptor.manifestVerificationKey);
@@ -276,13 +303,13 @@ describe("provider-neutral hosted sharing core", () => {
         offset: 0n,
         length: 4n,
       } as const;
-      const grant = service.issueRangeGrant(sessionCapability, scope);
+      const grant = issueRangeGrant(service, sessionCapability, scope);
       return { descriptor, sessionCapability, scope, grant };
     };
 
     const deleted = await create();
     await service.deleteSession(deleted.sessionCapability);
-    await expect(service.readGrantedRange({
+    await expect(readGrantedRange(service, {
       ...deleted.scope,
       sessionCapability: deleted.sessionCapability,
       grantToken: deleted.grant.token,
@@ -290,7 +317,7 @@ describe("provider-neutral hosted sharing core", () => {
 
     const expiring = await create();
     store.beforeRead = () => { now.value = expiring.grant.expiresAtMs; };
-    await expect(service.readGrantedRange({
+    await expect(readGrantedRange(service, {
       ...expiring.scope,
       sessionCapability: expiring.sessionCapability,
       grantToken: expiring.grant.token,
@@ -300,7 +327,7 @@ describe("provider-neutral hosted sharing core", () => {
     const cancelling = await create();
     const abort = new AbortController();
     store.beforeRead = () => abort.abort("source closed");
-    await expect(service.readGrantedRange({
+    await expect(readGrantedRange(service, {
       ...cancelling.scope,
       sessionCapability: cancelling.sessionCapability,
       grantToken: cancelling.grant.token,
@@ -341,8 +368,8 @@ describe("provider-neutral hosted sharing core", () => {
     const opened = await hosted(service, new TextEncoder().encode("SENSITIVE_PAYLOAD"));
     const entry = opened.bundle.entries[1]!;
     const scope = rangeScope(opened, 1, 0n, 4n);
-    const grant = service.issueRangeGrant(opened.capability, scope);
-    await service.readGrantedRange({
+    const grant = issueRangeGrant(service, opened.capability, scope);
+    await readGrantedRange(service, {
       ...scope,
       sessionCapability: opened.capability,
       grantToken: grant.token,
