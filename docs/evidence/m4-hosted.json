@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M4",
+  "scope": "minimal hosted sharing reference proof",
+  "environment": {
+    "execution": "local-in-process",
+    "storage": "in-memory-reference",
+    "fixture": "synthetic",
+    "networkExecution": false,
+    "externalDeployment": false,
+    "paidInfrastructure": false,
+    "productionSecurityClaim": false
+  },
+  "gates": {
+    "signedManifest": "pass",
+    "immutableChunkIntegrity": "pass",
+    "exactRangeIsolation": "pass",
+    "revocationAndResidualTtl": "pass",
+    "deletionAndRetention": "pass",
+    "sourceAndUiEquivalence": "pass",
+    "redactedBoundedObservability": "pass"
+  },
+  "proof": {
+    "lifecycle": "synthetic upload -> immutable object/chunk hashes -> Ed25519 manifest -> opaque session -> exact short-lived grants -> hosted MCAP playback -> revoke/expire/delete/retention denial",
+    "negativeCases": [
+      "unauthorized capability",
+      "enumerated entry",
+      "tampered manifest",
+      "cross-tenant service namespace",
+      "cross-session",
+      "cross-object",
+      "cross-version",
+      "cross-range",
+      "expired grant",
+      "revoked session",
+      "deleted session",
+      "retention-expired session"
+    ],
+    "equivalence": [
+      "schema capability and provenance",
+      "message order and source sequence",
+      "timeline bounds",
+      "payload hashes",
+      "diagnostics",
+      "opaque read-only hosted UI"
+    ],
+    "observability": "bounded aggregate counters and kind/timestamp audit events only; no raw capabilities, grant tokens, object identifiers, storage keys, credentials, or payloads"
+  },
+  "exclusions": [
+    "no external deployment",
+    "no provider credentials",
+    "no paid infrastructure",
+    "no public product naming",
+    "no enterprise catalog, administration, collaboration, mobile, or VR",
+    "no production network, durability, availability, or security claim"
+  ]
+}
