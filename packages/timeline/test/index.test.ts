@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { BoundedTimelineQueue, normalizeSchedulingTime, stableTimelineSort } from "../src/index.js";
 
 describe("timeline normalization", () => {
-  it("uses diagnosed fallback rather than silently substituting timestamps", () => {
+  it("selects valid record timestamps exactly", () => {
+    expect(normalizeSchedulingTime([
+      { source: "record", valueNanos: 10n },
+      { source: "header", valueNanos: 12n },
+    ])).toEqual({ valueNanos: 10n, source: "record", diagnostics: [] });
+  });
+
+  it("selects valid header timestamps with diagnosed fallback", () => {
     expect(
       normalizeSchedulingTime([
         { source: "record", valueNanos: -1n },
@@ -15,6 +22,22 @@ describe("timeline normalization", () => {
       diagnostics: ["record timestamp is missing or invalid", "scheduling time fell back to header"],
     });
     expect(() => normalizeSchedulingTime([{ source: "record" }])).toThrow(/no valid scheduling timestamp/);
+  });
+
+  it("selects valid clock timestamps with diagnosed fallback", () => {
+    expect(normalizeSchedulingTime([
+      { source: "record", valueNanos: -1n },
+      { source: "header" },
+      { source: "clock", valueNanos: 42n },
+    ])).toEqual({
+      valueNanos: 42n,
+      source: "clock",
+      diagnostics: [
+        "record timestamp is missing or invalid",
+        "header timestamp is missing or invalid",
+        "scheduling time fell back to clock",
+      ],
+    });
   });
 
   it("sorts equal timestamps independently of arrival/chunk order", () => {

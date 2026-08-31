@@ -129,10 +129,23 @@ describe("M5 release hardening", () => {
         'Pulumi.production.yaml', '.pulumi/state.json', 'serverless.json', '.serverless/output.json',
         'Dockerfile.production', 'docker-compose.yaml', 'compose.prod.yml', 'cloudformation-template.json',
         'cfn-stack.yaml', 'samconfig.toml', 'cdk.json', 'cdk.out/manifest.json',
+        '.git-credentials', '.pypirc', '.docker/config.json', 'application_default_credentials.json',
+        'client-secret.json', 'kubeconfig', 'deploy/id_custom', 'deploy/private.pem', 'template.yaml', 'template.yml',
+        'stack.yaml', 'packaged.yaml', 'sam-template.yaml', '.aws-sam/build/template.yaml', 'infra/cdk-stack.ts',
       ];
-      const allowed = ['LICENSES.md', 'environment.md', '.env-example'];
+      const deniedContent = [
+        ['notes.txt', '-----BEGIN ' + 'PRIVATE KEY-----'],
+        ['config.json', '{"type":"service_' + 'account","private_' + 'key":"secret"}'],
+        ['registry.conf', '//registry.example/:_auth' + 'Token=secret'],
+        ['deployment.json', '{"Resources":{"Queue":{"Type":"AWS' + '::SQS::Queue"}}}'],
+      ];
+      const allowed = [
+        ['LICENSES.md', ''], ['environment.md', ''], ['.env-example', ''],
+        ['public.pem', '-----BEGIN CERTIFICATE-----'], ['generic-template.yaml.txt', 'Resources are documented here'],
+      ];
       if (denied.some((name) => repositoryStopReason(name) === undefined)) process.exit(1);
-      if (allowed.some((name) => repositoryStopReason(name) !== undefined)) process.exit(2);
+      if (deniedContent.some(([name, content]) => repositoryStopReason(name, content) === undefined)) process.exit(2);
+      if (allowed.some(([name, content]) => repositoryStopReason(name, content) !== undefined)) process.exit(3);
     `], { cwd: root, encoding: "utf8" });
     expect(stopProbe.stderr).toBe("");
     expect(stopProbe.status).toBe(0);
@@ -143,23 +156,59 @@ describe("M5 release hardening", () => {
     const result = spawnSync(process.execPath, ["scripts/toolchain/release-readiness-gate.mjs"], {
       cwd: root,
       encoding: "utf8",
+      env: { ...process.env, GITHUB_TOKEN: "must-not-leak", NPM_TOKEN: "must-not-leak", NODE_OPTIONS: "--no-warnings" },
     });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/release readiness gate: ok \(blocked; production certification=false\)/);
     const manifest = JSON.parse(readFileSync(join(root, evidence.protocolSchemaV1.executionManifest), "utf8")) as {
-      manifest: { source: { commit: string; tree: string }; cases: Array<{ reporterOutputDigest: string }> };
+      manifest: {
+        source: { commit: string; tree: string };
+        cases: Array<{
+          command: { env: Record<string, string> };
+          reporterRawDigest: string;
+          normalizedAssertionDigest: string;
+          executionEnvironmentDigest: string;
+          semanticReceipt: { productionAssertion: { file: string; testName: string } };
+        }>;
+      };
     };
     expect(manifest.manifest.source.commit).toMatch(/^[a-f0-9]{40,64}$/u);
     expect(manifest.manifest.source.tree).toMatch(/^[a-f0-9]{40,64}$/u);
-    expect(manifest.manifest.cases.every(({ reporterOutputDigest }) => /^sha256:[a-f0-9]{64}$/u.test(reporterOutputDigest))).toBe(true);
+    expect(manifest.manifest.cases).toHaveLength(36);
+    expect(manifest.manifest.cases.every(({ reporterRawDigest, normalizedAssertionDigest, executionEnvironmentDigest }) =>
+      [reporterRawDigest, normalizedAssertionDigest, executionEnvironmentDigest]
+        .every((value) => /^sha256:[a-f0-9]{64}$/u.test(value)))).toBe(true);
+    expect(new Set(manifest.manifest.cases.map(({ semanticReceipt }) =>
+      `${semanticReceipt.productionAssertion.file}\0${semanticReceipt.productionAssertion.testName}`)).size).toBe(36);
+    for (const { command } of manifest.manifest.cases) {
+      expect(Object.keys(command.env).sort()).toEqual([
+        "CI", "LANG", "LC_ALL", "NODE_OPTIONS", "NO_COLOR", "PATH", "TZ",
+        "V1_CONFORMANCE_CASE_ID", "V1_CONFORMANCE_RECEIPT_PATH",
+      ]);
+      expect(command.env).toMatchObject({ CI: "1", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_OPTIONS: "", TZ: "UTC" });
+      expect(JSON.stringify(command.env)).not.toMatch(/must-not-leak|GITHUB_TOKEN|NPM_TOKEN/u);
+    }
     const tamper = spawnSync(process.execPath, ["--input-type=module", "--eval", `
       import { readFileSync } from 'node:fs';
       import { verifyConformanceExecutionManifest } from './scripts/toolchain/conformance-execution-manifest.mjs';
-      const value = JSON.parse(readFileSync('./artifacts/v1-conformance-execution.json', 'utf8'));
-      value.manifest.cases[0].reporterOutputDigest = 'sha256:' + '0'.repeat(64);
-      verifyConformanceExecutionManifest(process.cwd(), value);
+      const source = readFileSync('./artifacts/v1-conformance-execution.json', 'utf8');
+      const mutations = [
+        value => { value.manifest.cases[0].reporterRaw += ' '; },
+        value => { value.manifest.cases[0].normalizedAssertionDigest = 'sha256:' + '0'.repeat(64); },
+        value => { value.manifest.cases[0].command.env.TZ = 'Asia/Seoul'; },
+        value => { value.manifest.cases[0].semanticReceipt.productionReporterRaw += ' '; },
+        value => { value.manifest.cases[0].semanticReceipt.observedResult = 'rejected'; },
+        value => { value.manifest.cases[0].executionArtifacts[0].digest = 'sha256:' + '0'.repeat(64); },
+      ];
+      for (const mutate of mutations) {
+        const value = JSON.parse(source); mutate(value);
+        let rejected = false;
+        try { verifyConformanceExecutionManifest(process.cwd(), value); } catch { rejected = true; }
+        if (!rejected) process.exit(1);
+      }
     `], { cwd: root, encoding: "utf8" });
-    expect(tamper.status).not.toBe(0);
+    expect(tamper.stderr).toBe("");
+    expect(tamper.status).toBe(0);
   }, 60_000);
 });

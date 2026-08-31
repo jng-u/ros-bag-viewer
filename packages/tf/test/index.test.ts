@@ -27,6 +27,12 @@ describe("TF buffer", () => {
       interpolated: true,
       transform: { translation: { x: 5, y: 0, z: 0 } },
     });
+  });
+
+  it("rejects extrapolation outside bracketing samples", () => {
+    const buffer = new TfBuffer(1, 8);
+    buffer.add(sample({ timeNanos: 0n }));
+    buffer.add(sample({ timeNanos: 10n, translation: { x: 10, y: 0, z: 0 } }));
     expect(buffer.lookup("map", "base", 11n, 1)).toMatchObject({
       ok: false,
       reason: "extrapolation",

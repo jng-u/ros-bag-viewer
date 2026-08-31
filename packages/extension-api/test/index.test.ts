@@ -450,13 +450,63 @@ describe("TrustedExtensionHost conformance", () => {
     })).toThrow(/item limit/);
     expect(capabilityOwnKeys).not.toHaveBeenCalled();
   });
+
+  it("charges UTF-8 exactly and stops before attacker-controlled tails", () => {
+    let nextId = 0;
+    const configure = (value: unknown, maxMessageSnapshotBytes: number) => {
+      const calls = vi.fn();
+      const host = new TrustedExtensionHost({ limits: { maxMessageSnapshotBytes } });
+      const id = `utf8-${nextId++}`;
+      host.register({
+        apiVersion: 1,
+        id,
+        requiredCapabilities: [],
+        create: () => lifecycle({ configure: calls }),
+      });
+      const instance = host.instantiate(id, `${id}-instance`);
+      return { calls, instance, run: () => instance.configure(value) };
+    };
+
+    for (const [value, bytes] of [["a", 1], ["é", 2], ["😀", 4], ["\ud800", 3], ["\udc00", 3]] as const) {
+      const accepted = configure(value, bytes);
+      expect(accepted.run).not.toThrow();
+      expect(accepted.calls).toHaveBeenCalledOnce();
+      if (bytes > 1) {
+        const rejected = configure(value, bytes - 1);
+        expect(rejected.run).toThrow(/byte budget/);
+        expect(rejected.calls).not.toHaveBeenCalled();
+        expect(rejected.instance.state).toBe("instantiated");
+      }
+    }
+
+    const charCodeAt = vi.spyOn(String.prototype, "charCodeAt");
+    try {
+      const hugeValue = configure("x".repeat(1_000_000), 1);
+      expect(hugeValue.run).toThrow(/byte budget/);
+      expect(hugeValue.calls).not.toHaveBeenCalled();
+      expect(hugeValue.instance.state).toBe("instantiated");
+      expect(charCodeAt).not.toHaveBeenCalled();
+
+      const hugeKey = configure({ ["x".repeat(1_000_000)]: null }, 24);
+      expect(hugeKey.run).toThrow(/byte budget/);
+      expect(hugeKey.calls).not.toHaveBeenCalled();
+      expect(charCodeAt).not.toHaveBeenCalled();
+
+      const boundedScan = configure("😀😀aaaa", 8);
+      expect(boundedScan.run).toThrow(/byte budget/);
+      expect(boundedScan.calls).not.toHaveBeenCalled();
+      expect(charCodeAt).toHaveBeenCalledTimes(5);
+    } finally {
+      charCodeAt.mockRestore();
+    }
+  });
 });
 
 describe("out-of-core range summary example", () => {
-  it("runs through the v1 host and releases its bounded handle", () => {
+  const runningInstance = (instanceId: string) => {
     const host = new TrustedExtensionHost({ limits: { maxResourceBytesPerInstance: 64 } });
     host.register(rangeSummaryExtension);
-    const instance = host.instantiate("range-summary", "range-summary-instance");
+    const instance = host.instantiate("range-summary", instanceId);
     instance.configure({ maxSamples: 4 });
     instance.attachSource(1);
     instance.update({
@@ -466,8 +516,18 @@ describe("out-of-core range summary example", () => {
       value: { ranges: [1, Number.NaN, 2, 3, 4] },
     });
     instance.render();
+    return instance;
+  };
+
+  it("renders through the v1 host with a bounded handle", () => {
+    const instance = runningInstance("range-summary-render");
     expect(instance.telemetry()).toMatchObject({ state: "rendering", activeHandles: 1, resourceBytes: 24 });
     expect(instance.telemetry().diagnostics[0]?.message).toBe("topic=/scan; samples=3; epoch=1");
+  });
+
+  it("disposes its bounded handle idempotently", () => {
+    const instance = runningInstance("range-summary-dispose");
+    instance.dispose();
     instance.dispose();
     expect(instance.telemetry()).toMatchObject({ state: "disposed", activeHandles: 0, resourceBytes: 0 });
   });
@@ -501,6 +561,13 @@ describe("out-of-core range summary example", () => {
       'globalThis["fetch"]("/");',
       'Reflect.get(globalThis, "Function");',
       '[]["filter"]["constructor"]("return 1")();',
+      '(function(){}).constructor("return 1")();',
+      '(class{}).constructor("return 1")();',
+      '(function(){}).constructor`return 1`;',
+      'const C=(function(){}).constructor; C("return 1")();',
+      'const {constructor:C}=function(){}; C("return 1")();',
+      'Object.getOwnPropertyDescriptor(function(){}, "constructor").value("return 1")();',
+      'const R=Reflect; R.get(function(){}, "constructor");',
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
@@ -509,7 +576,14 @@ describe("out-of-core range summary example", () => {
       ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
       expect(probe.status, source).not.toBe(0);
     }
-  });
+    const allowed = spawnSync(process.execPath, [
+      "scripts/toolchain/audit-extension-examples.mjs",
+      "--source-base64",
+      Buffer.from("class Safe { constructor() {} }").toString("base64"),
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
+    expect(allowed.stderr).toBe("");
+    expect(allowed.status).toBe(0);
+  }, 15_000);
 });
 
 function lifecycle(

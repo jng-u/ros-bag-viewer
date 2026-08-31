@@ -1,55 +1,61 @@
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const passCases = [
-  "sources/local-mcap", "sources/local-ros1-bag", "sources/local-ros2-sqlite", "sources/hosted-source-bundle",
-  "sources/ros1-live", "sources/ros2-live", "schemas/schema-present", "schemas/schema-resolvable", "schemas/opaque",
-  "timeTf/record-time", "timeTf/header-time", "timeTf/receipt-time", "timeTf/clock-time", "timeTf/source-epoch-invalidation",
-  "timeTf/tf-interpolation", "timeTf/tf-missing", "timeTf/tf-extrapolation", "displayExtensionLifecycle/register",
-  "displayExtensionLifecycle/instantiate", "displayExtensionLifecycle/configure", "displayExtensionLifecycle/attach",
-  "displayExtensionLifecycle/update", "displayExtensionLifecycle/render", "displayExtensionLifecycle/suspend",
-  "displayExtensionLifecycle/error", "displayExtensionLifecycle/dispose",
-] as const;
+import {
+  V1_CONFORMANCE_PRODUCTION_PROBES,
+  v1ConformanceProductionCommand,
+} from "../../../scripts/toolchain/v1-conformance-production-probes.mjs";
 
-const rejectedCases = [
-  "rejections/unknown-version", "rejections/extra-key", "rejections/operation-widening",
-  "rejections/capability-escalation", "rejections/schema-conflict", "rejections/schema-oversize",
-  "rejections/schema-depth", "rejections/lifetime-use-after-release", "rejections/lifetime-double-release",
-  "rejections/lifetime-stale-epoch",
-] as const;
+function digest(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
 
-function writeReceipt(caseId: string, observedResult: "pass" | "rejected"): void {
+function executeProductionProbe(probe: (typeof V1_CONFORMANCE_PRODUCTION_PROBES)[number]) {
+  const command = v1ConformanceProductionCommand(probe.caseId);
+  const result = spawnSync(command.argv[0], command.argv.slice(1), {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: command.env,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  expect(result.status, result.stderr || result.stdout).toBe(0);
+  let report: unknown;
+  expect(() => { report = JSON.parse(result.stdout); }).not.toThrow();
+  expect(report).toEqual({
+    schemaVersion: 1,
+    reason: "passed",
+    unhandledErrors: 0,
+    assertions: [{ file: probe.evidence, testName: probe.testName, status: "passed" }],
+  });
+  const assertion = (report as { assertions: Array<{ file: string; testName: string; status: string }> }).assertions[0]!;
+  const diagnostic = `production assertion passed: ${assertion.file}#${assertion.testName}`;
+  expect(new TextEncoder().encode(diagnostic).byteLength).toBeLessThanOrEqual(512);
+  return Object.freeze({
+    schemaVersion: 1,
+    caseId: probe.caseId,
+    observedResult: probe.observedResult,
+    diagnostic,
+    productionCommand: command,
+    productionAssertion: assertion,
+    productionReporterRaw: result.stdout,
+    productionReporterRawDigest: digest(result.stdout),
+    productionAssertionDigest: digest(JSON.stringify(assertion)),
+  });
+}
+
+function writeReceipt(receipt: ReturnType<typeof executeProductionProbe>): void {
   const path = process.env.V1_CONFORMANCE_RECEIPT_PATH;
   if (path === undefined) return;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ schemaVersion: 1, caseId, observedResult })}\n`, { flag: "wx" });
-}
-
-function observePass(caseId: string, probe: () => void): void {
-  probe();
-  writeReceipt(caseId, "pass");
-}
-
-function observeRejection(caseId: string, probe: () => void, accepts: (error: unknown) => boolean): void {
-  let failure: unknown;
-  try { probe(); } catch (error) { failure = error; }
-  expect(accepts(failure)).toBe(true);
-  writeReceipt(caseId, "rejected");
+  writeFileSync(path, `${JSON.stringify(receipt)}\n`, { flag: "wx" });
 }
 
 describe("v1 execution receipts", () => {
-  for (const caseId of passCases) {
-    it(`observes ${caseId}`, () => observePass(caseId, () => {
-      expect(caseId).toMatch(/^[a-zA-Z]+\/[a-z0-9-]+$/u);
-    }));
-  }
-  for (const caseId of rejectedCases) {
-    it(`observes ${caseId}`, () => observeRejection(
-      caseId,
-      () => { throw new Error(`observed semantic rejection: ${caseId}`); },
-      (error) => error instanceof Error && error.message === `observed semantic rejection: ${caseId}`,
-    ));
+  for (const probe of V1_CONFORMANCE_PRODUCTION_PROBES) {
+    it(`observes ${probe.caseId}`, () => writeReceipt(executeProductionProbe(probe)), 30_000);
   }
 });

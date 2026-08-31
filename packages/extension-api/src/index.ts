@@ -177,20 +177,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function utf8ByteLength(value: string): number {
-  let bytes = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      const low = value.charCodeAt(index + 1);
-      if (low >= 0xdc00 && low <= 0xdfff) { bytes += 4; index += 1; } else bytes += 3;
-    } else bytes += 3;
-  }
-  return bytes;
-}
-
 interface SnapshotBudget {
   bytes: number;
   items: number;
@@ -204,6 +190,29 @@ function chargeSnapshot(budget: SnapshotBudget, bytes: number): void {
   budget.bytes += bytes;
 }
 
+function chargeUtf8Snapshot(budget: SnapshotBudget, value: string, prefixBytes = 0): void {
+  const available = budget.maxBytes - budget.bytes;
+  if (!Number.isSafeInteger(prefixBytes) || prefixBytes < 0 || prefixBytes > available) {
+    throw new Error("extension message snapshot byte budget exceeded");
+  }
+  const remaining = available - prefixBytes;
+  if (value.length > remaining) throw new Error("extension message snapshot byte budget exceeded");
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    let width: number;
+    if (code < 0x80) width = 1;
+    else if (code < 0x800) width = 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) { width = 4; index += 1; } else width = 3;
+    } else width = 3;
+    if (width > remaining - bytes) throw new Error("extension message snapshot byte budget exceeded");
+    bytes += width;
+  }
+  budget.bytes += prefixBytes + bytes;
+}
+
 function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, seen = new Set<object>()): unknown {
   if (++budget.items > 100_000) throw new Error("extension message snapshot item limit exceeded");
   if (depth > 64) throw new Error("extension message snapshot depth limit exceeded");
@@ -211,7 +220,7 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
   if (typeof value === "boolean") { chargeSnapshot(budget, 1); return value; }
   if (typeof value === "number") { chargeSnapshot(budget, 8); return value; }
   if (typeof value === "bigint") throw new Error("extension message snapshot must not contain BigInt values");
-  if (typeof value === "string") { chargeSnapshot(budget, utf8ByteLength(value)); return value; }
+  if (typeof value === "string") { chargeUtf8Snapshot(budget, value); return value; }
   if (typeof value !== "object") throw new Error("extension message snapshot contains an unsupported value");
   if (seen.has(value)) throw new Error("extension message snapshot must not contain cycles or repeated references");
   seen.add(value);
@@ -249,7 +258,7 @@ function canonicalSnapshot(value: unknown, budget: SnapshotBudget, depth = 0, se
     if (key === "__proto__") throw new Error("extension message snapshot must not contain __proto__ fields");
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
     if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("extension message snapshot must contain plain enumerable data");
-    chargeSnapshot(budget, 8 + utf8ByteLength(key));
+    chargeUtf8Snapshot(budget, key, 8);
     Object.defineProperty(output, key, {
       value: canonicalSnapshot(descriptor.value, budget, depth + 1, seen),
       enumerable: true,

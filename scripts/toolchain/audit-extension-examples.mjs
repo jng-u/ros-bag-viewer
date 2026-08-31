@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, extname, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import ts from "typescript";
@@ -14,9 +16,10 @@ const privilegedNames = new Set([
   "publish", "callService", "sendAction", "setParameter", "rawCommand",
   "global", "self", "WebAssembly", "Atomics",
 ]);
-const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis"]);
+const deniedRuntimeNames = new Set(["eval", "Function", "require", "globalThis", "Reflect", "constructor", "prototype", "__proto__"]);
 
 function fail(message) { throw new Error(`extension example audit: ${message}`); }
+function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 
 function assertModule(specifier, label, resolveRelative) {
   if (specifier === allowedModule) return;
@@ -57,9 +60,15 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Reflect") {
         fail(`${filename} uses computed reflection`);
       }
+      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "getOwnPropertyDescriptor") {
+        fail(`${filename} acquires a runtime descriptor`);
+      }
     }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "Function") {
       fail(`${filename} constructs Function`);
+    }
+    if (ts.isPropertyAccessExpression(node) && ["constructor", "prototype", "__proto__"].includes(node.name.text)) {
+      fail(`${filename} accesses denied runtime property ${node.name.text}`);
     }
     if (ts.isIdentifier(node) && privilegedNames.has(node.text)) fail(`${filename} references privileged ${node.text}`);
     if (ts.isIdentifier(node) && deniedRuntimeNames.has(node.text)) fail(`${filename} references denied runtime ${node.text}`);
@@ -110,20 +119,96 @@ function trackedEntries(root) {
   });
 }
 
+function emittedFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? emittedFiles(path) : [path];
+  });
+}
+
+function resolveEmittedModule(outputRoot, filename, specifier, available) {
+  const requested = resolve(dirname(filename), specifier);
+  const candidates = [requested];
+  if ([".js", ".mjs", ".cjs"].includes(extname(requested))) {
+    const base = requested.slice(0, -extname(requested).length);
+    candidates.push(`${base}.d.ts`, `${base}.js`);
+  }
+  if (extname(requested) === "") {
+    for (const extension of [".js", ".d.ts"]) candidates.push(`${requested}${extension}`, resolve(requested, `index${extension}`));
+  }
+  const target = candidates.find((candidate) => available.has(relative(outputRoot, candidate).split(sep).join("/")));
+  if (!target || relative(outputRoot, target).startsWith(`..${sep}`)) fail(`${filename} has an unresolved emitted module ${specifier}`);
+}
+
+function emitAuditedPackage(packageRoot, configPath, manifest) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "extension-example-audit-"));
+  try {
+    const outputRoot = join(temporaryRoot, "dist");
+    const read = ts.readConfigFile(configPath, ts.sys.readFile);
+    if (read.error) fail(`${configPath} cannot be read by TypeScript`);
+    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, packageRoot, {
+      composite: false,
+      declaration: true,
+      declarationMap: false,
+      incremental: false,
+      outDir: outputRoot,
+      sourceMap: false,
+      tsBuildInfoFile: join(temporaryRoot, "build.tsbuildinfo"),
+    }, configPath);
+    if (parsed.errors.length > 0) fail(`${configPath} contains TypeScript configuration errors`);
+    const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    const emitted = program.emit();
+    if (diagnostics.length > 0 || emitted.emitSkipped) fail(`${configPath} does not build without diagnostics`);
+    const files = emittedFiles(outputRoot);
+    const available = new Set(files.map((path) => relative(outputRoot, path).split(sep).join("/")));
+    const expectedTargets = [manifest.exports, manifest.types].map((target) => {
+      const prefix = "./dist/";
+      if (typeof target !== "string" || !target.startsWith(prefix)) fail(`${packageRoot}/package.json has an unbound export target`);
+      return target.slice(prefix.length);
+    });
+    for (const target of expectedTargets) {
+      const path = resolve(outputRoot, target);
+      if (!available.has(target) || !statSync(path).isFile()) fail(`${packageRoot}/package.json names missing emitted target ${target}`);
+    }
+    const artifactMap = files.map((path) => {
+      const name = relative(outputRoot, path).split(sep).join("/");
+      const bytes = readFileSync(path);
+      if (sourceExtensions.has(extname(path)) || path.endsWith(".d.ts")) {
+        auditSourceText(bytes.toString("utf8"), `${packageRoot}/dist/${name}`, (specifier) => {
+          resolveEmittedModule(outputRoot, path, specifier, available);
+        });
+      } else fail(`${packageRoot}/dist/${name} is an unaudited emitted artifact`);
+      return `${name}\0${digest(bytes)}`;
+    }).sort();
+    return artifactMap;
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 export function auditExtensionExamples(root = defaultRoot) {
   const entries = trackedEntries(root);
   if (entries.length === 0) fail("no tracked examples found");
   const tracked = new Set(entries.map(({ path }) => path));
+  const packages = new Map();
   for (const entry of entries) {
     if (entry.mode !== "100644") fail(`${entry.path} has denied executable or symlink mode ${entry.mode}`);
     const parts = entry.path.split("/");
     if (parts.length < 3) fail(`${entry.path} is outside an example package`);
     const packageRoot = resolve(root, parts.slice(0, 2).join("/"));
+    const packageState = packages.get(packageRoot) ?? {};
+    packages.set(packageRoot, packageState);
     const path = resolve(root, entry.path);
     if (relative(packageRoot, path).startsWith(`..${sep}`)) fail(`${entry.path} escapes its package`);
     const name = parts.at(-1);
-    if (name === "package.json") auditManifest(JSON.parse(readFileSync(path, "utf8")), entry.path);
-    else if (name === "tsconfig.json") auditTsconfig(JSON.parse(readFileSync(path, "utf8")), entry.path);
+    if (name === "package.json") {
+      packageState.manifest = JSON.parse(readFileSync(path, "utf8"));
+      auditManifest(packageState.manifest, entry.path);
+    } else if (name === "tsconfig.json") {
+      packageState.configPath = path;
+      auditTsconfig(JSON.parse(readFileSync(path, "utf8")), entry.path);
+    }
     else if (sourceExtensions.has(extname(name))) auditSourceText(readFileSync(path, "utf8"), entry.path, (specifier) => {
       const requested = resolve(dirname(path), specifier);
       const candidates = [requested];
@@ -143,6 +228,12 @@ export function auditExtensionExamples(root = defaultRoot) {
       }
     });
     else fail(`${entry.path} is an unaudited executable/config surface`);
+  }
+  for (const [packageRoot, packageState] of packages) {
+    if (!packageState.manifest || !packageState.configPath) fail(`${relative(root, packageRoot)} is missing its audited package/config surface`);
+    const first = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest);
+    const second = emitAuditedPackage(packageRoot, packageState.configPath, packageState.manifest);
+    if (JSON.stringify(first) !== JSON.stringify(second)) fail(`${relative(root, packageRoot)} does not emit reproducibly`);
   }
 }
 

@@ -116,7 +116,7 @@ function validateRepositoryStops() {
   for (const path of listFiles(root)) {
     const repositoryPath = relative(root, path);
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-    const stopReason = repositoryStopReason(repositoryPath);
+    const stopReason = repositoryStopReason(repositoryPath, readFileSync(path));
     if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
     const packageJson = JSON.parse(readFileSync(path, "utf8"));

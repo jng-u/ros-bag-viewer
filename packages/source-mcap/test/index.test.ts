@@ -101,6 +101,25 @@ describe("MCAP adapter", () => {
     expect(telemetry.peakInFlightBytes).toBeLessThan(bytes.byteLength);
   });
 
+  it("exposes embedded schema bytes as schema-present", async () => {
+    const bytes = await fixture(true);
+    const session = await McapSourceSession.open(boundedReader(bytes), {
+      limits: {
+        sequentialReadBytes: 64,
+        maxBufferedBytes: 2048,
+        maxDecompressedBytes: 4096,
+        maxDecompressionRatio: 16,
+        maxMessageIndexCacheBytes: 256,
+      },
+    });
+    expect(session.channels()[0]?.schema).toMatchObject({
+      capability: "schema-present",
+      name: "example_msgs/msg/Point",
+      encoding: "ros2msg",
+    });
+    expect(session.channels()[0]?.schema?.data).toEqual(new TextEncoder().encode("float64 x\n"));
+  });
+
   it("exposes explicit degraded sequential progress for unindexed MCAP", async () => {
     const bytes = await fixture(false);
     const reader = boundedReader(bytes);

@@ -127,31 +127,19 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(parseV1ConformanceFixture(fixture).extensionOperations).toEqual(V1_FROZEN_EXTENSION_OPERATIONS);
   });
 
-  it("rejects unknown versions, extra keys, incomplete results, and operation or capability widening", () => {
+  it("rejects unknown fixture versions", () => {
     expect(() => parseV1ConformanceFixture({ ...cloneFixture(), protocolVersion: 2 })).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "unsupported-version" }),
     );
+  });
+
+  it("rejects extra fixture keys", () => {
     expect(() => parseV1ConformanceFixture({ ...cloneFixture(), surprise: true })).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }),
     );
     const substitutedEvidence = cloneFixture();
     (substitutedEvidence.sources as Array<Record<string, unknown>>)[0]!.evidence = "packages/protocol/test/conformance-v1.test.ts";
     expect(() => parseV1ConformanceFixture(substitutedEvidence)).toThrow(/frozen case evidence/);
-
-    const widenedOperations = cloneFixture();
-    widenedOperations.browserOperations = [...V1_FROZEN_BROWSER_OPERATIONS, "publish"];
-    expect(() => parseV1ConformanceFixture(widenedOperations)).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "operation-widening" }),
-    );
-
-    const escalatedCapabilities = cloneFixture();
-    escalatedCapabilities.extensionCapabilities = [
-      ...(escalatedCapabilities.extensionCapabilities as string[]),
-      "raw-webgl",
-    ];
-    expect(() => parseV1ConformanceFixture(escalatedCapabilities)).toThrowError(
-      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "capability-escalation" }),
-    );
 
     const skipped = cloneFixture();
     (skipped.sources as Array<Record<string, unknown>>)[0]!.result = "skipped";
@@ -163,6 +151,25 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(() => parseV1ConformanceFixture(oversizedTestName)).toThrow(/test name is oversized/);
   });
 
+  it("rejects operation widening", () => {
+    const widenedOperations = cloneFixture();
+    widenedOperations.browserOperations = [...V1_FROZEN_BROWSER_OPERATIONS, "publish"];
+    expect(() => parseV1ConformanceFixture(widenedOperations)).toThrowError(
+      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "operation-widening" }),
+    );
+  });
+
+  it("rejects capability escalation", () => {
+    const escalatedCapabilities = cloneFixture();
+    escalatedCapabilities.extensionCapabilities = [
+      ...(escalatedCapabilities.extensionCapabilities as string[]),
+      "raw-webgl",
+    ];
+    expect(() => parseV1ConformanceFixture(escalatedCapabilities)).toThrowError(
+      expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "capability-escalation" }),
+    );
+  });
+
   it("keeps write/service/action/parameter/raw command widening denied by the executable parser", () => {
     const base = { version: 1, sessionId: "s", sequence: 0, requestId: "r" } as const;
     for (const operation of ["publish", "service", "action", "set_parameter", "raw-command"]) {
@@ -170,9 +177,8 @@ describe("protocol/schema v1 conformance freeze", () => {
     }
   });
 
-  it("rejects schema conflicts, oversize, excessive depth, extra keys, and unknown versions", () => {
+  it("rejects schema conflicts", () => {
     expect(validateV1SchemaAdmission(validSchemaAdmission())).toMatchObject({ version: 1 });
-
     const conflict = validSchemaAdmission();
     conflict.providers = [
       ...(conflict.providers as object[]),
@@ -181,9 +187,22 @@ describe("protocol/schema v1 conformance freeze", () => {
     expect(() => validateV1SchemaAdmission(conflict)).toThrowError(
       expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-conflict" }),
     );
+  });
+
+  it("rejects oversized schemas", () => {
     const oversized = validSchemaAdmission(); oversized.providers = [{ providerId: "x", providerVersion: "1", schema: "x".repeat(V1_SCHEMA_LIMITS.maxBytes + 1) }];
     expect(() => validateV1SchemaAdmission(oversized))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-oversize" }));
+  });
+
+  it("rejects excessively deep schemas", () => {
+    let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
+    const tooDeep = validSchemaAdmission(); tooDeep.providers = [{ providerId: "x", providerVersion: "1", schema: deep }];
+    expect(() => validateV1SchemaAdmission(tooDeep))
+      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
+  });
+
+  it("rejects noncanonical schema provider structures and versions", () => {
     const sparse = validSchemaAdmission(); sparse.providers = [{ providerId: "x", providerVersion: "1", schema: new Array(100_001) }];
     expect(() => validateV1SchemaAdmission(sparse))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
@@ -195,10 +214,6 @@ describe("protocol/schema v1 conformance freeze", () => {
     const repeated = validSchemaAdmission(); repeated.providers = [{ providerId: "x", providerVersion: "1", schema: { first: shared, second: shared } }];
     expect(() => validateV1SchemaAdmission(repeated))
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
-    let deep: unknown = "leaf"; for (let index = 0; index <= V1_SCHEMA_LIMITS.maxDepth; index += 1) deep = { nested: deep };
-    const tooDeep = validSchemaAdmission(); tooDeep.providers = [{ providerId: "x", providerVersion: "1", schema: deep }];
-    expect(() => validateV1SchemaAdmission(tooDeep))
-      .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "schema-depth" }));
     const oversizedProvider = validSchemaAdmission();
     oversizedProvider.providers = [{ providerId: "x".repeat(257), providerVersion: "1", schema: {} }];
     expect(() => validateV1SchemaAdmission(oversizedProvider)).toThrowError(/provider/);
@@ -208,14 +223,21 @@ describe("protocol/schema v1 conformance freeze", () => {
       .toThrowError(expect.objectContaining<Partial<V1ConformanceViolation>>({ code: "invalid-fixture" }));
   });
 
-  it("rejects payload lifetime use-after-release, double release, and stale epochs", () => {
+  it("rejects payload lifetime use after release", () => {
     const epoch = 1 as SourceEpoch;
     const lease = new ReferenceCountedPayloadLease(epoch, 16);
     lease.release();
     expect(() => lease.assertUsable(epoch)).toThrow(/active source epoch/);
-    expect(() => lease.release()).toThrow(/more than retained/);
+  });
 
-    const stale = new ReferenceCountedPayloadLease(epoch, 16);
+  it("rejects payload lifetime double release", () => {
+    const lease = new ReferenceCountedPayloadLease(1 as SourceEpoch, 16);
+    lease.release();
+    expect(() => lease.release()).toThrow(/more than retained/);
+  });
+
+  it("rejects payload lifetime stale epochs", () => {
+    const stale = new ReferenceCountedPayloadLease(1 as SourceEpoch, 16);
     expect(() => stale.assertUsable(2 as SourceEpoch)).toThrow(/active source epoch/);
   });
 });
