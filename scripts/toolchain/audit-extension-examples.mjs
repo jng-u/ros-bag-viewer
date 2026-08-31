@@ -175,6 +175,9 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       const propertyName = property === undefined && ts.isIdentifier(node.name) ? node.name.text :
         property && ts.isComputedPropertyName(property) ? constantString(property.expression) :
           property && (ts.isIdentifier(property) || ts.isStringLiteralLike(property) || ts.isNumericLiteral(property)) ? property.text : undefined;
+      if (property && ts.isComputedPropertyName(property) && propertyName === undefined) {
+        fail(`${filename} has an unresolved computed binding property`);
+      }
       if (propertyName && (deniedRuntimeProperties.has(propertyName) || deniedRuntimeNames.has(propertyName))) {
         fail(`${filename} destructures a denied runtime property`);
       }

@@ -718,6 +718,11 @@ export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecy
   () => { const { ["con" + "structor"]: recovered } = function () {}; recovered("return globalThis")(); },
   () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
 ));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => { const key = "constructor"; const { [key]: recovered } = function () {}; recovered("return globalThis")(); },
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
@@ -754,6 +759,18 @@ export const safe: TrustedExtensionDefinition<SafeConfigAlias, SafeMessage> =
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
     expect(allowedTyped.stderr).toBe("");
     expect(allowedTyped.status).toBe(0);
+    const allowedComputedBinding = `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const safe = defineTrustedExtension("safe", () => defineTrustedLifecycle(
+  () => { const { ["safe-key"]: value } = { "safe-key": 1 }; void value; },
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`;
+    const allowedComputed = spawnSync(process.execPath, [
+      "scripts/toolchain/audit-extension-examples.mjs",
+      "--source-base64",
+      Buffer.from(allowedComputedBinding).toString("base64"),
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
+    expect(allowedComputed.stderr).toBe("");
+    expect(allowedComputed.status).toBe(0);
   }, 15_000);
 });
 
