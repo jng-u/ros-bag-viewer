@@ -1,1 +1,8 @@
-{"name":"@ros-web-viewer/web","private":true,"type":"module"}
+{
+  "name": "@ros-web-viewer/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "evidence:semantic": "tsc -b && node scripts/generate-semantic-evidence.mjs"
+  }
+}
