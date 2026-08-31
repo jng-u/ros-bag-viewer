@@ -558,10 +558,10 @@ export class HostedSharingService {
       if (typeof record.bytes !== "string") throw new Error("hosted upload bytes must be base64 text");
       return { entryId: String(record.entryId), relativePath: String(record.relativePath), bytes: decodeBoundedBase64(record.bytes, this.#limits.maxSessionBytes, "hosted upload bytes") };
     });
-    return this.createHostedSession({ entries, relations: Array.isArray(parsed.relations) ? parsed.relations as HostedUploadRelation[] : undefined, sessionTtlMs: typeof parsed.sessionTtlMs === "number" ? parsed.sessionTtlMs : undefined, retentionMs: typeof parsed.retentionMs === "number" ? parsed.retentionMs : undefined });
+    return this.#createHostedSession({ entries, relations: Array.isArray(parsed.relations) ? parsed.relations as HostedUploadRelation[] : undefined, sessionTtlMs: typeof parsed.sessionTtlMs === "number" ? parsed.sessionTtlMs : undefined, retentionMs: typeof parsed.retentionMs === "number" ? parsed.retentionMs : undefined });
   }
 
-  async createHostedSession(input: CreateHostedSessionInput): Promise<HostedSessionDescriptor> {
+  async #createHostedSession(input: CreateHostedSessionInput): Promise<HostedSessionDescriptor> {
     if (this.#sessions.size >= this.#limits.maxActiveSessions) throw new Error("hosted session capacity reached");
     if (input.entries.length === 0 || input.entries.length > this.#limits.maxEntriesPerSession) {
       throw new Error("hosted upload entry count is outside configured limits");
@@ -678,10 +678,10 @@ export class HostedSharingService {
 
   issueRangeGrantSerialized(sessionCapability: string, serialized: string): IssuedRangeGrant {
     const parsed = parseSerializedRecord(serialized, "range grant request");
-    return this.issueRangeGrant(sessionCapability, { sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) });
+    return this.#issueRangeGrant(sessionCapability, { sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) });
   }
 
-  issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
+  #issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
     try {
       if (this.#grants.size >= this.#limits.maxActiveGrants) throw new HostedAccessError();
       const session = this.#activeSession(sessionCapability);
@@ -723,10 +723,10 @@ export class HostedSharingService {
 
   async readGrantedRangeSerialized(serialized: string, signal: AbortSignal): Promise<Uint8Array> {
     const parsed = parseSerializedRecord(serialized, "granted range read");
-    return this.readGrantedRange({ sessionCapability: String(parsed.sessionCapability), grantToken: String(parsed.grantToken), sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
+    return this.#readGrantedRange({ sessionCapability: String(parsed.sessionCapability), grantToken: String(parsed.grantToken), sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
   }
 
-  async readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
+  async #readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
     try {
       if (signal.aborted) throw abortError(signal.reason);
       const grant = this.#findGrant(request.grantToken);
