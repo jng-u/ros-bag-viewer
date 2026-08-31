@@ -1,5 +1,7 @@
 export const LIVE_PROTOCOL_VERSION = 1 as const;
 
+export * from "./conformance-v1.js";
+
 export const BROWSER_OPERATIONS = Object.freeze(["discover", "subscribe", "unsubscribe", "health"] as const);
 export type BrowserOperation = (typeof BROWSER_OPERATIONS)[number];
 
