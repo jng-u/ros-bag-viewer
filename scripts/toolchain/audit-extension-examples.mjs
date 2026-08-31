@@ -82,20 +82,44 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   let extensionDefinitionExports = 0;
   const exportedTypes = new Map();
   let exportedDefinitionType;
-    const isBuilderCall = (expression, name) => { const entry = ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) ? importedSymbols.get(expression.expression.text) : undefined; return !!entry && entry.name === name && symbolAt(expression.expression) === entry.symbol; };
-  const directReturns = (callback) => {
-    if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return undefined;
-    if (!ts.isBlock(callback.body)) return [callback.body];
-    const statements = [...callback.body.statements];
-    const returns = statements.filter((statement) => ts.isReturnStatement(statement));
-    if (returns.length !== 1) return [];
-    const index = statements.indexOf(returns[0]);
-    for (const statement of statements.slice(0, index)) {
-      if (!ts.isVariableStatement(statement) && !ts.isFunctionDeclaration(statement) && !ts.isClassDeclaration(statement)) return [];
-      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((d) => d.initializer && ts.isCallExpression(d.initializer))) return [];
+  const resolvedSymbol = (symbol) => symbol?.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+  const isBuilderCall = (expression, name) => {
+    const entry = ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) ? importedSymbols.get(expression.expression.text) : undefined;
+    return !!entry && entry.name === name && symbolAt(expression.expression) === entry.symbol;
+  };
+  const pureCreateInitializer = (node) => {
+    if (ts.isStringLiteralLike(node) || ts.isNumericLiteral(node) ||
+        node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword || node.kind === ts.SyntaxKind.NullKeyword) return true;
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) {
+      return pureCreateInitializer(node.expression);
     }
-    if (statements.slice(index + 1).length > 0) return [];
-    return [returns[0].expression];
+    if (ts.isPrefixUnaryExpression(node) && [
+      ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.ExclamationToken, ts.SyntaxKind.TildeToken,
+    ].includes(node.operator)) return pureCreateInitializer(node.operand);
+    if (ts.isArrayLiteralExpression(node)) return node.elements.every((element) => !ts.isSpreadElement(element) && pureCreateInitializer(element));
+    if (ts.isObjectLiteralExpression(node)) return node.properties.every((property) =>
+      ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name) && pureCreateInitializer(property.initializer));
+    return false;
+  };
+  const directLifecycleReturn = (callback) => {
+    if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return undefined;
+    if (callback.name || callback.asteriskToken || callback.typeParameters ||
+        callback.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.AsyncKeyword) || callback.parameters.some((parameter) =>
+      !ts.isIdentifier(parameter.name) || parameter.initializer || parameter.dotDotDotToken ||
+      ["defineTrustedExtension", "defineTrustedLifecycle"].includes(parameter.name.text))) return undefined;
+    if (!ts.isBlock(callback.body)) return isBuilderCall(callback.body, "defineTrustedLifecycle") ? callback.body : undefined;
+    const statements = [...callback.body.statements];
+    const final = statements.at(-1);
+    if (!final || !ts.isReturnStatement(final) || !final.expression || !isBuilderCall(final.expression, "defineTrustedLifecycle")) return undefined;
+    for (const statement of statements.slice(0, -1)) {
+      if (!ts.isVariableStatement(statement)) return undefined;
+      if (statement.declarationList.flags & ts.NodeFlags.Using) return undefined;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || ["defineTrustedExtension", "defineTrustedLifecycle"].includes(declaration.name.text)) return undefined;
+        if (declaration.initializer && !pureCreateInitializer(declaration.initializer)) return undefined;
+      }
+    }
+    return final.expression;
   };
   const isInTypePosition = (node) => { let p = node.parent; while (p) { if (ts.isTypeNode(p)) return true; if (ts.isExpression(p) || ts.isStatement(p) || ts.isSourceFile(p)) return false; p = p.parent; } return false; };
   const declarationName = (node) => {
@@ -153,24 +177,34 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         const declaration = node.declarationList.declarations[0];
         if (!declaration.initializer || !isBuilderCall(declaration.initializer, "defineTrustedExtension")) fail(`${filename} must export exact definition builder result`);
         const callback = declaration.initializer.arguments[1];
-        const returns = callback && directReturns(callback);
-        if (!returns || returns.length !== 1 || !returns[0] || !isBuilderCall(returns[0], "defineTrustedLifecycle")) fail(`${filename} create callback must have exactly one direct lifecycle return`);
+        if (!callback || !directLifecycleReturn(callback)) fail(`${filename} create callback must use only pure declarations before one exact lifecycle return`);
         extensionDefinitionExports += 1; exportedDefinitionType = declaration.type;
-      } else if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) exportedTypes.set(node.name.text, node);
+      } else if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+        const symbol = resolvedSymbol(symbolAt(node.name));
+        if (!symbol) fail(`${filename} cannot resolve exported type ${node.name.text}`);
+        exportedTypes.set(symbol, node.name.text);
+      }
       else fail(`${filename} exports unsupported runtime declaration`);
     }
     if (!filename.endsWith(".d.ts") && (ts.isExportAssignment(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier === undefined))) fail(`${filename} uses an unsupported runtime export`);
     ts.forEachChild(node, visit);
   };
-  // The module surface is declaration-only: no top-level execution beyond the exported builder declaration.
+  // The module surface is declaration-only: no execution or helper declarations beyond the exact audited surface.
   if (!filename.endsWith(".d.ts")) {
     for (const statement of file.statements) {
-      if (ts.isExpressionStatement(statement) || ts.isIfStatement(statement) || ts.isForStatement(statement) || ts.isWhileStatement(statement) || ts.isTryStatement(statement)) fail(`${filename} has arbitrary top-level execution`);
+      if (ts.isImportDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+      if (ts.isVariableStatement(statement) && statement.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword)) continue;
+      fail(`${filename} has a non-approved top-level declaration or execution`);
     }
     const builderNames = new Set(["defineTrustedExtension", "defineTrustedLifecycle"]);
     const checkMutation = (node) => {
       if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(node.left) && builderNames.has(node.left.text)) fail(`${filename} reassigns a trusted builder`);
       if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.initializer) && builderNames.has(node.initializer.text)) fail(`${filename} aliases a trusted builder`);
+      if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+          node.name && ts.isIdentifier(node.name) && builderNames.has(node.name.text)) {
+        const entry = importedSymbols.get(node.name.text);
+        if (!entry || symbolAt(node.name) !== entry.symbol) fail(`${filename} shadows a trusted builder`);
+      }
       ts.forEachChild(node, checkMutation);
     };
     checkMutation(file);
@@ -181,9 +215,28 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   if (exportedTypes.size > 0 && !exportedDefinitionType) fail(`${filename} exported types must be referenced by the definition type surface`);
   if (exportedDefinitionType) {
     const used = new Set();
-    const collectTypeNames = (node) => { const parent = node.parent; const propertyName = (ts.isPropertySignature(parent) || ts.isPropertyDeclaration(parent) || ts.isMethodSignature(parent)) && parent.name === node; if (ts.isIdentifier(node) && exportedTypes.has(node.text) && !propertyName) used.add(node.text); ts.forEachChild(node, collectTypeNames); };
-    collectTypeNames(exportedDefinitionType);
-    for (const name of exportedTypes.keys()) if (!used.has(name)) fail(`${filename} exports unused type ${name}`);
+    const expanded = new Set();
+    const collectTypeSymbols = (node) => {
+      if (ts.isIdentifier(node)) {
+        const symbol = resolvedSymbol(symbolAt(node));
+        if (symbol) {
+          if (exportedTypes.has(symbol)) used.add(symbol);
+          if (!expanded.has(symbol)) {
+            expanded.add(symbol);
+            for (const declaration of symbol.declarations ?? []) {
+              if (ts.isTypeAliasDeclaration(declaration)) collectTypeSymbols(declaration.type);
+              if (ts.isInterfaceDeclaration(declaration)) {
+                for (const heritage of declaration.heritageClauses ?? []) collectTypeSymbols(heritage);
+                for (const member of declaration.members) collectTypeSymbols(member);
+              }
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, collectTypeSymbols);
+    };
+    collectTypeSymbols(exportedDefinitionType);
+    for (const [symbol, name] of exportedTypes) if (!used.has(symbol)) fail(`${filename} exports unused type ${name}`);
   }
 }
 

@@ -654,6 +654,55 @@ export const unsafe = defineTrustedExtension("unsafe", () => lifecycle(
 defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
 const fake = { configure() {}, attachSource() {}, update() {}, render() {}, suspend() {}, handleError() {}, dispose() {} };
 export const unsafe = defineTrustedExtension("unsafe", () => fake as any);`,
+      `import { defineTrustedExtension, defineTrustedLifecycle, type TrustedExtensionDefinition } from "@ros-web-viewer/extension-api";
+export interface UnusedConfig { readonly enabled: boolean }
+export const unsafe: TrustedExtensionDefinition<{ [UnusedConfig in "shadow"]: number }> =
+  defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+    () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+  ));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+const boot = (() => { throw new Error("not ready"); })();
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => {
+  const boot = (() => { if (true) throw new Error("not ready"); return 0; })();
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", (context) => {
+  const resource = context.allocateResource("text-buffer", 1);
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", (context) => {
+  const effect = true ? context.allocateResource("text-buffer", 1) : undefined;
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", (context) => {
+  const effect = (context.emitDiagnostic("info", "X", "x"), 0);
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => {
+  defineTrustedLifecycle = (() => ({})) as any;
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", (defineTrustedLifecycle) => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", (context = (() => { throw new Error("not ready"); })()) =>
+  defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+export const unsafe = defineTrustedExtension("unsafe", () => {
+  let count = 0;
+  count = 1;
+  return defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+});`,
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",
@@ -669,6 +718,27 @@ export const unsafe = defineTrustedExtension("unsafe", () => fake as any);`,
     ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
     expect(allowed.stderr).toBe("");
     expect(allowed.status).toBe(0);
+    const validTypedDefinition = `import {
+  defineTrustedExtension, defineTrustedLifecycle, type TrustedExtensionDefinition,
+} from "@ros-web-viewer/extension-api";
+export interface SafeConfig { readonly enabled: boolean }
+export interface SafeMessage { readonly value: number }
+type SafeConfigAlias = SafeConfig;
+export const safe: TrustedExtensionDefinition<SafeConfigAlias, SafeMessage> =
+  defineTrustedExtension("safe", () => {
+    let count = 0;
+    let ready = false;
+    return defineTrustedLifecycle(
+      () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+    );
+  });`;
+    const allowedTyped = spawnSync(process.execPath, [
+      "scripts/toolchain/audit-extension-examples.mjs",
+      "--source-base64",
+      Buffer.from(validTypedDefinition).toString("base64"),
+    ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
+    expect(allowedTyped.stderr).toBe("");
+    expect(allowedTyped.status).toBe(0);
   }, 15_000);
 });
 
