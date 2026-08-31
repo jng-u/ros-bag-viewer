@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HostedAccessError,
   HostedSharingService,
+  serializeHostedManifestPayload,
   verifyHostedManifest,
   type ImmutableObjectRef,
   type ImmutableObjectStore,
@@ -102,10 +103,14 @@ describe("provider-neutral hosted sharing core", () => {
     const bundle = verifyHostedManifest(JSON.stringify(manifest), descriptor.manifestVerificationKey);
     const ownKeys = vi.fn(Reflect.ownKeys);
     const get = vi.fn(Reflect.get);
-    const hostile = new Proxy(manifest, { get, ownKeys });
+    const getPrototypeOf = vi.fn(Reflect.getPrototypeOf);
+    const hostile = new Proxy(manifest, { get, getPrototypeOf, ownKeys });
     expect(() => verifyHostedManifest(hostile as unknown as string, descriptor.manifestVerificationKey))
       .toThrow(/bounded serialized JSON text/);
+    expect(() => serializeHostedManifestPayload(hostile as unknown as string))
+      .toThrow(/bounded serialized JSON text/);
     expect(get).not.toHaveBeenCalled();
+    expect(getPrototypeOf).not.toHaveBeenCalled();
     expect(ownKeys).not.toHaveBeenCalled();
     expect(bundle.entries).toHaveLength(1);
     expect(bundle.entries[0]).toMatchObject({

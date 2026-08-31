@@ -293,7 +293,7 @@ function validateLimits(limits: HostedCoreLimits): HostedCoreLimits {
   return Object.freeze({ ...limits });
 }
 
-export function serializeHostedManifestPayload(payload: HostedManifestPayload): string {
+function canonicalHostedManifestPayload(payload: HostedManifestPayload): string {
   return JSON.stringify({
     schemaVersion: payload.schemaVersion,
     bundleId: payload.bundleId,
@@ -317,6 +317,17 @@ export function serializeHostedManifestPayload(payload: HostedManifestPayload): 
       ...(relation.ordinal === undefined ? {} : { ordinal: relation.ordinal }),
     })),
   });
+}
+
+export function serializeHostedManifestPayload(serializedPayload: string): string {
+  if (typeof serializedPayload !== "string" || serializedPayload.length > MAX_SIGNED_MANIFEST_BYTES ||
+      Buffer.byteLength(serializedPayload, "utf8") > MAX_SIGNED_MANIFEST_BYTES) {
+    throw new Error("hosted manifest payload must be bounded serialized JSON text");
+  }
+  let payload: HostedManifestPayload;
+  try { payload = JSON.parse(serializedPayload) as HostedManifestPayload; }
+  catch { throw new Error("hosted manifest payload is not valid JSON"); }
+  return canonicalHostedManifestPayload(payload);
 }
 
 function exactKeys(value: object, expected: readonly string[]): boolean {
@@ -428,7 +439,7 @@ export function verifyHostedManifest(serializedManifest: string, trustedPublicKe
   const publicKeyBytes = decodeCanonicalBase64Url(manifest.publicKeySpki, 128, "public key encoding");
   if (sha256(publicKeyBytes) !== manifest.keyId) throw new Error("hosted manifest key id mismatch");
   const publicKey = createPublicKey({ key: publicKeyBytes, format: "der", type: "spki" });
-  const valid = verify(null, Buffer.from(serializeHostedManifestPayload(manifest.payload)), publicKey,
+  const valid = verify(null, Buffer.from(canonicalHostedManifestPayload(manifest.payload)), publicKey,
     decodeCanonicalBase64Url(manifest.signature, 64, "signature encoding"));
   if (!valid) throw new Error("hosted manifest signature is invalid");
 
@@ -474,7 +485,7 @@ function signManifest(payload: HostedManifestPayload, privateKey: KeyObject, pub
     keyId: sha256(publicKeyBytes),
     publicKeySpki,
     payload,
-    signature: sign(null, Buffer.from(serializeHostedManifestPayload(payload)), privateKey).toString("base64url"),
+    signature: sign(null, Buffer.from(canonicalHostedManifestPayload(payload)), privateKey).toString("base64url"),
   });
 }
 

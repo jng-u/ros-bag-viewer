@@ -1,4 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { dirname, parse, resolve } from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import { TextDecoder } from "node:util";
 
 const READ_CHUNK_BYTES = 64 * 1024;
@@ -29,12 +31,26 @@ export function utf8ByteLengthAtMost(value, maxBytes, label = "text") {
 
 export function readBoundedBytes(path, maxBytes, label = path) {
   assertByteCeiling(maxBytes, label);
-  const pathBefore = lstatSync(path);
+  const absolutePath = resolve(path instanceof URL ? fileURLToPath(path) : path);
+  const assertStableAncestors = () => {
+    const root = parse(absolutePath).root;
+    let current = dirname(absolutePath);
+    while (current !== root) {
+      const status = lstatSync(current);
+      if (!status.isDirectory() || status.isSymbolicLink()) {
+        throw new Error(`${label} has a non-directory or symlinked ancestor`);
+      }
+      current = dirname(current);
+    }
+  };
+  assertStableAncestors();
+  const pathBefore = lstatSync(absolutePath);
   if (!pathBefore.isFile()) throw new Error(`${label} must be a regular non-symlink file`);
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const descriptor = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const before = fstatSync(descriptor);
-    const pathAfterOpen = lstatSync(path);
+    assertStableAncestors();
+    const pathAfterOpen = lstatSync(absolutePath);
     if (!before.isFile() || !pathAfterOpen.isFile() ||
         pathBefore.dev !== before.dev || pathBefore.ino !== before.ino ||
         pathAfterOpen.dev !== before.dev || pathAfterOpen.ino !== before.ino) {
@@ -51,7 +67,8 @@ export function readBoundedBytes(path, maxBytes, label = path) {
       total += count;
     }
     const after = fstatSync(descriptor);
-    const pathAfterRead = lstatSync(path);
+    assertStableAncestors();
+    const pathAfterRead = lstatSync(absolutePath);
     if (total > maxBytes || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
         !pathAfterRead.isFile() || pathAfterRead.dev !== after.dev || pathAfterRead.ino !== after.ino ||
         before.mtimeMs !== after.mtimeMs || total !== after.size) {

@@ -71,7 +71,7 @@ export interface EdgeMessage {
   readonly subscriptionId: string;
   readonly sourceSequence: number;
   readonly timestampNanos: string;
-  readonly payload: Uint8Array;
+  readonly payloadBase64: string;
 }
 
 export interface EdgeTransport {
@@ -142,8 +142,6 @@ interface RateWindow {
   messages: number;
 }
 
-const encoder = new TextEncoder();
-
 function hash(value: string): Uint8Array {
   return createHash("sha256").update(value).digest();
 }
@@ -186,6 +184,61 @@ function frameByteLength(value: string, maximum: number): number {
   return bytes;
 }
 
+function parseSerializedRecord(text: string, maximum: number, label: string): Record<string, unknown> {
+  if (typeof text !== "string" || frameByteLength(text, maximum) > maximum) {
+    throw new RelayDenied("unauthorized", `${label} must be bounded serialized JSON text`);
+  }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { throw new RelayDenied("unauthorized", `${label} is not valid JSON`); }
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new RelayDenied("unauthorized", `${label} must be a JSON object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function exactSerializedKeys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): boolean {
+  const keys = Object.keys(value);
+  return required.every((key) => keys.includes(key)) && keys.every((key) => required.includes(key) || optional.includes(key));
+}
+
+function parseConnectRequest(text: string, maxCredentialBytes: number): RelayConnectRequest {
+  const value = parseSerializedRecord(text, maxCredentialBytes + 2_048, "relay connect request");
+  if (!exactSerializedKeys(value, ["credential", "origin", "sessionId"], ["connectionId"]) ||
+      typeof value.credential !== "string" || typeof value.origin !== "string" || typeof value.sessionId !== "string" ||
+      value.connectionId !== undefined && typeof value.connectionId !== "string") {
+    throw new RelayDenied("unauthorized", "relay connect request has invalid fields");
+  }
+  return Object.freeze(value) as unknown as RelayConnectRequest;
+}
+
+function parseEdgeMessage(text: string, maxMessageBytes: number): Readonly<Omit<EdgeMessage, "payloadBase64"> & { payload: Uint8Array }> | undefined {
+  const maxEncodedBytes = Math.ceil(maxMessageBytes / 3) * 4;
+  let value: Record<string, unknown>;
+  try { value = parseSerializedRecord(text, maxEncodedBytes + 1_024, "edge message"); }
+  catch { return undefined; }
+  if (!exactSerializedKeys(value, ["subscriptionId", "sourceSequence", "timestampNanos", "payloadBase64"]) ||
+      typeof value.subscriptionId !== "string" || typeof value.timestampNanos !== "string" ||
+      !Number.isSafeInteger(value.sourceSequence) || (value.sourceSequence as number) < 0 ||
+      typeof value.payloadBase64 !== "string" || value.payloadBase64.length > maxEncodedBytes ||
+      !/^[A-Za-z0-9_-]*$/u.test(value.payloadBase64)) return undefined;
+  const decoded = Buffer.from(value.payloadBase64, "base64url");
+  if (decoded.byteLength > maxMessageBytes || decoded.toString("base64url") !== value.payloadBase64) return undefined;
+  const payload = Uint8Array.from(decoded);
+  return Object.freeze({
+    subscriptionId: value.subscriptionId,
+    sourceSequence: value.sourceSequence as number,
+    timestampNanos: value.timestampNanos,
+    payload,
+  });
+}
+
+function descriptorWithinLimits(descriptor: TopicDescriptor, limits: ProtocolLimits): boolean {
+  return frameByteLength(descriptor.topic, limits.maxTopicBytes) <= limits.maxTopicBytes &&
+    frameByteLength(descriptor.type, limits.maxTypeBytes) <= limits.maxTypeBytes &&
+    descriptor.maxRateHz <= limits.maxRateHz && descriptor.maxMessageBytes <= limits.maxMessageBytes;
+}
+
 function mergeLimits(overrides: Partial<RelayLimits> | undefined): RelayLimits {
   const merged = { ...DEFAULT_RELAY_LIMITS, ...overrides };
   for (const [name, value] of Object.entries(merged)) positiveSafeInteger(value, name);
@@ -218,7 +271,9 @@ export class InMemorySessionAuthenticator implements BrowserAuthenticator {
 
   constructor(entries: readonly Readonly<{ credential: string; grant: BrowserSessionGrant }>[]) {
     this.#grants = entries.map(({ credential, grant }) => {
-      if (!credential) throw new Error("browser credential must not be empty");
+      if (!credential || frameByteLength(credential, DEFAULT_RELAY_LIMITS.maxCredentialBytes) > DEFAULT_RELAY_LIMITS.maxCredentialBytes) {
+        throw new Error("browser credential must be non-empty and bounded");
+      }
       return Object.freeze({
         digest: hash(credential),
         grant: Object.freeze({ ...grant, allowedOrigins: Object.freeze([...grant.allowedOrigins]) }),
@@ -276,24 +331,28 @@ export class SecureLiveRelay {
       return normalized;
     }));
     if (this.#allowedOrigins.size === 0) throw new Error("at least one allowed Origin is required");
-    if (!configuration.edgeIdentity.identityId || !configuration.edgeIdentity.credential) {
+    if (!configuration.edgeIdentity.identityId || !configuration.edgeIdentity.credential ||
+        frameByteLength(configuration.edgeIdentity.credential, this.#limits.maxCredentialBytes) > this.#limits.maxCredentialBytes) {
       throw new Error("a distinct relay-to-edge identity and credential are required");
     }
     this.#edgeIdentity = Object.freeze({ ...configuration.edgeIdentity });
   }
 
-  async connect(request: RelayConnectRequest): Promise<RelayConnection> {
+  async connect(serializedRequest: string): Promise<RelayConnection> {
     const reject = (): never => {
       this.#telemetry.rejectedConnections += 1;
       throw new RelayDenied("unauthorized", "connection is not authorized");
     };
+    let request: RelayConnectRequest;
+    try { request = parseConnectRequest(serializedRequest, this.#limits.maxCredentialBytes); }
+    catch { return reject(); }
     const origin = exactOrigin(request.origin);
     if (
       !origin ||
       !this.#allowedOrigins.has(origin) ||
       !request.credential ||
       request.credential === this.#edgeIdentity.credential ||
-      encoder.encode(request.credential).byteLength > this.#limits.maxCredentialBytes
+      frameByteLength(request.credential, this.#limits.maxCredentialBytes) > this.#limits.maxCredentialBytes
     ) return reject();
 
     let grant: BrowserSessionGrant | undefined;
@@ -311,7 +370,8 @@ export class SecureLiveRelay {
 
     const policy = this.#resolveSessionPolicy(grant);
     if (!policy) return reject();
-    const validatedTopics = policy.topics.map((topic) => validateTopicDescriptor(topic, this.#protocolLimits));
+    const validatedTopics = policy.topics.map((topic) => validateTopicDescriptor(JSON.stringify(topic)));
+    if (validatedTopics.some((topic) => !descriptorWithinLimits(topic, this.#protocolLimits))) return reject();
     const existing = this.#sessionConnections.get(grant.sessionId) ?? new Set<string>();
     if (existing.size >= this.#limits.maxConnectionsPerSession) return reject();
 
@@ -448,7 +508,7 @@ export class RelayConnection {
 
     let frame: BrowserFrame;
     try {
-      frame = parseBrowserFrameJson(input, this.#protocolLimits);
+      frame = parseBrowserFrameJson(input);
     } catch (error) {
       if (error instanceof ProtocolViolation) return this.#reject("invalid-request");
       return this.#reject("invalid-request");
@@ -491,7 +551,8 @@ export class RelayConnection {
     }
     const allowed = new Map(this.#policy.topics.map((topic) => [`${topic.topic}\0${topic.type}`, topic]));
     const topics = reply.topics
-      .map((topic) => validateTopicDescriptor(topic, this.#protocolLimits))
+      .map((topic) => validateTopicDescriptor(JSON.stringify(topic)))
+      .filter((topic) => descriptorWithinLimits(topic, this.#protocolLimits))
       .filter((topic) => allowed.has(`${topic.topic}\0${topic.type}`))
       .map((topic) => {
         const policy = allowed.get(`${topic.topic}\0${topic.type}`)!;
@@ -568,22 +629,22 @@ export class RelayConnection {
       expiresAtMs,
       allowlistDigest: this.#allowlistDigest,
     };
-    return validateEdgePlan(plan, {
-      nowMs: issuedAtMs,
-      maxTtlMs: this.#limits.edgePlanTtlMs,
-      limits: this.#protocolLimits,
-    });
+    return validateEdgePlan(JSON.stringify(plan), issuedAtMs, this.#limits.edgePlanTtlMs);
   }
 
-  pushFromEdge(message: EdgeMessage): boolean {
+  pushFromEdge(serializedMessage: string): boolean {
     if (this.#closed) return false;
+    const message = parseEdgeMessage(serializedMessage, this.#protocolLimits.maxMessageBytes);
+    if (!message) {
+      this.#drop(0);
+      return false;
+    }
     const subscription = this.#subscriptions.get(message.subscriptionId);
     if (
       !subscription ||
       !Number.isSafeInteger(message.sourceSequence) ||
       message.sourceSequence < 0 ||
       !/^(0|[1-9][0-9]*)$/u.test(message.timestampNanos) ||
-      !(message.payload instanceof Uint8Array) ||
       message.payload.byteLength > subscription.maxMessageBytes ||
       message.payload.byteLength > this.#protocolLimits.maxMessageBytes ||
       !this.#admitRate(subscription)

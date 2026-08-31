@@ -636,6 +636,24 @@ const defineTrustedExtension = () => ({});
 export const fake = defineTrustedExtension("fake", () => defineTrustedLifecycle(
   () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
 ));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+function mask(setTimeout: unknown) { void setTimeout; }
+setTimeout(() => {}, 0);
+export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+const decoy = defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+export const unsafe = defineTrustedExtension("unsafe", () => ({ configure() {}, attachSource() {}, update() {}, render() {}, suspend() {}, handleError() {}, dispose() {} }) as any);`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+const lifecycle = defineTrustedLifecycle;
+export const unsafe = defineTrustedExtension("unsafe", () => lifecycle(
+  () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
+));`,
+      `import { defineTrustedExtension, defineTrustedLifecycle } from "@ros-web-viewer/extension-api";
+defineTrustedLifecycle(() => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
+const fake = { configure() {}, attachSource() {}, update() {}, render() {}, suspend() {}, handleError() {}, dispose() {} };
+export const unsafe = defineTrustedExtension("unsafe", () => fake as any);`,
     ]) {
       const probe = spawnSync(process.execPath, [
         "scripts/toolchain/audit-extension-examples.mjs",

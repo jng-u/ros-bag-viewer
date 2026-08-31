@@ -70,33 +70,52 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   const scriptKind = filename.endsWith(".tsx") ? ts.ScriptKind.TSX : filename.endsWith(".jsx") ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKind);
   if (file.parseDiagnostics.length > 0) fail(`${filename} contains TypeScript parse errors`);
-  const bound = new Set();
+  const rootScope = { parent: undefined, bindings: new Set() };
+  const scopeByNode = new WeakMap();
   const declaredLocals = new Set();
-  const bindName = (name) => {
-    if (ts.isIdentifier(name)) bound.add(name.text);
+  const bindName = (scope, name, local = false) => {
+    if (ts.isIdentifier(name)) {
+      scope.bindings.add(name.text);
+      if (local) declaredLocals.add(name.text);
+    }
     else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-      for (const element of name.elements) if (ts.isBindingElement(element)) bindName(element.name);
+      for (const element of name.elements) if (ts.isBindingElement(element)) bindName(scope, element.name, local);
     }
   };
-  const collectBindings = (node) => {
-    if ((ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) && node.name) bindName(node.name);
-    if (ts.isImportClause(node) && node.name) bindName(node.name);
-    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) ||
+  const collectBindings = (node, scope) => {
+    scopeByNode.set(node, scope);
+    if ((ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) && node.name) bindName(scope, node.name);
+    if (ts.isImportClause(node) && node.name) bindName(scope, node.name);
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isClassDeclaration(node) ||
         ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
-      if (node.name) {
-        bindName(node.name);
-        const collectLocal = (name) => {
-          if (ts.isIdentifier(name)) declaredLocals.add(name.text);
-          else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
-            for (const element of name.elements) if (ts.isBindingElement(element)) collectLocal(element.name);
-          }
-        };
-        collectLocal(node.name);
-      }
+      if (node.name) bindName(scope, node.name, !ts.isImportSpecifier(node));
     }
-    ts.forEachChild(node, collectBindings);
+    if (ts.isFunctionDeclaration(node) && node.name) bindName(scope, node.name, true);
+    if (ts.isFunctionLike(node)) {
+      const functionScope = { parent: scope, bindings: new Set() };
+      scopeByNode.set(node, functionScope);
+      if (ts.isFunctionExpression(node) && node.name) bindName(functionScope, node.name, true);
+      for (const parameter of node.parameters) collectBindings(parameter, functionScope);
+      if (node.body) collectBindings(node.body, functionScope);
+      return;
+    }
+    if (node !== file && (ts.isBlock(node) || ts.isCaseBlock(node) || ts.isCatchClause(node) || ts.isModuleBlock(node))) {
+      const blockScope = { parent: scope, bindings: new Set() };
+      scopeByNode.set(node, blockScope);
+      ts.forEachChild(node, (child) => collectBindings(child, blockScope));
+      return;
+    }
+    ts.forEachChild(node, (child) => collectBindings(child, scope));
   };
-  collectBindings(file);
+  collectBindings(file, rootScope);
+  const isBoundAt = (node, name) => {
+    let scope = scopeByNode.get(node);
+    while (scope) {
+      if (scope.bindings.has(name)) return true;
+      scope = scope.parent;
+    }
+    return false;
+  };
   const rootIdentifier = (expression) => {
     let current = expression;
     while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) current = current.expression;
@@ -105,8 +124,34 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   };
   let extensionApiImport = false;
   let extensionDefinitionExports = 0;
-  let trustedLifecycleCalls = 0;
   const importedSymbols = new Map();
+  const isDirectImportedCall = (expression, importedName) =>
+    ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) &&
+    importedSymbols.get(expression.expression.text) === importedName;
+  const returnedExpressions = (callback) => {
+    if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return undefined;
+    if (!ts.isBlock(callback.body)) return [callback.body];
+    const returns = [];
+    const collectReturns = (node) => {
+      if (node !== callback && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node)) {
+        if (!node.expression) return;
+        returns.push(node.expression);
+        return;
+      }
+      ts.forEachChild(node, collectReturns);
+    };
+    collectReturns(callback.body);
+    return returns;
+  };
+  const isBoundExtensionDefinition = (initializer) => {
+    if (!isDirectImportedCall(initializer, "defineTrustedExtension")) return false;
+    const callback = initializer.arguments[1];
+    if (!callback) return false;
+    const returns = returnedExpressions(callback);
+    return returns !== undefined && returns.length > 0 &&
+      returns.every((expression) => isDirectImportedCall(expression, "defineTrustedLifecycle"));
+  };
   const visit = (node) => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier !== undefined) {
       if (!ts.isStringLiteral(node.moduleSpecifier)) fail(`${filename} has a non-literal module specifier`);
@@ -137,10 +182,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       assertModule(reference.expression.text, filename, resolveRelative);
     }
     if (ts.isCallExpression(node)) {
-      if (ts.isIdentifier(node.expression) && importedSymbols.get(node.expression.text) === "defineTrustedLifecycle") {
-        trustedLifecycleCalls += 1;
-      }
-      if (ts.isIdentifier(node.expression) && !bound.has(node.expression.text) && !safeStandardGlobals.has(node.expression.text)) {
+      if (ts.isIdentifier(node.expression) && !isBoundAt(node, node.expression.text) && !safeStandardGlobals.has(node.expression.text)) {
         fail(`${filename} calls unbound ambient ${node.expression.text}`);
       }
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) fail(`${filename} uses dynamic import`);
@@ -159,7 +201,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
         fail(`${filename} acquires a runtime descriptor`);
       }
     }
-    if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && !bound.has(node.tag.text)) {
+    if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && !isBoundAt(node, node.tag.text)) {
       fail(`${filename} calls unbound ambient tag ${node.tag.text}`);
     }
     if (ts.isNewExpression(node)) {
@@ -172,7 +214,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
     }
     if (ts.isPropertyAccessExpression(node)) {
       const root = rootIdentifier(node);
-      if (root !== undefined && !bound.has(root) && !safeStandardGlobals.has(root)) {
+      if (root !== undefined && !isBoundAt(node, root) && !safeStandardGlobals.has(root)) {
         fail(`${filename} references unbound ambient ${root}`);
       }
     }
@@ -194,11 +236,9 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
       if (ts.isVariableStatement(node)) {
         if (node.declarationList.declarations.length !== 1) fail(`${filename} exports multiple runtime bindings`);
         const declaration = node.declarationList.declarations[0];
-        if (declaration?.initializer && ts.isCallExpression(declaration.initializer) &&
-            ts.isIdentifier(declaration.initializer.expression) &&
-            importedSymbols.get(declaration.initializer.expression.text) === "defineTrustedExtension") {
+        if (declaration?.initializer && isBoundExtensionDefinition(declaration.initializer)) {
           extensionDefinitionExports += 1;
-        } else fail(`${filename} exports unsupported runtime state`);
+        } else fail(`${filename} must export a definition whose create callback directly returns the exact imported lifecycle builder result`);
       } else if (!ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node)) {
         fail(`${filename} exports unsupported runtime declaration`);
       }
@@ -213,7 +253,7 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   if ([...importedSymbols.keys()].some((name) => declaredLocals.has(name))) {
     fail(`${filename} shadows an imported extension-api symbol`);
   }
-  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 || trustedLifecycleCalls === 0 ||
+  if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 ||
       ![...importedSymbols.values()].includes("defineTrustedExtension") || ![...importedSymbols.values()].includes("defineTrustedLifecycle"))) {
     fail(`${filename} must call the exact imported builders and export one defineTrustedExtension result`);
   }
@@ -298,8 +338,10 @@ function emitAuditedPackage(packageRoot, configPath, manifest, auditedConfig) {
     const host = ts.createCompilerHost(parsed.options);
     const defaultReadFile = host.readFile.bind(host);
     host.readFile = (filename) => {
-      const withinPackage = relative(packageRoot, filename) === "" || !relative(packageRoot, filename).startsWith(`..${sep}`);
-      return withinPackage ? readBoundedText(filename, sourceMaxBytes, relative(defaultRoot, filename)) : defaultReadFile(filename);
+      const packageRelative = relative(packageRoot, filename);
+      const auditedPackageInput = (packageRelative === "" || !packageRelative.startsWith(`..${sep}`)) &&
+        packageRelative !== "node_modules" && !packageRelative.startsWith(`node_modules${sep}`);
+      return auditedPackageInput ? readBoundedText(filename, sourceMaxBytes, relative(defaultRoot, filename)) : defaultReadFile(filename);
     };
     const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences, host });
     const diagnostics = ts.getPreEmitDiagnostics(program);

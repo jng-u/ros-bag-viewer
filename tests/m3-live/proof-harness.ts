@@ -41,6 +41,29 @@ export const liveTopics: readonly TopicDescriptor[] = Object.freeze([
 const relayIdentity = Object.freeze({ identityId: "m3-relay", credential: "edge-secret" });
 const allowlistDigest = computeAllowlistDigest(liveTopics);
 
+function connectRelay(relay: SecureLiveRelay, request: {
+  readonly credential: string;
+  readonly origin: string;
+  readonly sessionId: string;
+  readonly connectionId?: string;
+}): Promise<RelayConnection> {
+  return relay.connect(JSON.stringify(request));
+}
+
+function pushEdge(relay: RelayConnection, message: {
+  readonly subscriptionId: string;
+  readonly sourceSequence: number;
+  readonly timestampNanos: string;
+  readonly payload: Uint8Array;
+}): boolean {
+  return relay.pushFromEdge(JSON.stringify({
+    subscriptionId: message.subscriptionId,
+    sourceSequence: message.sourceSequence,
+    timestampNanos: message.timestampNanos,
+    payloadBase64: Buffer.from(message.payload).toString("base64url"),
+  }));
+}
+
 class SyntheticRosReadPort implements EdgeReadPort {
   readonly callbacks = new Map<string, (payload: Uint8Array) => void>();
   readonly writesAttempted = 0;
@@ -161,7 +184,7 @@ export function createSyntheticFixture(generation: RosGeneration): M3SyntheticFi
     port,
     relay,
     connect(connectionId) {
-      return relay.connect({
+      return connectRelay(relay, {
         credential: "browser-secret",
         origin: "https://viewer.example",
         sessionId: "m3-session",
@@ -200,7 +223,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
   }
 
   async connect(credentials: LiveSessionCredentials): Promise<LiveRelayConnection> {
-    const relay = await this.#fixture.relay.connect({
+    const relay = await connectRelay(this.#fixture.relay, {
       credential: credentials.sessionToken,
       origin: credentials.browserOrigin,
       sessionId: "m3-session",
@@ -310,7 +333,7 @@ export class SyntheticLiveRelayTransport implements LiveRelayTransport {
     for (const subscription of active.subscriptions.values()) {
       let edgeFrame = this.#fixture.edge.drainFrame(subscription.subscriptionId);
       while (edgeFrame) {
-        active.relay.pushFromEdge({
+        pushEdge(active.relay, {
           subscriptionId: subscription.subscriptionId,
           sourceSequence: this.#nextSourceSequence++,
           timestampNanos: String(BigInt(this.#fixture.getNow()) * 1_000_000n),
@@ -404,7 +427,7 @@ export async function runSyntheticLoadProof(generation: RosGeneration): Promise<
         while (frame) {
           const syntheticLatency = 2_000_000;
           syntheticLatencies.push(syntheticLatency);
-          connection.pushFromEdge({
+          pushEdge(connection, {
             subscriptionId,
             sourceSequence: sourceSequence++,
             timestampNanos: String(BigInt(fixture.getNow()) * 1_000_000n - BigInt(syntheticLatency)),

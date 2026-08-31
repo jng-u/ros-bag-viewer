@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +55,13 @@ describe("M5 release hardening", () => {
       const symlink = join(directory, "linked.json");
       symlinkSync(exact, symlink);
       expect(() => readBoundedJson(symlink, 11, "symlink fixture")).toThrow(/non-symlink/);
+      const targetDirectory = join(directory, "target");
+      mkdirSync(targetDirectory);
+      writeFileSync(join(targetDirectory, "payload.json"), '{"ok":true}');
+      const linkedDirectory = join(directory, "linked-directory");
+      symlinkSync(targetDirectory, linkedDirectory, "dir");
+      expect(() => readBoundedJson(join(linkedDirectory, "payload.json"), 11, "ancestor symlink fixture"))
+        .toThrow(/symlinked ancestor/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -153,6 +160,9 @@ describe("M5 release hardening", () => {
         'stack.yaml', 'packaged.yaml', 'sam-template.yaml', '.aws-sam/build/template.yaml', 'infra/cdk-stack.ts',
         'dist/index.js', 'artifacts/output.json', 'dist/deployment.zip', 'infra/main.bicep',
         'google-credentials.json', '.serverless/cloudformation-template-update-stack.json',
+        'archive/release.zip', 'deployment/output.txt', 'artifact/serverless-output.txt', 'output/bundle.js',
+        'build/release.zip', 'artifact/release.json', 'nested/dist/bundle.js', 'nested/artifacts/release.json',
+        'release/output.tar', 'helm/Chart.yaml', 'helm/values.yaml', 'pulumi-output.txt', 'cdktf-output.txt',
       ];
       const deniedContent = [
         ['notes.txt', '-----BEGIN ' + 'PRIVATE KEY-----'],
@@ -164,11 +174,26 @@ describe("M5 release hardening", () => {
         ['infra/bucket.ts', "import { Bucket } from '@aws-cdk/" + "aws-s3';"],
         ['infra/dynamic.ts', "await import('aws-" + "cdk-lib');"],
         ['infra/app.py', 'from aws_' + 'cdk import App'],
+        ['infra/dynamic.py', 'import importlib\\nimportlib.import_module("aws_' + 'cdk.aws_s3")'],
+        ['infra/dunder.py', '__import__("aws_' + 'cdk")'],
+        ['infra/cdktf.py', 'import cd' + 'ktf'],
+        ['infra/pulumi.py', 'import pulumi_' + 'aws'],
+        ['infra/commented.ts', 'require /* bounded */ ("@cdktf/' + 'provider-aws")'],
+        ['infra/imported.ts', 'await import(/* bounded */ "@pulumi/' + 'aws")'],
         ['deployment.yaml', 'apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: viewer'],
+        ['job.yaml', 'apiVersion: batch/v1\\nkind: Job\\nmetadata:\\n  name: viewer'],
+        ['configmap.yaml', 'apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: viewer'],
         ['config.ini', 'aws_' + 'access_key_id=AKIAEXAMPLE1234'],
         ['package.json', '{"private":true,"dependencies":{"@pulumi/' + 'aws":"1"}}'],
+        ['package.json', '{"private":true,"dependencies":{"@pulumi/' + 'kubernetes":"1"}}'],
+        ['package.json', '{"private":true,"dependencies":{"@pulumi/' + 'pulumi":"1"}}'],
         ['package.json', '{"license":"M' + 'IT"}'],
+        ['package.json', '{"lic\\\\u0065nse":"M' + 'IT"}'],
         ['secret.json', '{"private_' + 'key":"super-secret-material"}'],
+        ['notes.json', '{"private\\\\u005fkey":"super-secret-material"}'],
+        ['notes.json', '{"auth\\\\u006frization":"Bearer secret-token-value"}'],
+        ['notes.json', '{"access\\\\u005ftoken":"secret-token-value"}'],
+        ['notes.yaml', 'token: super-secret-token-value'],
         ['large.txt', 'x'.repeat(1024 * 1024 + 8) + '\\n-----BEGIN ' + 'PRIVATE KEY-----'],
       ];
       const allowed = [

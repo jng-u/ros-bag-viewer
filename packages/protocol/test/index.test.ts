@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BROWSER_OPERATIONS,
-  DEFAULT_PROTOCOL_LIMITS,
   EDGE_OPERATIONS,
   LIVE_PROTOCOL_VERSION,
   ProtocolViolation,
@@ -56,23 +55,26 @@ describe("secure live protocol", () => {
   it("admits only serialized frames and returns host-owned canonical records", () => {
     const getter = vi.fn(() => 1);
     const ownKeys = vi.fn(Reflect.ownKeys);
-    const hostile = new Proxy({ ...base, operation: "health" }, { get: getter, ownKeys });
+    const getPrototypeOf = vi.fn(Reflect.getPrototypeOf);
+    const hostile = new Proxy({ ...base, operation: "health" }, { get: getter, getPrototypeOf, ownKeys });
     expect(() => parseBrowserFrame(hostile as unknown as string)).toThrow(/serialized JSON text/);
     expect(getter).not.toHaveBeenCalled();
+    expect(getPrototypeOf).not.toHaveBeenCalled();
     expect(ownKeys).not.toHaveBeenCalled();
 
-    const limits = { ...DEFAULT_PROTOCOL_LIMITS } as Record<string, unknown>;
-    Object.defineProperty(limits, "maxFrameBytes", { enumerable: true, get: getter });
-    expect(() => parseBrowserFrame(JSON.stringify({ ...base, operation: "health" }), limits as unknown as typeof DEFAULT_PROTOCOL_LIMITS))
-      .toThrow(/hidden or accessor/);
-    expect(getter).not.toHaveBeenCalled();
+    expect(parseBrowserFrame.length).toBe(1);
 
-    const descriptor = validateTopicDescriptor({
+    const descriptor = validateTopicDescriptor(JSON.stringify({
       topic: "/x", type: "std_msgs/msg/String", maxRateHz: 1, maxMessageBytes: 1,
       schemaHash: `sha256:${"a".repeat(64)}`,
-    });
+    }));
     expect(Object.isFrozen(descriptor)).toBe(true);
-    expect(() => validateTopicDescriptor({ ...descriptor, schemaHash: "SHA256:bad" })).toThrow(/schemaHash/);
+    expect(() => validateTopicDescriptor(JSON.stringify({ ...descriptor, schemaHash: "SHA256:bad" }))).toThrow(/schemaHash/);
+    expect(() => validateTopicDescriptor(hostile as unknown as string)).toThrow(/serialized JSON text/);
+    expect(() => validateEdgePlan(hostile as unknown as string, 0, 1)).toThrow(/serialized JSON text/);
+    expect(getter).not.toHaveBeenCalled();
+    expect(getPrototypeOf).not.toHaveBeenCalled();
+    expect(ownKeys).not.toHaveBeenCalled();
   });
 
   it("rejects duplicate JSON keys, protocol confusion, and oversized frames before dispatch", () => {
@@ -81,17 +83,11 @@ describe("secure live protocol", () => {
     expect(() => parseBrowserFrameJson("[]")).toThrow(/frame must be an object/);
     expect(() => parseBrowserFrameJson('{"version":2,"operation":"health","sessionId":"s","sequence":0,"requestId":"r"}'))
       .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "unsupported-version" }));
-    expect(() => parseBrowserFrameJson(JSON.stringify({ ...base, operation: "health", padding: "x".repeat(512) }), {
-      maxFrameBytes: 128,
-      maxIdentifierBytes: 128,
-      maxTopicBytes: 256,
-      maxTypeBytes: 256,
-      maxRateHz: 1_000,
-      maxMessageBytes: 1_024,
-    })).toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "frame-too-large" }));
+    expect(() => parseBrowserFrameJson(JSON.stringify({ ...base, operation: "health", padding: "x".repeat(32_000) })))
+      .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "frame-too-large" }));
     const encode = vi.spyOn(TextEncoder.prototype, "encode");
     try {
-      expect(() => parseBrowserFrameJson("x".repeat(1_000_000), { ...DEFAULT_PROTOCOL_LIMITS, maxFrameBytes: 128 }))
+      expect(() => parseBrowserFrameJson("x".repeat(1_000_000)))
         .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "frame-too-large" }));
       expect(encode).not.toHaveBeenCalled();
     } finally {
@@ -117,12 +113,12 @@ describe("secure live protocol", () => {
       maxMessageBytes: 1_000_000,
     } as const;
 
-    expect(validateEdgePlan(plan, { nowMs: 1_100, maxTtlMs: 1_000 })).toEqual(plan);
-    expect(() => validateEdgePlan({ ...plan, expiresAtMs: 1_000 }, { nowMs: 1_100, maxTtlMs: 1_000 }))
+    expect(validateEdgePlan(JSON.stringify(plan), 1_100, 1_000)).toEqual(plan);
+    expect(() => validateEdgePlan(JSON.stringify({ ...plan, expiresAtMs: 1_000 }), 1_100, 1_000))
       .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "expired-plan" }));
-    expect(() => validateEdgePlan({ ...plan, expiresAtMs: 3_000 }, { nowMs: 1_100, maxTtlMs: 1_000 }))
+    expect(() => validateEdgePlan(JSON.stringify({ ...plan, expiresAtMs: 3_000 }), 1_100, 1_000))
       .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "expired-plan" }));
-    expect(() => validateEdgePlan({ ...plan, operation: "publish" }, { nowMs: 1_100, maxTtlMs: 1_000 }))
+    expect(() => validateEdgePlan(JSON.stringify({ ...plan, operation: "publish" }), 1_100, 1_000))
       .toThrowError(expect.objectContaining<Partial<ProtocolViolation>>({ code: "operation-denied" }));
   });
 });

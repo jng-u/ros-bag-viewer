@@ -349,10 +349,9 @@ function assertNoDuplicateTopLevelKeys(text: string): void {
 
 export function parseBrowserFrameJson(
   text: string,
-  limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): BrowserFrame {
   if (typeof text !== "string") throw new ProtocolViolation("invalid-frame", "frame must be bounded serialized JSON text");
-  const canonicalProtocolLimits = canonicalLimits(limits);
+  const canonicalProtocolLimits = DEFAULT_PROTOCOL_LIMITS;
   if (exceedsUtf8Bytes(text, canonicalProtocolLimits.maxFrameBytes)) {
     throw new ProtocolViolation("frame-too-large", "frame exceeds the configured byte ceiling");
   }
@@ -368,9 +367,8 @@ export function parseBrowserFrameJson(
 
 export function parseBrowserFrame(
   text: string,
-  limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
 ): BrowserFrame {
-  return parseBrowserFrameJson(text, limits);
+  return parseBrowserFrameJson(text);
 }
 
 function parseBrowserFrameRecord(
@@ -421,10 +419,16 @@ function parseBrowserFrameRecord(
 }
 
 export function validateTopicDescriptor(
-  value: unknown,
-  limits: ProtocolLimits = DEFAULT_PROTOCOL_LIMITS,
+  text: string,
 ): TopicDescriptor {
-  const canonicalProtocolLimits = canonicalLimits(limits);
+  if (typeof text !== "string") throw new ProtocolViolation("invalid-frame", "topic descriptor must be bounded serialized JSON text");
+  const canonicalProtocolLimits = DEFAULT_PROTOCOL_LIMITS;
+  if (exceedsUtf8Bytes(text, canonicalProtocolLimits.maxFrameBytes)) {
+    throw new ProtocolViolation("frame-too-large", "topic descriptor exceeds the configured byte ceiling");
+  }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { throw new ProtocolViolation("invalid-frame", "topic descriptor is not valid JSON"); }
   const descriptor = canonicalRecord(value, "topic descriptor", canonicalProtocolLimits.maxFrameBytes);
   const allowed = descriptor.schemaHash === undefined
     ? ["topic", "type", "maxRateHz", "maxMessageBytes"]
@@ -441,14 +445,20 @@ export function validateTopicDescriptor(
 }
 
 export function validateEdgePlan(
-  value: unknown,
-  options: Readonly<{ nowMs: number; maxTtlMs: number; limits?: ProtocolLimits }>,
+  text: string,
+  nowMs: number,
+  maxTtlMs: number,
 ): EdgePlan {
-  const canonicalOptions = canonicalRecord(options, "edge plan options");
-  assertExactKeys(canonicalOptions, canonicalOptions.limits === undefined ? ["nowMs", "maxTtlMs"] : ["nowMs", "maxTtlMs", "limits"]);
-  assertSafeNonNegative(canonicalOptions.nowMs, "nowMs");
-  assertSafePositive(canonicalOptions.maxTtlMs, "maxTtlMs", Number.MAX_SAFE_INTEGER);
-  const limits = canonicalLimits(canonicalOptions.limits ?? DEFAULT_PROTOCOL_LIMITS);
+  if (typeof text !== "string") throw new ProtocolViolation("invalid-frame", "edge plan must be bounded serialized JSON text");
+  assertSafeNonNegative(nowMs, "nowMs");
+  assertSafePositive(maxTtlMs, "maxTtlMs", Number.MAX_SAFE_INTEGER);
+  const limits = DEFAULT_PROTOCOL_LIMITS;
+  if (exceedsUtf8Bytes(text, limits.maxFrameBytes)) {
+    throw new ProtocolViolation("frame-too-large", "edge plan exceeds the configured byte ceiling");
+  }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { throw new ProtocolViolation("invalid-frame", "edge plan is not valid JSON"); }
   const plan = canonicalRecord(value, "edge plan", limits.maxFrameBytes);
   assertFrameBytes(plan, limits);
   if (plan.version !== LIVE_PROTOCOL_VERSION) throw new ProtocolViolation("unsupported-version", "protocol version is not supported");
@@ -469,9 +479,9 @@ export function validateEdgePlan(
     throw new ProtocolViolation("invalid-field", "allowlistDigest is invalid");
   }
   if (
-    plan.expiresAtMs <= (canonicalOptions.nowMs as number) ||
+    plan.expiresAtMs <= nowMs ||
     plan.expiresAtMs <= plan.issuedAtMs ||
-    plan.expiresAtMs - plan.issuedAtMs > (canonicalOptions.maxTtlMs as number)
+    plan.expiresAtMs - plan.issuedAtMs > maxTtlMs
   ) {
     throw new ProtocolViolation("expired-plan", "edge plan is expired or exceeds its allowed lifetime");
   }

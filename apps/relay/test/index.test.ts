@@ -81,6 +81,24 @@ function frame(sequence: number, operation: "discover" | "health" = "health") {
   } as const;
 }
 
+function connectRelay(relay: SecureLiveRelay, request: Record<string, unknown>) {
+  return relay.connect(JSON.stringify(request));
+}
+
+function pushEdge(connection: Awaited<ReturnType<SecureLiveRelay["connect"]>>, message: {
+  readonly subscriptionId: string;
+  readonly sourceSequence: number;
+  readonly timestampNanos: string;
+  readonly payload: Uint8Array;
+}) {
+  return connection.pushFromEdge(JSON.stringify({
+    subscriptionId: message.subscriptionId,
+    sourceSequence: message.sourceSequence,
+    timestampNanos: message.timestampNanos,
+    payloadBase64: Buffer.from(message.payload).toString("base64url"),
+  }));
+}
+
 function subscribe(sequence: number, overrides: Record<string, unknown> = {}) {
   return {
     ...frame(sequence),
@@ -95,6 +113,40 @@ function subscribe(sequence: number, overrides: Record<string, unknown> = {}) {
 }
 
 describe("secure live relay", () => {
+  it("admits connect and edge messages only as bounded serialized text without caller traps", async () => {
+    const authenticate = vi.fn(async () => undefined);
+    const { relay } = fixture({ authenticator: { authenticate } });
+    const get = vi.fn(() => "x");
+    const getPrototypeOf = vi.fn(Reflect.getPrototypeOf);
+    const ownKeys = vi.fn(Reflect.ownKeys);
+    const hostile = new Proxy({}, { get, getPrototypeOf, ownKeys });
+    await expect(relay.connect(hostile as unknown as string)).rejects.toMatchObject({ code: "unauthorized" });
+    expect(get).not.toHaveBeenCalled();
+    expect(getPrototypeOf).not.toHaveBeenCalled();
+    expect(ownKeys).not.toHaveBeenCalled();
+
+    const encode = vi.spyOn(TextEncoder.prototype, "encode");
+    try {
+      await expect(relay.connect(JSON.stringify({
+        credential: "x".repeat(5_000_000),
+        origin: "https://viewer.example",
+        sessionId: "session-1",
+      }))).rejects.toMatchObject({ code: "unauthorized" });
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(encode).not.toHaveBeenCalled();
+    } finally {
+      encode.mockRestore();
+    }
+
+    const connection = await connectRelay(fixture().relay, {
+      credential: "browser-secret", origin: "https://viewer.example", sessionId: "session-1",
+    });
+    expect(connection.pushFromEdge(hostile as unknown as string)).toBe(false);
+    expect(get).not.toHaveBeenCalled();
+    expect(getPrototypeOf).not.toHaveBeenCalled();
+    expect(ownKeys).not.toHaveBeenCalled();
+  });
+
   it("fails connection auth closed with constant-shape denial for Origin, session, token, expiry, and quotas", async () => {
     const { relay, setNow } = fixture();
     const invalid = [
@@ -104,27 +156,27 @@ describe("secure live relay", () => {
       { credential: "browser-secret", origin: "https://viewer.example", sessionId: "session-2" },
     ];
     for (const request of invalid) {
-      await expect(relay.connect(request)).rejects.toMatchObject({
+      await expect(connectRelay(relay, request)).rejects.toMatchObject({
         name: "RelayDenied",
         code: "unauthorized",
         message: "connection is not authorized",
       });
     }
 
-    const connection = await relay.connect({
+    const connection = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
       connectionId: "connection-1",
     });
-    await expect(relay.connect({
+    await expect(connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
     })).rejects.toBeInstanceOf(RelayDenied);
     await connection.close();
     setNow(20_000);
-    await expect(relay.connect({
+    await expect(connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -133,7 +185,7 @@ describe("secure live relay", () => {
 
   it("generates exact subscribe-only edge plans under a distinct relay identity and never forwards browser frames", async () => {
     const { relay, edge } = fixture();
-    const connection = await relay.connect({
+    const connection = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -183,7 +235,7 @@ describe("secure live relay", () => {
 
   it("enforces replay across reconnect, exact allowlists, subscription quota, expiry, and request quota", async () => {
     const { relay, edge, setNow } = fixture();
-    const first = await relay.connect({
+    const first = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -195,7 +247,7 @@ describe("secure live relay", () => {
     expect(edge.requests).toHaveLength(0);
     await first.close();
 
-    const second = await relay.connect({
+    const second = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -220,7 +272,7 @@ describe("secure live relay", () => {
       maxDrainBytes: 1_000,
       edgePlanTtlMs: 500,
     } });
-    const connection = await requestLimited.relay.connect({
+    const connection = await connectRelay(requestLimited.relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -231,7 +283,7 @@ describe("secure live relay", () => {
     expect(requestLimited.edge.requests).toHaveLength(0);
 
     const subscriptionLimited = fixture();
-    const second = await subscriptionLimited.relay.connect({
+    const second = await connectRelay(subscriptionLimited.relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -246,7 +298,7 @@ describe("secure live relay", () => {
 
   it("keeps message queues bounded, drops oldest/over-rate/oversized data, and exposes only redacted telemetry", async () => {
     const { relay } = fixture();
-    const connection = await relay.connect({
+    const connection = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session-1",
@@ -255,14 +307,14 @@ describe("secure live relay", () => {
     expect(await connection.handle(JSON.stringify(subscribe(0, { maxRateHz: 4, maxMessageBytes: 300 })))).toMatchObject({ kind: "ack" });
 
     for (let sequence = 0; sequence < 6; sequence += 1) {
-      connection.pushFromEdge({
+      pushEdge(connection, {
         subscriptionId: "subscription-1",
         sourceSequence: sequence,
         timestampNanos: String(sequence),
         payload: new Uint8Array(200).fill(sequence),
       });
     }
-    expect(connection.pushFromEdge({
+    expect(pushEdge(connection, {
       subscriptionId: "subscription-1",
       sourceSequence: 7,
       timestampNanos: "7",

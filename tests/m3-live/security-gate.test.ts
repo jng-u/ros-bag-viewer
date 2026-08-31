@@ -54,6 +54,10 @@ function edgePlan(overrides: Record<string, unknown> = {}): EdgePlan {
   } as EdgePlan;
 }
 
+function connectRelay(relay: SecureLiveRelay, request: Record<string, string>) {
+  return relay.connect(JSON.stringify(request));
+}
+
 describe("M3 negative protocol and boundary proof", () => {
   it("rejects invalid Origin, browser credential, session binding, expiry, and connection quota with one public denial shape", async () => {
     let now = 10_000;
@@ -90,24 +94,24 @@ describe("M3 negative protocol and boundary proof", () => {
       { credential: "browser-secret", origin: "https://viewer.example", sessionId: "other" },
     ];
     for (const request of invalid) {
-      await expect(relay.connect(request)).rejects.toMatchObject({
+      await expect(connectRelay(relay, request)).rejects.toMatchObject({
         code: "unauthorized",
         message: "connection is not authorized",
       });
     }
-    const connection = await relay.connect({
+    const connection = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session",
     });
-    await expect(relay.connect({
+    await expect(connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session",
     })).rejects.toMatchObject({ code: "unauthorized" });
     await connection.close();
     now = 11_000;
-    await expect(relay.connect({
+    await expect(connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "session",
@@ -192,7 +196,7 @@ describe("M3 negative protocol and boundary proof", () => {
         maxRequestBytesPerWindow: 16_384,
       },
     });
-    const connection = await relay.connect({
+    const connection = await connectRelay(relay, {
       credential: "browser-secret",
       origin: "https://viewer.example",
       sessionId: "m3-session",

@@ -108,7 +108,7 @@ function capability(url: string): string {
 
 function sourceEnvelope(manifest: SignedHostedManifest): SignedManifestEnvelope {
   return Object.freeze({
-    payload: serializeHostedManifestPayload(manifest.payload),
+    payload: serializeHostedManifestPayload(JSON.stringify(manifest.payload)),
     signature: manifest.signature,
     keyId: manifest.keyId,
     algorithm: manifest.algorithm,
@@ -127,7 +127,7 @@ class CoreManifestVerifier implements HostedManifestVerifier {
   async verify(envelope: SignedManifestEnvelope, signal: AbortSignal): Promise<VerifiedHostedManifest> {
     if (signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
     if (
-      envelope.payload !== serializeHostedManifestPayload(this.#manifest.payload) ||
+      envelope.payload !== serializeHostedManifestPayload(JSON.stringify(this.#manifest.payload)) ||
       envelope.signature !== this.#manifest.signature ||
       envelope.keyId !== this.#manifest.keyId ||
       envelope.algorithm !== this.#manifest.algorithm
