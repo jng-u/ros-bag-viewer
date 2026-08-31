@@ -162,6 +162,19 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
     if (!filename.endsWith(".d.ts") && (ts.isExportAssignment(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier === undefined))) fail(`${filename} uses an unsupported runtime export`);
     ts.forEachChild(node, visit);
   };
+  // The module surface is declaration-only: no top-level execution beyond the exported builder declaration.
+  if (!filename.endsWith(".d.ts")) {
+    for (const statement of file.statements) {
+      if (ts.isExpressionStatement(statement) || ts.isIfStatement(statement) || ts.isForStatement(statement) || ts.isWhileStatement(statement) || ts.isTryStatement(statement)) fail(`${filename} has arbitrary top-level execution`);
+    }
+    const builderNames = new Set(["defineTrustedExtension", "defineTrustedLifecycle"]);
+    const checkMutation = (node) => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(node.left) && builderNames.has(node.left.text)) fail(`${filename} reassigns a trusted builder`);
+      if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.initializer) && builderNames.has(node.initializer.text)) fail(`${filename} aliases a trusted builder`);
+      ts.forEachChild(node, checkMutation);
+    };
+    checkMutation(file);
+  }
   visit(file);
   for (const entry of importedSymbols.values()) if (!entry.symbol) entry.symbol = checker.getSymbolsInScope(file, ts.SymbolFlags.Value).find((s) => s.name === entry.name);
   if (!filename.endsWith(".d.ts") && (!extensionApiImport || extensionDefinitionExports !== 1 || runtimeBuilderCalls.defineTrustedExtension !== 1 || runtimeBuilderCalls.defineTrustedLifecycle !== 1)) fail(`${filename} must contain exactly one exact imported extension/lifecycle builder path`);
