@@ -222,9 +222,9 @@ const semanticMatrix = [
   { name: "py-keyword", filename: "py-keyword.py", content: "load = __import__\nload(name=\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-nested-function", filename: "py-nested-function.py", content: "load = print\ndef f():\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-class-scope", filename: "py-class-scope.py", content: "load = print\nclass C:\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined, knownGap: true },
-  { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
-  { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined, knownGap: false },
+  { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
   { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
@@ -245,6 +245,10 @@ const semanticMatrix = [
   { name: "py-augmented-unrelated", filename: "py-augmented-unrelated.py", content: "load = __import__\nother += print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-destructured-position-safe", filename: "py-destructured-position-safe.py", content: "[load, other] = [print, __import__]\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
   { name: "py-delete-unrelated", filename: "py-delete-unrelated.py", content: "load = __import__\ndel other\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-comprehension-outer-iterable", filename: "py-comprehension-outer-iterable.py", content: "load = __import__\n[item for item in [load(\"pulumi_aws\")]]", expected: "infrastructure", knownGap: false },
+  { name: "py-global-unrelated-safe", filename: "py-global-unrelated-safe.py", content: "load = print\ndef f():\n  global other\n  other = __import__\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-nonlocal-unrelated-safe", filename: "py-nonlocal-unrelated-safe.py", content: "def outer():\n  load = print\n  other = print\n  def inner():\n    nonlocal other\n    other = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-class-local-non-leak", filename: "py-class-local-non-leak.py", content: "load = print\nclass C:\n  load = __import__\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
 ] as const;
 
 describe("structured repository stop policy", () => {

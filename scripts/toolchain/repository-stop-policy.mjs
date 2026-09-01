@@ -710,11 +710,22 @@ function pythonDeclaresInfrastructure(text) {
     const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*(.+)\s*\(\s*\1\s*\)$/u.exec(loader);
     return Boolean(lambda && isLoaderExpression(lambda[2]));
   };
+  const pythonBindingStateFacts = (source, name) => ({
+    constants: new Set(source.constants.get(name) ?? []), loader: source.loaderAliases.has(name),
+    importlib: source.importlibAliases.has(name), importModule: source.importModuleAliases.has(name),
+  });
   const clearPythonBinding = (name) => {
     state.constants.delete(name);
     state.loaderAliases.delete(name);
     state.importlibAliases.delete(name);
     state.importModuleAliases.delete(name);
+  };
+  const applyPythonBindingFacts = (name, facts) => {
+    clearPythonBinding(name);
+    if (facts.constants.size > 0) state.constants.set(name, new Set(facts.constants));
+    if (facts.loader) state.loaderAliases.add(name);
+    if (facts.importlib) state.importlibAliases.add(name);
+    if (facts.importModule) state.importModuleAliases.add(name);
   };
   const pythonBindingFacts = (expression) => {
     const normalized = normalizeLoaderExpression(expression);
@@ -724,11 +735,7 @@ function pythonDeclaresInfrastructure(text) {
     };
   };
   const assignPythonBinding = (name, expression, facts = pythonBindingFacts(expression)) => {
-    clearPythonBinding(name);
-    if (facts.constants.size > 0) state.constants.set(name, facts.constants);
-    if (facts.loader) state.loaderAliases.add(name);
-    if (facts.importlib) state.importlibAliases.add(name);
-    if (facts.importModule) state.importModuleAliases.add(name);
+    applyPythonBindingFacts(name, facts);
   };
   const pythonDestructuredParts = (expression) => {
     let normalized = stripPythonOuterParentheses(expression);
@@ -738,14 +745,56 @@ function pythonDeclaresInfrastructure(text) {
     const parts = pythonTopLevelParts(normalized).map((part) => part.trim());
     return parts.length > 1 && parts.every(Boolean) ? parts : undefined;
   };
+  const pythonExpressionDeclaresInfrastructure = (expression) => {
+    const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const loaderPatterns = [
+      ...[...state.loaderAliases, ...state.importModuleAliases,
+        ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)].map(escapePattern),
+      ...[...state.importlibAliases].map((alias) =>
+        `${escapePattern(alias)}\\s*\\.\\s*__dict__\\s*\\[\\s*["']import_module["']\\s*\\]`),
+    ];
+    const directBuiltin = /(?:builtins\.__dict__\s*\[\s*["']__import__["']\s*\]|getattr\s*\(\s*builtins\s*,\s*["']__import__["']\s*\))\s*\((.*)\)/u.exec(expression);
+    if (directBuiltin) {
+      const values = pythonStrings(directBuiltin[1].split(",", 1)[0], state.constants);
+      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    }
+    if (loaderPatterns.length === 0) return false;
+    const calls = new RegExp(`(?<![A-Za-z0-9_])(?:${loaderPatterns.join("|")})\\s*\\(`, "gu");
+    for (const match of expression.matchAll(calls)) {
+      const opening = match.index + match[0].lastIndexOf("(");
+      const closing = pythonDelimiterEnd(expression, opening);
+      if (closing === undefined) continue;
+      const rawArgs = expression.slice(opening + 1, closing);
+      const arguments_ = pythonTopLevelParts(rawArgs);
+      const first = arguments_[0] ?? "";
+      const starred = /^\s*\*\s*(?:\[\s*)?(.+?)(?:\s*\])?\s*$/u.exec(first);
+      const keyword = arguments_.map((argument) => /^\s*(?:name|module)\s*=\s*(.+)\s*$/u.exec(argument)).find(Boolean);
+      const values = pythonStrings(starred?.[1] ?? keyword?.[1] ?? first, state.constants);
+      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    }
+    return false;
+  };
   const lines = pythonLogicalStatements(text);
   const contexts = [];
   const closeContext = () => {
     const context = contexts.pop();
     if (context.type === "function") {
+      for (const name of context.globalBindings) context.globalEffects.set(name, pythonBindingStateFacts(state, name));
+      for (const name of context.nonlocalBindings) context.nonlocalEffects.set(name, pythonBindingStateFacts(state, name));
       state = context.before;
+      const outerFunction = [...contexts].reverse().find(({ type }) => type === "function");
+      for (const [name, facts] of context.nonlocalEffects) {
+        applyPythonBindingFacts(name, facts);
+        if (outerFunction?.nonlocalBindings.has(name)) outerFunction.nonlocalEffects.set(name, facts);
+        else if (outerFunction?.globalBindings.has(name)) outerFunction.globalEffects.set(name, facts);
+      }
+      for (const [name, facts] of context.globalEffects) {
+        if (outerFunction) outerFunction.globalEffects.set(name, facts);
+        else applyPythonBindingFacts(name, facts);
+      }
       if (context.wrapper) state.loaderAliases.add(context.name);
-    } else {
+    } else if (context.type === "class") state = context.before;
+    else {
       context.branches.push(copyState(state));
       if (!context.hasElse) context.branches.push(context.before);
       state = mergeStates(...context.branches);
@@ -774,10 +823,30 @@ function pythonDeclaresInfrastructure(text) {
     if (definition) {
       const parameters = definition[2].split(",").map((parameter) => /^\s*\*{0,2}([A-Za-z_]\w*)/u.exec(parameter)?.[1]).filter(Boolean);
       const localBindings = new Set(parameters);
+      const globalBindings = new Set();
+      const nonlocalBindings = new Set();
+      let nestedScopeIndentation;
       for (let bodyIndex = lineIndex + 1; bodyIndex < lines.length; bodyIndex += 1) {
         const bodyLine = lines[bodyIndex];
         const bodyIndentation = /^\s*/u.exec(bodyLine)[0].length;
         if (bodyLine.trim() && bodyIndentation <= indentation) break;
+        if (!bodyLine.trim()) continue;
+        if (nestedScopeIndentation !== undefined && bodyIndentation > nestedScopeIndentation) continue;
+        nestedScopeIndentation = undefined;
+        const nestedScope = /^\s*(?:(?:async\s+)?def|class)\s+([A-Za-z_]\w*)/u.exec(bodyLine);
+        if (nestedScope) {
+          localBindings.add(nestedScope[1]);
+          nestedScopeIndentation = bodyIndentation;
+          continue;
+        }
+        const directive = /^\s*(global|nonlocal)\s+(.+?)\s*$/u.exec(bodyLine);
+        if (directive) {
+          const target = directive[1] === "global" ? globalBindings : nonlocalBindings;
+          for (const binding of pythonTopLevelParts(directive[2])) {
+            if (/^[A-Za-z_]\w*$/u.test(binding.trim())) target.add(binding.trim());
+          }
+          continue;
+        }
         const assignmentBinding = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?(?:=|(?:\*\*|\/\/|<<|>>|[+\-*/%@&|^])=)/u.exec(bodyLine);
         if (assignmentBinding) localBindings.add(assignmentBinding[1]);
         const destructuredBinding = /^\s*(.+?)\s*=/u.exec(bodyLine);
@@ -793,9 +862,19 @@ function pythonDeclaresInfrastructure(text) {
         const fromBinding = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(bodyLine);
         if (fromBinding) localBindings.add(fromBinding[1] ?? "import_module");
       }
-      contexts.push({ type: "function", indentation, before: copyState(state), name: definition[1], parameter: parameters[0], wrapper: false, localBindings });
+      for (const binding of [...globalBindings, ...nonlocalBindings]) localBindings.delete(binding);
+      contexts.push({
+        type: "function", indentation, before: copyState(state), name: definition[1], parameter: parameters[0], wrapper: false,
+        localBindings, globalBindings, nonlocalBindings, globalEffects: new Map(), nonlocalEffects: new Map(),
+      });
       state = copyState(state);
       for (const binding of localBindings) clearPythonBinding(binding);
+      continue;
+    }
+    const classDefinition = /^\s*class\s+[A-Za-z_]\w*(?:\s*\([^)]*\))?\s*:\s*(?:#.*)?$/u.exec(line);
+    if (classDefinition) {
+      contexts.push({ type: "class", indentation, before: copyState(state) });
+      state = copyState(state);
       continue;
     }
     const importlib = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/u.exec(line);
@@ -829,35 +908,20 @@ function pythonDeclaresInfrastructure(text) {
     const returned = /^\s*return\s+(.+?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
     const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");
     if (returned && activeFunction && returned[2] === activeFunction.parameter && isLoaderExpression(returned[1])) activeFunction.wrapper = true;
-    const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-    const loaderPatterns = [
-      ...[...state.loaderAliases, ...state.importModuleAliases,
-        ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)].map(escapePattern),
-      ...[...state.importlibAliases].map((alias) =>
-        `${escapePattern(alias)}\\s*\\.\\s*__dict__\\s*\\[\\s*["']import_module["']\\s*\\]`),
-    ];
-    const directBuiltin = /(?:builtins\.__dict__\s*\[\s*["']__import__["']\s*\]|getattr\s*\(\s*builtins\s*,\s*["']__import__["']\s*\))\s*\((.*)\)/u.exec(line);
-    if (directBuiltin) {
-      const values = pythonStrings(directBuiltin[1].split(",", 1)[0], state.constants);
-      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    const comprehension = /^\s*\[\s*(.+?)\s+for\s+(.+?)\s+in\s+(.+)\]\s*$/u.exec(line);
+    if (comprehension) {
+      if (pythonExpressionDeclaresInfrastructure(comprehension[3])) return true;
+      const beforeComprehension = state;
+      state = copyState(state);
+      const targets = /^[A-Za-z_]\w*$/u.test(comprehension[2].trim()) ? [comprehension[2].trim()] :
+        pythonDestructuredParts(comprehension[2]) ?? [];
+      for (const target of targets) clearPythonBinding(target);
+      const found = pythonExpressionDeclaresInfrastructure(comprehension[1]);
+      state = beforeComprehension;
+      if (found) return true;
+      continue;
     }
-    if (loaderPatterns.length > 0) {
-      const calls = new RegExp(`(?<![A-Za-z0-9_])(?:${loaderPatterns.join("|")})\\s*\\(`, "gu");
-      for (const match of line.matchAll(calls)) {
-        const opening = match.index + match[0].lastIndexOf("(");
-        const closing = pythonDelimiterEnd(line, opening);
-        if (closing === undefined) continue;
-        const rawArgs = line.slice(opening + 1, closing);
-        // Accept structurally equivalent starred/keyword module arguments while
-        // remaining bounded and conservative (only literal/constant strings).
-        const arguments_ = pythonTopLevelParts(rawArgs);
-        const first = arguments_[0] ?? "";
-        const starred = /^\s*\*\s*(?:\[\s*)?(.+?)(?:\s*\])?\s*$/u.exec(first);
-        const keyword = arguments_.map((argument) => /^\s*(?:name|module)\s*=\s*(.+)\s*$/u.exec(argument)).find(Boolean);
-        const values = pythonStrings(starred?.[1] ?? keyword?.[1] ?? first, state.constants);
-        if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
-      }
-    }
+    if (pythonExpressionDeclaresInfrastructure(line)) return true;
   }
   while (contexts.length > 0) closeContext();
   return false;
