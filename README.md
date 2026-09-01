@@ -8,13 +8,13 @@
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. Select **MCAP**, **ROS1 BAG**, or **ROS2 BAG** next to **LOAD DEMO** for an immediate PointCloud2/Path sample. Real recordings can be opened as follows:
+Open <http://localhost:8080>. Select **MCAP**, **ROS1 BAG**, or **ROS2 BAG** next to **LOAD DEMO** for immediate PointCloud2, Image, Path, and Raw-inspector samples. Real recordings can be opened as follows:
 
 - MCAP: drop or select one `.mcap` file.
 - ROS1: drop or select one `.bag` file. Uncompressed, BZip2, and LZ4 chunk decoders are wired.
 - ROS2: drop a rosbag2 folder, use **OPEN ROS2 DIR**, or select/drop `metadata.yaml` together with every referenced `.db3` part. A standalone `.db3` is also accepted with synthesized local metadata.
 
-The first compatible PointCloud2 display is created automatically. Topic discovery, PointCloud2/Path rendering, raw inspection, timeline seeking, source epochs, bounded WebGL2 rendering, and GPU telemetry run in the browser; local recording bytes are not uploaded to the Caddy container.
+The first compatible PointCloud2 display is created automatically. Topic discovery, PointCloud2/Path rendering, raw and compressed Image display, bounded hex/ASCII Raw inspection, timeline seeking, source epochs, bounded WebGL2 rendering, and GPU telemetry run in the browser; local recording bytes are not uploaded to the Caddy container. ROS2 CDR transport alignment bytes are accepted only at the valid final 4-byte boundary rather than being interpreted as message fields.
 
 Use another host port when 8080 is occupied:
 

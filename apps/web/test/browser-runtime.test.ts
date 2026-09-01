@@ -40,9 +40,13 @@ describe("browser recording entry", () => {
     const opened = await runtime.open({ format: "ros1-bag", name: "demo-ros1.bag", sizeBytes: blob.size, immutableVersion: "ros1-test", blob });
     const sample = await runtime.sample("/demo/points", 0n);
     const decoded = decodeSemanticMessage({ channel: sample.channel, data: sample.data });
-    expect(opened.topics.map(({ name }) => name)).toEqual(["/demo/points", "/demo/path"]);
+    const imageSample = await runtime.sample("/demo/image", 0n);
+    const image = decodeSemanticMessage({ channel: imageSample.channel, data: imageSample.data });
+    expect(opened.topics.map(({ name }) => name)).toEqual(["/demo/points", "/demo/path", "/demo/image"]);
     expect(decoded.kind).toBe("pointcloud2");
     if (decoded.kind === "pointcloud2") expect(decoded.message.width * decoded.message.height).toBe(720);
+    expect(image.kind).toBe("image");
+    if (image.kind === "image") expect([image.message.width, image.message.height, image.message.encoding]).toEqual([96, 64, "rgb8"]);
   });
 
   it("opens and samples the deterministic ROS2 SQLite PointCloud2 bag through WASM", async () => {
@@ -62,8 +66,12 @@ describe("browser recording entry", () => {
     });
     const sample = await runtime.sample("/demo/points", 0n);
     const decoded = decodeSemanticMessage({ channel: sample.channel, data: sample.data });
-    expect(opened.topics.map(({ name }) => name)).toEqual(["/demo/path", "/demo/points"]);
+    const imageSample = await runtime.sample("/demo/image", 0n);
+    const image = decodeSemanticMessage({ channel: imageSample.channel, data: imageSample.data });
+    expect(opened.topics.map(({ name }) => name)).toEqual(["/demo/image", "/demo/path", "/demo/points"]);
     expect(decoded.kind).toBe("pointcloud2");
     if (decoded.kind === "pointcloud2") expect(decoded.message.width * decoded.message.height).toBe(720);
+    expect(image.kind).toBe("image");
+    if (image.kind === "image") expect([image.message.width, image.message.height, image.message.encoding]).toEqual([96, 64, "rgb8"]);
   });
 });

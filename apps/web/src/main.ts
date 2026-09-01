@@ -1,8 +1,10 @@
-import { PathDisplay, PointCloud2Display, type SemanticSceneSummary } from "@ros-web-viewer/displays-core";
+import { ImageDisplay, PathDisplay, PointCloud2Display, type SemanticSceneSummary } from "@ros-web-viewer/displays-core";
 import { decodeSemanticMessage } from "@ros-web-viewer/m1-integration";
 import { WebGl2Renderer } from "@ros-web-viewer/render-core";
 
 import { BrowserRecordingRuntime, detectBrowserSourceFormat, localFileVersion } from "./browser-runtime.js";
+import { rawImageToRgba } from "./image-raster.js";
+import { formatRawPreview } from "./raw-preview.js";
 import { DesktopShellController, type DisplayKind, type TopicSummary } from "./shell.js";
 import "./style.css";
 
@@ -58,6 +60,7 @@ app.innerHTML = `
       </div>
       <div class="canvas-wrap" id="drop-zone">
         <canvas id="scene-canvas" aria-label="ROS scene visualization"></canvas>
+        <canvas id="image-canvas" aria-label="ROS image visualization" hidden></canvas>
         <div class="axis-glyph" aria-hidden="true"><i class="axis-x">X</i><i class="axis-y">Y</i><i class="axis-z">Z</i></div>
         <div class="drop-prompt" id="drop-prompt">
           <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 10v29m0-29L21 21m11-11 11 11"/><path d="M13 38v11c0 3 2 5 5 5h28c3 0 5-2 5-5V38"/></svg>
@@ -114,6 +117,8 @@ const directoryInput = byId<HTMLInputElement>("directory-input");
 const dropZone = byId<HTMLElement>("drop-zone");
 const dropPrompt = byId<HTMLElement>("drop-prompt");
 const canvas = byId<HTMLCanvasElement>("scene-canvas");
+const imageCanvas = byId<HTMLCanvasElement>("image-canvas");
+const axisGlyph = document.querySelector<HTMLElement>(".axis-glyph")!;
 const topicList = byId<HTMLElement>("topic-list");
 const inspector = byId<HTMLElement>("inspector-content");
 const timeline = byId<HTMLInputElement>("timeline-input");
@@ -165,6 +170,70 @@ function resizeCanvas(): WebGL2RenderingContext {
   gl.clearColor(0.015, 0.035, 0.043, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   return gl;
+}
+
+function showRasterSurface(enabled: boolean): void {
+  canvas.hidden = enabled;
+  imageCanvas.hidden = !enabled;
+  axisGlyph.hidden = enabled;
+}
+
+function rasterCanvasContext(): CanvasRenderingContext2D {
+  showRasterSurface(true);
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(dropZone.clientWidth * scale));
+  const height = Math.max(1, Math.floor(dropZone.clientHeight * scale));
+  if (imageCanvas.width !== width || imageCanvas.height !== height) {
+    imageCanvas.width = width;
+    imageCanvas.height = height;
+  }
+  const context = imageCanvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("Canvas2D is unavailable for image rendering.");
+  context.fillStyle = "#020607";
+  context.fillRect(0, 0, width, height);
+  return context;
+}
+
+function drawRasterSource(source: CanvasImageSource, width: number, height: number, smoothing: boolean): void {
+  const context = rasterCanvasContext();
+  const scale = Math.min(imageCanvas.width / width, imageCanvas.height / height);
+  const targetWidth = Math.max(1, Math.floor(width * scale));
+  const targetHeight = Math.max(1, Math.floor(height * scale));
+  const x = Math.floor((imageCanvas.width - targetWidth) / 2);
+  const y = Math.floor((imageCanvas.height - targetHeight) / 2);
+  context.imageSmoothingEnabled = smoothing;
+  context.drawImage(source, x, y, targetWidth, targetHeight);
+}
+
+function compressedImageMime(format: string): string {
+  const match = format.toLocaleLowerCase().match(/(?:^|[;\s])(jpe?g|png|webp)(?:\s|$)/u);
+  const codec = match?.[1];
+  if (codec === "jpg" || codec === "jpeg") return "image/jpeg";
+  if (codec === "png") return "image/png";
+  if (codec === "webp") return "image/webp";
+  throw new Error(`unsupported compressed image codec: ${format}`);
+}
+
+async function drawDecodedImage(decoded: Extract<ReturnType<typeof decodeSemanticMessage>, { kind: "image" | "compressed-image" }>): Promise<{ width: number; height: number }> {
+  if (decoded.kind === "image") {
+    const source = document.createElement("canvas");
+    source.width = decoded.message.width;
+    source.height = decoded.message.height;
+    const context = source.getContext("2d");
+    if (!context) throw new Error("Canvas2D is unavailable for raw image conversion.");
+    context.putImageData(new ImageData(new Uint8ClampedArray(rawImageToRgba(decoded.message)), decoded.message.width, decoded.message.height), 0, 0);
+    drawRasterSource(source, decoded.message.width, decoded.message.height, false);
+    return { width: decoded.message.width, height: decoded.message.height };
+  }
+  const bitmap = await createImageBitmap(new Blob([new Uint8Array(decoded.message.data)], { type: compressedImageMime(decoded.message.format) }));
+  try {
+    const pixels = bitmap.width * bitmap.height;
+    if (!Number.isSafeInteger(pixels) || pixels > 16_000_000) throw new Error("Compressed image pixel budget exceeded");
+    drawRasterSource(bitmap, bitmap.width, bitmap.height, true);
+    return { width: bitmap.width, height: bitmap.height };
+  } finally {
+    bitmap.close();
+  }
 }
 
 function projectionFor(summary: SemanticSceneSummary): Float32Array {
@@ -236,15 +305,35 @@ async function renderActiveTopic(): Promise<void> {
     if (activeKind === "raw" || activeKind === "raw-inspector") {
       activeDisplay?.dispose();
       activeDisplay = undefined;
+      showRasterSurface(false);
       resizeCanvas();
-      inspector.innerHTML = `<dl class="detail-list"><div><dt>TOPIC</dt><dd>${escapeHtml(activeTopic.name)}</dd></div><div><dt>SCHEMA</dt><dd>${escapeHtml(message.channel.schema.name)}</dd></div><div><dt>ENCODING</dt><dd>${escapeHtml(message.channel.messageEncoding)}</dd></div><div><dt>PAYLOAD</dt><dd>${formatBytes(message.data.byteLength)}</dd></div><div><dt>LOG TIME</dt><dd>${message.logTimeNanos.toString()} ns</dd></div></dl>`;
-      canvasMessage.textContent = "Raw inspector selected. Choose PointCloud or Path for geometry.";
+      const preview = formatRawPreview(message.data);
+      inspector.innerHTML = `<dl class="detail-list"><div><dt>TOPIC</dt><dd>${escapeHtml(activeTopic.name)}</dd></div><div><dt>SCHEMA</dt><dd>${escapeHtml(message.channel.schema.name)}</dd></div><div><dt>ENCODING</dt><dd>${escapeHtml(message.channel.messageEncoding)}</dd></div><div><dt>PAYLOAD</dt><dd>${formatBytes(message.data.byteLength)}</dd></div><div><dt>LOG TIME</dt><dd>${message.logTimeNanos.toString()} ns</dd></div></dl><h3 class="raw-heading">BYTE PREVIEW · ${preview.shownBytes.toLocaleString()} B</h3><pre class="raw-preview">${escapeHtml(preview.text)}</pre>${preview.truncatedBytes > 0 ? `<p class="raw-truncated">${preview.truncatedBytes.toLocaleString()} additional bytes omitted by the bounded preview.</p>` : ""}`;
+      canvasMessage.textContent = `${preview.shownBytes.toLocaleString()} raw bytes shown in the inspector${preview.truncatedBytes > 0 ? `; ${preview.truncatedBytes.toLocaleString()} omitted` : ""}.`;
       return;
     }
     const decoded = decodeSemanticMessage({
       channel: { schema: message.channel.schema, messageEncoding: message.channel.messageEncoding },
       data: message.data,
     });
+    if ((decoded.kind === "image" || decoded.kind === "compressed-image") && activeKind === "image") {
+      activeDisplay?.dispose();
+      const display = new ImageDisplay("active-image");
+      display.configure({ maxInputBytes: 32 * 1024 * 1024, maxPixels: 16_000_000 });
+      display.attachSource(controller.state.epoch);
+      const summary = display.update(decoded.message, controller.state.epoch);
+      const dimensions = await drawDecodedImage(decoded);
+      display.render();
+      activeDisplay = display;
+      byId("view-stats").innerHTML = `<span>CANVAS2D</span><span>${dimensions.width.toLocaleString()} × ${dimensions.height.toLocaleString()}</span><span>${formatBytes(message.data.byteLength)}</span>`;
+      const gpuMeter = byId<HTMLMeterElement>("gpu-meter");
+      gpuMeter.value = 0;
+      byId("gpu-output").textContent = "RASTER";
+      showInspector(summary, activeTopic);
+      canvasMessage.textContent = `${dimensions.width.toLocaleString()} × ${dimensions.height.toLocaleString()} image rendered from ${summary.frameId || "unframed data"}.`;
+      return;
+    }
+    showRasterSurface(false);
     const gl = resizeCanvas();
     renderer ??= new WebGl2Renderer(canvas, {
       maxGpuBytes: 64 * 1024 * 1024,
@@ -508,12 +597,12 @@ playButton.addEventListener("click", () => playing ? stopPlayback() : startPlayb
 
 new ResizeObserver(() => {
   try {
-    resizeCanvas();
+    if (imageCanvas.hidden) resizeCanvas();
     if (activeTopic) void renderActiveTopic();
   } catch (error) {
     canvasMessage.textContent = error instanceof Error ? error.message : String(error);
   }
-}).observe(canvas);
+}).observe(dropZone);
 
 renderState();
 resizeCanvas();

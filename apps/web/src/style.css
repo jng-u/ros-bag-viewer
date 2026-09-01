@@ -80,7 +80,9 @@ button:focus-visible, input:focus-visible, label:has(input:focus-visible) { outl
 .view-stats { display: flex; gap: 13px; color: var(--faint); font: 600 8px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
 .canvas-wrap { position: relative; min-height: 0; overflow: hidden; background-color: #040b0e; background-image: linear-gradient(rgba(67, 112, 110, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 112, 110, .08) 1px, transparent 1px); background-size: 28px 28px; }
 .canvas-wrap::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, rgba(5, 12, 15, .08), rgba(5, 12, 15, .34)); }
-#scene-canvas { display: block; width: 100%; height: 100%; }
+#scene-canvas, #image-canvas { display: block; width: 100%; height: 100%; }
+#image-canvas { position: absolute; inset: 0; z-index: 1; background: #020607; }
+#scene-canvas[hidden], #image-canvas[hidden], .axis-glyph[hidden] { display: none; }
 .drop-prompt { position: absolute; z-index: 2; inset: 20px; display: grid; place-items: center; align-content: center; border: 1px dashed #294542; color: var(--muted); background: rgba(4, 11, 14, .72); transition: border-color 160ms ease-out, background 160ms ease-out; }
 .drop-prompt[hidden] { display: none; }
 .is-dragging .drop-prompt { border-color: var(--cyan); background: rgba(8, 42, 39, .76); }
@@ -102,6 +104,9 @@ button:focus-visible, input:focus-visible, label:has(input:focus-visible) { outl
 .detail-list div { display: grid; gap: 5px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .detail-list dt { color: var(--faint); font: 600 8px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; }
 .detail-list dd { overflow-wrap: anywhere; margin: 0; color: var(--ink); font: 500 10px/1.5 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+.raw-heading { margin: 20px 0 9px; color: var(--faint); font: 650 8px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; }
+.raw-preview { overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); background: #040a0d; color: #b8cfcb; font: 500 9px/1.55 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+.raw-truncated { color: var(--amber); font: 500 9px/1.5 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
 .resource-strip { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 13px 16px; border-top: 1px solid var(--line); color: var(--faint); font: 600 8px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
 .resource-strip meter { width: 100%; height: 3px; border: 0; background: var(--line); }
 .resource-strip meter::-webkit-meter-bar { border: 0; background: var(--line); }

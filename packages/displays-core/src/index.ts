@@ -854,7 +854,7 @@ export class ImageDisplay extends SummaryDisplay<RawImageMessage | CompressedIma
   protected summarize(message: RawImageMessage | CompressedImageMessage, config: ImageDisplayConfig): SemanticSceneSummary {
     if (message.data.byteLength > config.maxInputBytes) throw new Error("Image input byte budget exceeded");
     if ("format" in message) {
-      const codec = message.format.trim().toLowerCase().split(/[; ]/, 1)[0] ?? "";
+      const codec = message.format.trim().toLowerCase().match(/(?:^|[;\s])(jpe?g|png|webp)(?:\s|$)/u)?.[1] ?? "";
       const supported = (config.supportedCompressedCodecs ?? ["jpeg", "jpg", "png", "webp"]).map((value) => value.toLowerCase());
       if (!supported.includes(codec)) throw new Error(`unsupported compressed image codec: ${message.format}`);
       return {

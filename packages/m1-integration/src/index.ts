@@ -26,6 +26,8 @@ export const DEFAULT_SEMANTIC_DECODE_LIMITS: SemanticDecodeLimits = {
   maxPathPoses: 100_000,
 };
 
+const MAX_IMAGE_PIXELS = 16_000_000;
+
 export interface SemanticMcapMessage {
   readonly channel: {
     readonly schema: { readonly name: string; readonly capability: "schema-present" | "opaque" };
@@ -56,7 +58,29 @@ export interface DecodedPath {
   };
 }
 
-export type DecodedSemanticMessage = DecodedPointCloud2 | DecodedPath;
+export interface DecodedImage {
+  readonly kind: "image";
+  readonly message: {
+    readonly frameId: string;
+    readonly width: number;
+    readonly height: number;
+    readonly encoding: string;
+    readonly step: number;
+    readonly isBigEndian: boolean;
+    readonly data: Uint8Array;
+  };
+}
+
+export interface DecodedCompressedImage {
+  readonly kind: "compressed-image";
+  readonly message: {
+    readonly frameId: string;
+    readonly format: string;
+    readonly data: Uint8Array;
+  };
+}
+
+export type DecodedSemanticMessage = DecodedPointCloud2 | DecodedPath | DecodedImage | DecodedCompressedImage;
 
 export type SemanticDisplayPort =
   | {
@@ -177,7 +201,12 @@ class CdrReader {
   }
 
   ensureConsumed(): void {
-    if (this.#offset !== this.#bytes.byteLength) throw new Error("CDR message has unexpected trailing bytes");
+    const remaining = this.#bytes.byteLength - this.#offset;
+    const relative = this.#offset - this.#origin;
+    const transportAlignment = (4 - (relative % 4)) % 4;
+    if (remaining !== 0 && remaining !== transportAlignment) {
+      throw new Error("CDR message has unexpected trailing bytes");
+    }
   }
 
   #align(alignment: number): void {
@@ -269,11 +298,14 @@ function normalizedSchemaName(name: string): string {
 export function availableDisplaysForSchema(
   schemaName: string,
   capability: "schema-present" | "opaque" = "schema-present",
-): readonly ("point-cloud" | "path" | "raw")[] {
+): readonly ("image" | "point-cloud" | "path" | "raw")[] {
   if (capability === "opaque") return [];
   switch (normalizedSchemaName(schemaName)) {
     case "sensor_msgs/PointCloud2":
       return ["point-cloud", "raw"];
+    case "sensor_msgs/Image":
+    case "sensor_msgs/CompressedImage":
+      return ["image", "raw"];
     case "nav_msgs/Path":
       return ["path", "raw"];
     default:
@@ -336,6 +368,27 @@ export function decodeSemanticMessage(
     reader.ensureConsumed();
     return { kind: "path", message: { frameId: header.frameId, poses } };
   }
+  if (schema === "sensor_msgs/Image") {
+    const header = reader.header();
+    const height = reader.uint32();
+    const width = reader.uint32();
+    const pixelCount = height * width;
+    if (!Number.isSafeInteger(pixelCount) || pixelCount > MAX_IMAGE_PIXELS) throw new Error("Image pixel count exceeds limits");
+    const encoding = reader.string();
+    const isBigEndian = reader.uint8() !== 0;
+    const step = reader.uint32();
+    const data = reader.byteSequence(limits.maxMessageBytes);
+    reader.ensureConsumed();
+    if (!Number.isSafeInteger(step * height) || step * height > data.byteLength) throw new Error("Image dimensions exceed its bounded data sequence");
+    return { kind: "image", message: { frameId: header.frameId, width, height, encoding, step, isBigEndian, data } };
+  }
+  if (schema === "sensor_msgs/CompressedImage") {
+    const header = reader.header();
+    const format = reader.string();
+    const data = reader.byteSequence(limits.maxMessageBytes);
+    reader.ensureConsumed();
+    return { kind: "compressed-image", message: { frameId: header.frameId, format, data } };
+  }
   throw new Error(`no native semantic decoder for ${input.channel.schema.name}`);
 }
 
@@ -353,9 +406,11 @@ export function decodeRenderAndRelease(
     if (decoded.kind === "pointcloud2") {
       if (display.kind !== "pointcloud2") throw new Error("decoded pointcloud2 cannot update path display");
       summary = display.update(decoded.message, epoch);
-    } else {
+    } else if (decoded.kind === "path") {
       if (display.kind !== "path") throw new Error("decoded path cannot update pointcloud2 display");
       summary = display.update(decoded.message, epoch);
+    } else {
+      throw new Error("image messages require a raster display port");
     }
     display.render();
     return summary;
@@ -377,7 +432,7 @@ export interface LocalMcapTopicSummary {
   readonly typeName: string;
   readonly compatibility: "native-display" | "schema-backed-generic" | "opaque-inspectable";
   readonly schemaCapability: "schema-present" | "opaque";
-  readonly availableDisplays: readonly ("point-cloud" | "path" | "raw")[];
+  readonly availableDisplays: readonly ("image" | "point-cloud" | "path" | "raw")[];
 }
 
 export interface LocalMcapOpenResult {

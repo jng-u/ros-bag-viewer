@@ -30,6 +30,7 @@ The application runs from a Docker image and is opened in a desktop browser. Loc
 
 - WebGL2 is the required rendering baseline.
 - Local MCAP, ROS 1 bag, and ROS 2 SQLite bag bundles are browser-runnable recorded-source lanes. ROS 2 folders are selected as a directory or as `metadata.yaml` plus all referenced `.db3` parts.
+- PointCloud2 and Path use bounded geometry displays; raw and compressed Image messages use a bounded Canvas2D raster display; every topic exposes a bounded hexadecimal/ASCII Raw inspector.
 - The product is read-only. ROS publish, service, action, parameter mutation, and arbitrary bridge operations are excluded.
 - Resource limits, source epochs, payload ownership, TF/time diagnostics, and error recovery remain explicit.
 - Public product naming, public hosting, licensing, credentials, and production certification remain undecided.
