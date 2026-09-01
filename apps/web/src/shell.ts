@@ -37,6 +37,13 @@ export interface LocalMcapSelection {
   readonly sizeBytes: number;
   readonly immutableVersion: string;
   readonly blob?: Blob;
+  readonly files?: readonly {
+    readonly name: string;
+    readonly relativePath: string;
+    readonly sizeBytes: number;
+    readonly immutableVersion: string;
+    readonly blob: Blob;
+  }[];
 }
 
 export interface TopicSummary {

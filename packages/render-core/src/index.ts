@@ -95,7 +95,7 @@ in vec3 aPosition;
 uniform mat4 uViewProjection;
 void main() {
   gl_Position = uViewProjection * vec4(aPosition, 1.0);
-  gl_PointSize = 2.0;
+  gl_PointSize = 4.0;
 }`;
 
 const FRAGMENT_SHADER_SOURCE = `#version 300 es

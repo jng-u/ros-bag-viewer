@@ -10,3 +10,5 @@ sbom.cdx.json
 artifacts/
 .impeccable/
 apps/web/public/demo.mcap
+apps/web/public/demo-ros1.bag
+apps/web/public/demo-ros2/

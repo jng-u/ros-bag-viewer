@@ -23,9 +23,16 @@ app.innerHTML = `
       <div class="topbar-actions">
         <button class="quiet-button" id="live-button" type="button" aria-describedby="live-note">LIVE RELAY</button>
         <span class="sr-only" id="live-note">Requires a separately configured authenticated relay.</span>
+        <select class="demo-select" id="demo-kind" aria-label="Demo recording format">
+          <option value="mcap">MCAP</option>
+          <option value="ros1">ROS1 BAG</option>
+          <option value="ros2">ROS2 BAG</option>
+        </select>
         <button class="quiet-button" id="demo-button" type="button">LOAD DEMO</button>
+        <label class="quiet-button" for="directory-input">OPEN ROS2 DIR</label>
         <label class="open-button" for="recording-input">OPEN RECORDING</label>
-        <input id="recording-input" type="file" accept=".mcap,.bag,.db3,.yaml,.yml" />
+        <input id="recording-input" type="file" accept=".mcap,.bag,.db3,.yaml,.yml" multiple />
+        <input id="directory-input" type="file" webkitdirectory multiple />
       </div>
     </header>
 
@@ -40,7 +47,7 @@ app.innerHTML = `
         <input id="topic-filter" type="search" placeholder="Filter topics or types" autocomplete="off" />
       </label>
       <div class="topic-list" id="topic-list">
-        <div class="empty-list"><span>—</span><p>Drop an MCAP recording<br/>to discover topics.</p></div>
+        <div class="empty-list"><span>—</span><p>Drop MCAP, ROS1 bag,<br/>or a ROS2 bag folder.</p></div>
       </div>
     </aside>
 
@@ -55,7 +62,7 @@ app.innerHTML = `
         <div class="drop-prompt" id="drop-prompt">
           <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 10v29m0-29L21 21m11-11 11 11"/><path d="M13 38v11c0 3 2 5 5 5h28c3 0 5-2 5-5V38"/></svg>
           <strong>DROP ROS RECORDING</strong>
-          <span>MCAP runs directly in this browser build</span>
+          <span>MCAP · ROS1 .bag · ROS2 metadata.yaml + .db3</span>
           <button id="drop-open-button" type="button">SELECT FILE</button>
         </div>
         <div class="canvas-message" id="canvas-message" role="status" aria-live="polite"></div>
@@ -103,6 +110,7 @@ const byId = <T extends HTMLElement>(id: string): T => {
 
 const shell = document.querySelector<HTMLElement>(".viewer-shell")!;
 const input = byId<HTMLInputElement>("recording-input");
+const directoryInput = byId<HTMLInputElement>("directory-input");
 const dropZone = byId<HTMLElement>("drop-zone");
 const dropPrompt = byId<HTMLElement>("drop-prompt");
 const canvas = byId<HTMLCanvasElement>("scene-canvas");
@@ -233,7 +241,10 @@ async function renderActiveTopic(): Promise<void> {
       canvasMessage.textContent = "Raw inspector selected. Choose PointCloud or Path for geometry.";
       return;
     }
-    const decoded = decodeSemanticMessage({ channel: { schema: message.channel.schema }, data: message.data });
+    const decoded = decodeSemanticMessage({
+      channel: { schema: message.channel.schema, messageEncoding: message.channel.messageEncoding },
+      data: message.data,
+    });
     const gl = resizeCanvas();
     renderer ??= new WebGl2Renderer(canvas, {
       maxGpuBytes: 64 * 1024 * 1024,
@@ -279,7 +290,47 @@ async function renderActiveTopic(): Promise<void> {
   }
 }
 
-async function openFile(file: File, autoSelectDisplay = false): Promise<void> {
+interface SelectedBrowserFile {
+  readonly file: File;
+  readonly relativePath: string;
+}
+
+function selectedFiles(files: FileList): SelectedBrowserFile[] {
+  return Array.from(files, (file) => ({ file, relativePath: file.webkitRelativePath || file.name }));
+}
+
+function fileFromEntry(entry: FileSystemFileEntry): Promise<SelectedBrowserFile> {
+  return new Promise((resolve, reject) => entry.file(
+    (file) => resolve({ file, relativePath: entry.fullPath.replace(/^\//u, "") || file.name }),
+    reject,
+  ));
+}
+
+async function directoryEntries(directory: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> {
+  const reader = directory.createReader();
+  const output: FileSystemEntry[] = [];
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+    if (batch.length === 0) return output;
+    output.push(...batch);
+  }
+}
+
+async function filesFromEntry(entry: FileSystemEntry): Promise<SelectedBrowserFile[]> {
+  if (entry.isFile) return [await fileFromEntry(entry as FileSystemFileEntry)];
+  if (!entry.isDirectory) return [];
+  const nested = await directoryEntries(entry as FileSystemDirectoryEntry);
+  return (await Promise.all(nested.map(filesFromEntry))).flat();
+}
+
+async function droppedFiles(transfer: DataTransfer): Promise<SelectedBrowserFile[]> {
+  const entries = Array.from(transfer.items, (item) => item.webkitGetAsEntry()).filter((entry): entry is FileSystemEntry => entry !== null);
+  if (entries.length === 0) return selectedFiles(transfer.files);
+  return (await Promise.all(entries.map(filesFromEntry))).flat();
+}
+
+async function openFiles(entries: readonly SelectedBrowserFile[]): Promise<void> {
+  if (entries.length === 0) return;
   stopPlayback();
   activeTopic = undefined;
   activeKind = undefined;
@@ -287,26 +338,38 @@ async function openFile(file: File, autoSelectDisplay = false): Promise<void> {
   activeDisplay = undefined;
   byId("view-title").textContent = "WORLD VIEW";
   byId("inspector-title").textContent = "NO DISPLAY";
-  inspector.innerHTML = `<p class="muted-copy">Opening ${escapeHtml(file.name)} and discovering bounded source metadata.</p>`;
-  const detected = detectBrowserSourceFormat(file.name);
+  const ros2 = entries.some(({ relativePath }) => detectBrowserSourceFormat(relativePath) === "ros2-sqlite");
+  const first = entries[0]!;
+  const detected = ros2 ? "ros2-sqlite" : detectBrowserSourceFormat(first.file.name);
+  const name = ros2 ? `ROS2 BAG · ${entries.length} FILE${entries.length === 1 ? "" : "S"}` : first.file.name;
+  inspector.innerHTML = `<p class="muted-copy">Opening ${escapeHtml(name)} and discovering bounded source metadata.</p>`;
+  const versions = entries.map(({ file, relativePath }) => `${relativePath}:${localFileVersion(file)}`);
   await controller.openLocal({
     format: detected === "unknown" ? "mcap" : detected,
-    name: file.name,
-    sizeBytes: file.size,
-    immutableVersion: localFileVersion(file),
-    blob: file,
+    name,
+    sizeBytes: entries.reduce((total, { file }) => total + file.size, 0),
+    immutableVersion: versions.join("|"),
+    blob: first.file,
+    files: entries.map(({ file, relativePath }) => ({
+      name: file.name,
+      relativePath,
+      sizeBytes: file.size,
+      immutableVersion: localFileVersion(file),
+      blob: file,
+    })),
   });
   renderState();
-  if (autoSelectDisplay) {
-    const topic = controller.state.topics.find(({ availableDisplays }) => availableDisplays.some((kind) => kind !== "raw" && kind !== "raw-inspector"));
-    const kind = topic?.availableDisplays.find((candidate) => candidate !== "raw" && candidate !== "raw-inspector");
-    if (topic && kind) {
-      controller.addDisplay(topic.id, kind);
-      activeTopic = topic;
-      activeKind = kind;
-      renderState();
-      await renderActiveTopic();
-    }
+  const topic = controller.state.topics.find(({ availableDisplays }) => availableDisplays.includes("point-cloud") || availableDisplays.includes("pointcloud2"))
+    ?? controller.state.topics.find(({ availableDisplays }) => availableDisplays.some((kind) => kind !== "raw" && kind !== "raw-inspector"))
+    ?? controller.state.topics.find(({ availableDisplays }) => availableDisplays.length > 0);
+  const kind = topic?.availableDisplays.find((candidate) => candidate !== "raw" && candidate !== "raw-inspector")
+    ?? topic?.availableDisplays[0];
+  if (topic && kind) {
+    controller.addDisplay(topic.id, kind);
+    activeTopic = topic;
+    activeKind = kind;
+    renderState();
+    await renderActiveTopic();
   }
 }
 
@@ -340,23 +403,32 @@ function startPlayback(): void {
 }
 
 input.addEventListener("change", () => {
-  const file = input.files?.[0];
-  if (file) void openFile(file);
+  if (input.files) void openFiles(selectedFiles(input.files));
   input.value = "";
+});
+directoryInput.addEventListener("change", () => {
+  if (directoryInput.files) void openFiles(selectedFiles(directoryInput.files));
+  directoryInput.value = "";
 });
 
 byId("drop-open-button").addEventListener("click", () => input.click());
 byId<HTMLButtonElement>("demo-button").addEventListener("click", async (event) => {
   const button = event.currentTarget as HTMLButtonElement;
+  const demoKind = byId<HTMLSelectElement>("demo-kind").value as "mcap" | "ros1" | "ros2";
   button.disabled = true;
   button.textContent = "LOADING…";
   statusLine.dataset.tone = "normal";
-  statusLine.textContent = "Loading the bundled deterministic ROS 2 MCAP demo…";
+  statusLine.textContent = `Loading the bundled deterministic ${demoKind.toLocaleUpperCase()} demo…`;
   try {
-    const response = await fetch("/demo.mcap");
-    if (!response.ok) throw new Error(`Demo request failed with HTTP ${response.status}.`);
-    const blob = await response.blob();
-    await openFile(new File([blob], "ros-web-viewer-demo.mcap", { type: "application/octet-stream", lastModified: 0 }), true);
+    const paths = demoKind === "mcap" ? ["demo.mcap"] : demoKind === "ros1" ? ["demo-ros1.bag"] : ["demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"];
+    const entries = await Promise.all(paths.map(async (path): Promise<SelectedBrowserFile> => {
+      const response = await fetch(`/${path}`);
+      if (!response.ok) throw new Error(`Demo request for ${path} failed with HTTP ${response.status}.`);
+      const blob = await response.blob();
+      const name = path.split("/").at(-1) ?? path;
+      return { file: new File([blob], name, { type: "application/octet-stream", lastModified: 0 }), relativePath: path };
+    }));
+    await openFiles(entries);
   } catch (error) {
     statusLine.dataset.tone = "error";
     statusLine.textContent = error instanceof Error ? error.message : String(error);
@@ -383,8 +455,12 @@ for (const eventName of ["dragleave", "drop"] as const) {
   });
 }
 dropZone.addEventListener("drop", (event) => {
-  const file = event.dataTransfer?.files[0];
-  if (file) void openFile(file);
+  const transfer = event.dataTransfer;
+  if (!transfer) return;
+  void droppedFiles(transfer).then(openFiles).catch((error) => {
+    statusLine.dataset.tone = "error";
+    statusLine.textContent = `Could not read the dropped recording: ${error instanceof Error ? error.message : String(error)}`;
+  });
 });
 
 byId<HTMLInputElement>("topic-filter").addEventListener("input", (event) => {

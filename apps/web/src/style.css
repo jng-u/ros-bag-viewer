@@ -37,12 +37,13 @@ button:focus-visible, input:focus-visible, label:has(input:focus-visible) { outl
 .source-name { overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .mode-tag { color: var(--cyan); font: 600 9px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
+.demo-select { min-height: 32px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 3px; background: #071014; color: var(--muted); font: 650 9px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .06em; }
 .quiet-button, .open-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 3px; background: transparent; color: var(--muted); font: 650 9px/1 "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; cursor: pointer; }
 .quiet-button:hover { color: var(--ink); border-color: var(--muted); }
 .quiet-button:disabled { opacity: .5; cursor: wait; }
 .open-button { border-color: #27766d; background: #0b302d; color: var(--cyan); }
 .open-button:hover { background: #10443e; }
-#recording-input { position: absolute; opacity: 0; pointer-events: none; }
+#recording-input, #directory-input { position: absolute; opacity: 0; pointer-events: none; }
 
 .topics-panel, .inspector-panel { min-width: 0; background: var(--surface); }
 .topics-panel { grid-area: topics; border-right: 1px solid var(--line); }

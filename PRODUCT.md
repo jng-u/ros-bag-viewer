@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-Delegated to the existing repository: TypeScript, vanilla browser APIs, Vite, WebGL2, and an Nginx Docker image. The deployed UI must not require ROS packages in the browser container.
+Delegated to the existing repository: TypeScript, vanilla browser APIs, Vite, WebGL2, SQLite WASM, and a Caddy Docker image. The deployed UI does not require ROS packages in the browser container.
 
 ## Users
 
@@ -29,7 +29,7 @@ The application runs from a Docker image and is opened in a desktop browser. Loc
 ## Capabilities and Constraints
 
 - WebGL2 is the required rendering baseline.
-- Local MCAP is the first browser-runnable vertical slice; ROS 1 bag and ROS 2 SQLite remain visible compatibility lanes and must report unsupported browser capabilities honestly.
+- Local MCAP, ROS 1 bag, and ROS 2 SQLite bag bundles are browser-runnable recorded-source lanes. ROS 2 folders are selected as a directory or as `metadata.yaml` plus all referenced `.db3` parts.
 - The product is read-only. ROS publish, service, action, parameter mutation, and arbitrary bridge operations are excluded.
 - Resource limits, source epochs, payload ownership, TF/time diagnostics, and error recovery remain explicit.
 - Public product naming, public hosting, licensing, credentials, and production certification remain undecided.

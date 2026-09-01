@@ -29,6 +29,7 @@ export const DEFAULT_SEMANTIC_DECODE_LIMITS: SemanticDecodeLimits = {
 export interface SemanticMcapMessage {
   readonly channel: {
     readonly schema: { readonly name: string; readonly capability: "schema-present" | "opaque" };
+    readonly messageEncoding?: string;
   };
   readonly data: Uint8Array;
 }
@@ -191,6 +192,76 @@ class CdrReader {
   }
 }
 
+class Ros1Reader {
+  readonly #view: DataView;
+  readonly #bytes: Uint8Array;
+  readonly #limits: SemanticDecodeLimits;
+  #offset = 0;
+
+  constructor(bytes: Uint8Array, limits: SemanticDecodeLimits) {
+    if (bytes.byteLength > limits.maxMessageBytes) throw new Error("ROS1 message exceeds maxMessageBytes");
+    this.#bytes = bytes;
+    this.#view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    this.#limits = limits;
+  }
+
+  uint8(): number {
+    this.#require(1);
+    return this.#view.getUint8(this.#offset++);
+  }
+
+  uint32(): number {
+    this.#require(4);
+    const value = this.#view.getUint32(this.#offset, true);
+    this.#offset += 4;
+    return value;
+  }
+
+  float64(): number {
+    this.#require(8);
+    const value = this.#view.getFloat64(this.#offset, true);
+    this.#offset += 8;
+    if (!Number.isFinite(value)) throw new Error("ROS1 geometry contains a non-finite value");
+    return value;
+  }
+
+  string(): string {
+    const length = this.uint32();
+    if (length > this.#limits.maxStringBytes) throw new Error("ROS1 string length exceeds limits");
+    this.#require(length);
+    const value = new TextDecoder("utf-8", { fatal: true }).decode(this.#bytes.subarray(this.#offset, this.#offset + length));
+    this.#offset += length;
+    return value;
+  }
+
+  byteSequence(maxBytes: number): Uint8Array {
+    const length = this.uint32();
+    if (length > maxBytes) throw new Error("ROS1 byte sequence exceeds limits");
+    this.#require(length);
+    const value = this.#bytes.subarray(this.#offset, this.#offset + length);
+    this.#offset += length;
+    return value;
+  }
+
+  header(): { readonly frameId: string; readonly stampNanos: bigint } {
+    this.uint32(); // seq
+    const seconds = this.uint32();
+    const nanoseconds = this.uint32();
+    if (nanoseconds >= 1_000_000_000) throw new Error("ROS1 header nanoseconds are invalid");
+    return { frameId: this.string(), stampNanos: BigInt(seconds) * 1_000_000_000n + BigInt(nanoseconds) };
+  }
+
+  ensureConsumed(): void {
+    if (this.#offset !== this.#bytes.byteLength) throw new Error("ROS1 message has unexpected trailing bytes");
+  }
+
+  #require(length: number): void {
+    if (!Number.isSafeInteger(length) || length < 0 || this.#offset + length > this.#bytes.byteLength) {
+      throw new Error("ROS1 message is truncated");
+    }
+  }
+}
+
 function normalizedSchemaName(name: string): string {
   return name.replace("/msg/", "/");
 }
@@ -216,7 +287,10 @@ export function decodeSemanticMessage(
 ): DecodedSemanticMessage {
   assertSemanticDecodeLimits(limits);
   if (input.channel.schema.capability !== "schema-present") throw new Error("semantic decoding requires a present schema");
-  const reader = new CdrReader(input.data, limits);
+  const encoding = input.channel.messageEncoding?.toLocaleLowerCase();
+  const reader = encoding === "ros1" || encoding === "ros1msg"
+    ? new Ros1Reader(input.data, limits)
+    : new CdrReader(input.data, limits);
   const schema = normalizedSchemaName(input.channel.schema.name);
   if (schema === "sensor_msgs/PointCloud2") {
     const header = reader.header();

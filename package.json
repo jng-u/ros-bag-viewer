@@ -10,6 +10,7 @@
     "typecheck": "tsc -b && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:toolchain": "vitest run tests/toolchain/smoke.test.ts tests/toolchain/release-readiness.test.ts",
+    "pretest:unit": "corepack pnpm build && node apps/web/scripts/generate-demo-mcap.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:integration": "vitest run tests/m1/vertical-slice.test.ts packages/m2-recorded-gate/test/index.test.ts packages/source-hosted/test/index.test.ts tests/m4-hosted/lifecycle.test.ts",
     "test:security": "vitest run tests/m0/baseline.test.ts -t 'approval evidence|paid-infrastructure' && vitest run tests/m3-live/security-gate.test.ts packages/hosted-core/test/index.test.ts tests/m4-hosted/lifecycle.test.ts",

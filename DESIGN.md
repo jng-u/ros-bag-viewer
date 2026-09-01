@@ -17,7 +17,7 @@ The deployed viewer is an instrument surface rather than a dashboard: a compact 
 - A recording can be selected or dropped directly into the viewport.
 - Topic rows reveal only compatible display actions.
 - Timeline movement advances the source epoch and redraws the active display.
-- Errors remain in-place with recovery language; unsupported compatibility lanes are named instead of simulated.
+- Errors remain in-place with recovery language; source-specific failures are reported instead of being hidden behind an empty viewport.
 - Motion is limited to transport and source transitions and stops under reduced-motion preference.
 
 ## Responsive boundary

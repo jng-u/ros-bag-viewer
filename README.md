@@ -8,7 +8,13 @@
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. Click **LOAD DEMO** for an immediate PointCloud2/Path sample, or drop an `.mcap` recording into the viewport. Topic discovery, PointCloud2/Path display creation, raw inspection, timeline seeking, source epochs, bounded WebGL2 rendering, and GPU telemetry run in the browser; recording bytes are not uploaded to the Caddy container.
+Open <http://localhost:8080>. Select **MCAP**, **ROS1 BAG**, or **ROS2 BAG** next to **LOAD DEMO** for an immediate PointCloud2/Path sample. Real recordings can be opened as follows:
+
+- MCAP: drop or select one `.mcap` file.
+- ROS1: drop or select one `.bag` file. Uncompressed, BZip2, and LZ4 chunk decoders are wired.
+- ROS2: drop a rosbag2 folder, use **OPEN ROS2 DIR**, or select/drop `metadata.yaml` together with every referenced `.db3` part. A standalone `.db3` is also accepted with synthesized local metadata.
+
+The first compatible PointCloud2 display is created automatically. Topic discovery, PointCloud2/Path rendering, raw inspection, timeline seeking, source epochs, bounded WebGL2 rendering, and GPU telemetry run in the browser; local recording bytes are not uploaded to the Caddy container.
 
 Use another host port when 8080 is occupied:
 
@@ -18,7 +24,7 @@ ROS_WEB_VIEWER_PORT=8090 docker compose up --build
 
 Stop it with `docker compose down`.
 
-This first Docker-runnable vertical slice supports MCAP directly. ROS1 bag and ROS2 SQLite parser contracts remain in the workspace, but their browser codec/SQLite runtimes are not yet wired into this image; selecting those formats produces an explicit capability error rather than pretending they rendered. Secure live mode likewise requires a separately deployed authenticated relay/edge runtime and remains disabled in this browser-only container.
+Recorded MCAP, ROS1 bag, and ROS2 SQLite paths are wired into this Docker image. Secure live mode still requires a separately deployed authenticated relay/edge runtime and remains disabled in this browser-only container.
 
 For local UI development:
 
