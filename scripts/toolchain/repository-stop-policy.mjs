@@ -710,6 +710,34 @@ function pythonDeclaresInfrastructure(text) {
     const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*(.+)\s*\(\s*\1\s*\)$/u.exec(loader);
     return Boolean(lambda && isLoaderExpression(lambda[2]));
   };
+  const clearPythonBinding = (name) => {
+    state.constants.delete(name);
+    state.loaderAliases.delete(name);
+    state.importlibAliases.delete(name);
+    state.importModuleAliases.delete(name);
+  };
+  const pythonBindingFacts = (expression) => {
+    const normalized = normalizeLoaderExpression(expression);
+    return {
+      constants: pythonStrings(expression, state.constants), loader: isLoaderExpression(expression),
+      importlib: state.importlibAliases.has(normalized), importModule: state.importModuleAliases.has(normalized),
+    };
+  };
+  const assignPythonBinding = (name, expression, facts = pythonBindingFacts(expression)) => {
+    clearPythonBinding(name);
+    if (facts.constants.size > 0) state.constants.set(name, facts.constants);
+    if (facts.loader) state.loaderAliases.add(name);
+    if (facts.importlib) state.importlibAliases.add(name);
+    if (facts.importModule) state.importModuleAliases.add(name);
+  };
+  const pythonDestructuredParts = (expression) => {
+    let normalized = stripPythonOuterParentheses(expression);
+    if (normalized.startsWith("[") && pythonDelimiterEnd(normalized, 0) === normalized.length - 1) {
+      normalized = normalized.slice(1, -1).trim();
+    }
+    const parts = pythonTopLevelParts(normalized).map((part) => part.trim());
+    return parts.length > 1 && parts.every(Boolean) ? parts : undefined;
+  };
   const lines = pythonLogicalStatements(text);
   const contexts = [];
   const closeContext = () => {
@@ -750,8 +778,16 @@ function pythonDeclaresInfrastructure(text) {
         const bodyLine = lines[bodyIndex];
         const bodyIndentation = /^\s*/u.exec(bodyLine)[0].length;
         if (bodyLine.trim() && bodyIndentation <= indentation) break;
-        const assignmentBinding = /^\s*([A-Za-z_]\w*)\s*=/u.exec(bodyLine);
+        const assignmentBinding = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?(?:=|(?:\*\*|\/\/|<<|>>|[+\-*/%@&|^])=)/u.exec(bodyLine);
         if (assignmentBinding) localBindings.add(assignmentBinding[1]);
+        const destructuredBinding = /^\s*(.+?)\s*=/u.exec(bodyLine);
+        for (const binding of pythonDestructuredParts(destructuredBinding?.[1] ?? "") ?? []) {
+          if (/^[A-Za-z_]\w*$/u.test(binding)) localBindings.add(binding);
+        }
+        const deletedBindings = /^\s*del\s+(.+?)\s*$/u.exec(bodyLine);
+        for (const binding of pythonTopLevelParts(deletedBindings?.[1] ?? "")) {
+          if (/^[A-Za-z_]\w*$/u.test(binding.trim())) localBindings.add(binding.trim());
+        }
         const importBinding = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(bodyLine);
         if (importBinding) localBindings.add(importBinding[1] ?? "importlib");
         const fromBinding = /^\s*from\s+importlib\s+import\s+import_module(?:\s+as\s+([A-Za-z_]\w*))?/u.exec(bodyLine);
@@ -759,12 +795,7 @@ function pythonDeclaresInfrastructure(text) {
       }
       contexts.push({ type: "function", indentation, before: copyState(state), name: definition[1], parameter: parameters[0], wrapper: false, localBindings });
       state = copyState(state);
-      for (const binding of localBindings) {
-        state.constants.delete(binding);
-        state.loaderAliases.delete(binding);
-        state.importlibAliases.delete(binding);
-        state.importModuleAliases.delete(binding);
-      }
+      for (const binding of localBindings) clearPythonBinding(binding);
       continue;
     }
     const importlib = /^\s*import\s+importlib(?:\s+as\s+([A-Za-z_]\w*))?\s*(?:#.*)?$/u.exec(line);
@@ -776,18 +807,24 @@ function pythonDeclaresInfrastructure(text) {
     }
     const directImport = /^\s*(?:from|import)\s+(aws_cdk|cdktf|pulumi(?:_[A-Za-z0-9_]+)?)(?:\b|\.)/u.exec(line);
     if (directImport) return true;
-    const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*(.+?)\s*$/u.exec(line);
-    if (assignment) {
-      const values = pythonStrings(assignment[2], state.constants);
-      if (values.size > 0) state.constants.set(assignment[1], values);
-      else state.constants.delete(assignment[1]);
-      if (isLoaderExpression(assignment[2])) state.loaderAliases.add(assignment[1]);
-      else state.loaderAliases.delete(assignment[1]);
-      const assigned = normalizeLoaderExpression(assignment[2]);
-      if (state.importlibAliases.has(assigned)) state.importlibAliases.add(assignment[1]);
-      else state.importlibAliases.delete(assignment[1]);
-      if (state.importModuleAliases.has(assigned)) state.importModuleAliases.add(assignment[1]);
-      else state.importModuleAliases.delete(assignment[1]);
+    const augmented = /^\s*([A-Za-z_]\w*)\s*(?:\*\*|\/\/|<<|>>|[+\-*/%@&|^])=\s*(.+?)\s*$/u.exec(line);
+    if (augmented) clearPythonBinding(augmented[1]);
+    const deleted = /^\s*del\s+(.+?)\s*$/u.exec(line);
+    if (deleted) {
+      for (const binding of pythonTopLevelParts(deleted[1])) {
+        if (/^[A-Za-z_]\w*$/u.test(binding.trim())) clearPythonBinding(binding.trim());
+      }
+    }
+    const assignment = /^\s*([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+?)\s*$/u.exec(line);
+    if (assignment) assignPythonBinding(assignment[1], assignment[2]);
+    else {
+      const destructured = /^\s*(.+?)\s*=\s*(.+?)\s*$/u.exec(line);
+      const bindings = pythonDestructuredParts(destructured?.[1] ?? "");
+      const expressions = pythonDestructuredParts(destructured?.[2] ?? "");
+      if (bindings?.every((binding) => /^[A-Za-z_]\w*$/u.test(binding))) {
+        const facts = expressions?.length === bindings.length ? expressions.map(pythonBindingFacts) : undefined;
+        bindings.forEach((binding, index) => facts ? assignPythonBinding(binding, expressions[index], facts[index]) : clearPythonBinding(binding));
+      }
     }
     const returned = /^\s*return\s+(.+?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
     const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");

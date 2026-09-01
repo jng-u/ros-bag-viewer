@@ -225,11 +225,11 @@ const semanticMatrix = [
   { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined, knownGap: true },
   { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
   { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
-  { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
-  { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined, knownGap: true },
-  { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-alternate-import", filename: "py-alternate-import.py", content: "from importlib import import_module as im\nim(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-delete", filename: "py-delete.py", content: "load = __import__\ndel load\nload(\"pulumi_aws\")", expected: undefined, knownGap: true },
+  { name: "py-delete", filename: "py-delete.py", content: "load = __import__\ndel load\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
   { name: "py-rebinding", filename: "py-rebinding.py", content: "load = __import__\nload = print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
   { name: "py-benign-shadow", filename: "py-benign-shadow.py", content: "load = print\nload(\"safe_package\")", expected: undefined, knownGap: false },
   { name: "yaml-indicator", filename: "k8s/indicator.yaml", content: "kind: Deployment\napiVersion: apps/v1", expected: "infrastructure", knownGap: false },
@@ -241,6 +241,10 @@ const semanticMatrix = [
   { name: "ts-safe-import", filename: "src/safe.ts", content: "import x from \"safe-package\"", expected: undefined, knownGap: false },
   { name: "py-importlib-dict-direct", filename: "py-importlib-dict.py", content: "import importlib\nimportlib.__dict__[\"import_module\"](\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
   { name: "py-starred-keyword", filename: "py-starred-keyword.py", content: "load = __import__\nload(*[\"pulumi_aws\"], level=0)", expected: "infrastructure", knownGap: false },
+  { name: "py-annotated-safe", filename: "py-annotated-safe.py", content: "load: object = print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-augmented-unrelated", filename: "py-augmented-unrelated.py", content: "load = __import__\nother += print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-destructured-position-safe", filename: "py-destructured-position-safe.py", content: "[load, other] = [print, __import__]\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-delete-unrelated", filename: "py-delete-unrelated.py", content: "load = __import__\ndel other\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
 ] as const;
 
 describe("structured repository stop policy", () => {
