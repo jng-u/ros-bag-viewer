@@ -49,12 +49,13 @@ function stripYamlBlockScalars(text) {
       payloadIndent = undefined;
       scalarHeaderIndent = undefined;
     }
-    const header = /^\s*(?:-\s+)?(?:[^:#]+:\s*)?[|>](?:[1-9])?[+-]?\s*(?:#.*)?$/u.exec(rawLine);
+    const header = /^\s*(?:-\s+)?(?:[^:#]+:\s*)?[|>]((?:[1-9][+-]?)|(?:[+-][1-9]?))?\s*(?:#.*)?$/u.exec(rawLine);
     if (header) {
       // Determine the effective scalar indentation from its first payload line;
       // this preserves later sequence/mapping siblings at their own indentation.
       scalarHeaderIndent = indentation;
-      payloadIndent = undefined;
+      const explicitIndent = header[1]?.match(/[1-9]/u)?.[0];
+      payloadIndent = explicitIndent ? indentation + Number(explicitIndent) : undefined;
       kept.push(rawLine);
       continue;
     }
@@ -441,6 +442,15 @@ function typescriptDeclaresInfrastructure(text, filename) {
     }
   };
 
+  const collectFunctionBindings = (node, bindings = new Set()) => {
+    node.forEachChild((child) => {
+      if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name)) bindings.add(child.name.text);
+      else if (ts.isFunctionDeclaration(child) && child.name) bindings.add(child.name.text);
+      else if (!ts.isFunctionLike(child)) collectFunctionBindings(child, bindings);
+    });
+    return bindings;
+  };
+
   const inspect = (node, environment = rootEnvironment) => {
     if (found) return;
     if (ts.isImportDeclaration(node)) {
@@ -479,6 +489,10 @@ function typescriptDeclaresInfrastructure(text, filename) {
       if ([...typescriptStrings(moduleArgument, environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isFunctionLike(node)) {
       const localEnvironment = copyTypeScriptEnvironment(environment);
+      for (const binding of collectFunctionBindings(node.body ?? node)) {
+        localEnvironment.constants.delete(binding);
+        localEnvironment.loaders.delete(binding);
+      }
       for (const parameter of node.parameters) {
         if (ts.isIdentifier(parameter.name)) {
           localEnvironment.constants.delete(parameter.name.text);
@@ -586,13 +600,17 @@ function pythonDeclaresInfrastructure(text) {
     if (getattr) {
       const receiver = normalizeLoaderExpression(getattr[1]);
       const attributes = pythonStrings(getattr[2].split(",", 1)[0], state.constants);
-      if (/^[A-Za-z_]\w*$/u.test(receiver) && attributes.has("import_module")) return `${receiver}.import_module`;
+      if (/^[A-Za-z_]\w*$/u.test(receiver) && (attributes.has("import_module") || attributes.has("__import__"))) {
+        return `${receiver}.${[...attributes][0]}`;
+      }
     }
     const dictionary = /^(.*?)\s*\.\s*__dict__\s*(?:\[\s*(.+)\s*\]|\.get\s*\(\s*(.+)\s*\))$/u.exec(normalized);
     if (dictionary) {
       const receiver = normalizeLoaderExpression(dictionary[1]);
       const attributes = pythonStrings(dictionary[2] ?? dictionary[3], state.constants);
-      if (/^[A-Za-z_]\w*$/u.test(receiver) && attributes.has("import_module")) return `${receiver}.import_module`;
+      if (/^[A-Za-z_]\w*$/u.test(receiver) && (attributes.has("import_module") || attributes.has("__import__"))) {
+        return `${receiver}.${[...attributes][0]}`;
+      }
     }
     return normalized;
   };
@@ -688,6 +706,11 @@ function pythonDeclaresInfrastructure(text) {
     const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)]
       .map((loader) => loader.replace(".", "\\."))
       .join("|");
+    const directBuiltin = /(?:builtins\.__dict__\s*\[\s*["']__import__["']\s*\]|getattr\s*\(\s*builtins\s*,\s*["']__import__["']\s*\))\s*\((.*)\)/u.exec(line);
+    if (directBuiltin) {
+      const values = pythonStrings(directBuiltin[1].split(",", 1)[0], state.constants);
+      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    }
     const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
     for (const match of line.matchAll(calls)) {
       const rawArgs = match[1];

@@ -80,8 +80,9 @@ const infrastructureContents = [
   ["src/apply-require.ts", "require.apply(null, [\"aws-cdk-lib\"])"],
   ["src/void-call.ts", "require.call(void (0), \"aws-cdk-lib\")"],
   ["src/reflect-apply.ts", "Reflect.apply(require, object, [\"aws-cdk-lib\"])"],
-  ["src/module-require.ts", "module.require(\"aws-cdk-lib\")"],
   ["src/bind-prebound.ts", "const load = require.bind(object, \"safe\"); load(\"aws-cdk-lib\")"],
+  ["src/computed-reflect.ts", "Reflect[\"apply\"](require, object, [\"aws-cdk-lib\"])"],
+  ["src/module-require.ts", "module.require(\"aws-cdk-lib\")"],
   ["src/sequence-require.ts", "(0, require)(\"aws-cdk-lib\")"],
   ["src/sequence-alias.ts", "const load = (safeLoader, require); load(\"aws-cdk-lib\")"],
   ["src/as-module-argument.ts", "const load = require; load((\"aws-cdk-lib\" as string))"],
@@ -114,6 +115,8 @@ const infrastructureContents = [
   ["infra/dict-get-loader.py", "import importlib\nload = importlib.__dict__.get(\"import_module\")\nload(\"pulumi_aws\")"],
   ["infra/builtins-import.py", "import builtins\nbuiltins.__import__(\"pulumi_aws\")"],
   ["infra/getattr-default.py", "import importlib\nload = getattr(importlib, \"import_\" + \"module\", None)\nload(\"pulumi_aws\")"],
+  ["infra/builtins-getattr.py", "getattr(builtins, \"__import__\")('pulumi_aws')"],
+  ["infra/builtins-dict.py", "builtins.__dict__[\"__import__\"](\"pulumi_aws\")"],
   ["deployment.yaml", "kind: Deployment\napiVersion: apps/v1\nmetadata:\n  name: viewer"],
   ["resources.yaml", "items:\n  - apiVersion: v1\n    kind: ConfigMap\n    metadata:\n      name: viewer"],
   ["quoted.yaml", "\"apiVersion\": v1\n'kind': ConfigMap"],
@@ -122,6 +125,7 @@ const infrastructureContents = [
   ["deep-flow.yaml", "root: { items: [{ resource: { 'apiVersion': v1, \"kind\": ConfigMap } }] }"],
   ["deployment.json", "{\"items\":[{\"kind\":\"CustomResourceDefinition\",\"apiVersion\":\"apiextensions.k8s.io/v1\"}]}"],
   ["sequence-mapping-scalar-real.yaml", "items:\n  - notes: |\n      apiVersion: v1\n      kind: ConfigMap\n    apiVersion: v1\n    kind: Deployment"],
+  ["explicit-indent-real.yaml", "items:\n  - notes: |+2\n    text\n  apiVersion: v1\n  kind: Deployment"],
 ] as const;
 
 const credentialContents = [
