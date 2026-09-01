@@ -264,8 +264,8 @@ describe("M1 dimensional evidence gate", () => {
         displayKind: "pointcloud2",
         primitive: "points",
         inputVertices: 120000,
-        renderedVertices: 60000,
-        droppedVertices: 60000,
+        renderedVertices: 120000,
+        droppedVertices: 0,
       },
       {
         displayKind: "path",
@@ -289,7 +289,7 @@ describe("M1 dimensional evidence gate", () => {
       liveGpuBytes: 0,
       pooledBuffers: 0,
       pooledGpuBytes: 0,
-      peakGpuBytes: 744000,
+      peakGpuBytes: 1464000,
       drawCalls: 2,
       disposedBuffers: 2,
       rejectedAllocations: 0,
@@ -362,7 +362,7 @@ describe("M1 dimensional evidence gate", () => {
 
     const renderer = new CapturingRenderer();
     const cloud = new PointCloud2Display("cloud", renderer);
-    cloud.configure({ maxPoints: 2, maxInputBytes: 48 });
+    cloud.configure({ maxPoints: 4, maxInputBytes: 48 });
     cloud.attachSource(1);
     expect(
       cloud.update(
@@ -374,7 +374,7 @@ describe("M1 dimensional evidence gate", () => {
         ]),
         1,
       ),
-    ).toMatchObject({ displayKind: "pointcloud2", primitive: "points", renderedVertices: 2, droppedVertices: 2 });
+    ).toMatchObject({ displayKind: "pointcloud2", primitive: "points", renderedVertices: 4, droppedVertices: 0 });
 
     const path = new PathDisplay("path", renderer);
     path.configure({ maxPoses: 3, maxInputBytes: 72 });

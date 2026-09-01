@@ -15,18 +15,29 @@
 
 | Source | Form | Required evidence | M0 status |
 |---|---|---|---|
-| ROS 2 MCAP | Local `File`/`Blob`; indexed | Topics/types/times, range reads, deterministic seek, schema provenance | Format fixture admitted; ROS 2 SLAM/render evidence deferred to M1 |
+| ROS 2 MCAP | Local `File`/`Blob`; indexed | Topics/types/times, range reads, deterministic seek, schema provenance | Docker Firefox passes the generated full native-display fixture; public dense MCAP hardware evidence remains open |
 | ROS 2 MCAP | Local/hosted; unindexed | Explicit sequential/degraded mode, bounded index build and cancellation | Planned; fixture not approved |
-| ROS 1 bag | Local recording; isolated ROS 1 lane | Connection schema, supported compression, topic/time inventory | M2 deterministic synthetic local/granted-range adapter gate passes; public corpus/browser support is not yet promoted |
-| ROS 2 SQLite | `metadata.yaml` plus single/multipart `.db3` | Relation validation, ordering, missing-part diagnostics | M2 deterministic synthetic single/multipart local/granted-range gate passes; production browser SQLite provider and public corpus support are not yet promoted |
-| ROS 1/ROS 2 live | Private generation-specific edge through relay | Read-only subscriptions, schema provenance, reconnect epochs | M3 deterministic local synthetic contract gate passes for both generations; real ROS/network/browser environments are not promoted |
-| Hosted recordings | Signed immutable manifest plus granted ranges | Local/hosted normalized equivalence and authorization failures | M4 local/in-memory reference contract; no production network, storage, identity, browser, or retention promotion |
+| ROS 1 bag | Local recording; isolated ROS 1 lane | Connection schema, supported compression, topic/time inventory | Docker Firefox passes generated uncompressed/LZ4 fixtures and the public 37.8 MiB indexed BZip2 Cartographer bag by pinned SHA-256 |
+| ROS 2 SQLite | `metadata.yaml` plus single/multipart `.db3` | Relation validation, ordering, missing-part diagnostics | Docker Firefox passes generated bundles plus the pinned 49.5 MB SEAV navigation bag: 25 topics and synchronized TF/scan/odom/map/marker/plot/raw at an active-SLAM timestamp |
+| ROS 1/ROS 2 live | Private generation-specific edge through relay | Read-only subscriptions, schema provenance, reconnect epochs | Docker Noetic and Jazzy bridges bind only `127.0.0.1:8765/8766` and pass actual ROS `/tf` and `/scan` into Firefox; external TLS/network/identity certification remains deployment-specific |
+| Hosted recordings | Immutable capability-scoped upload plus ranges | Local/hosted normalized equivalence and authorization failures | Docker share service and Firefox pass create, immutable range-open, synchronized rendering, revoke, and post-revoke HTTP 403; no enterprise catalog or production object-store claim |
 
 Evidence records exact browser build, OS, CPU/GPU, WebGL2 capability, viewport/DPR, input hash, ROS generation/distro, storage version, compression codec, schema provider, source mode, and cold/warm/cache state. Current stable Chromium and Firefox on Windows, macOS, and Ubuntu are candidates, not support claims.
 
 The named benchmark profile is **M0-LAPTOP-2026-01**: x86-64, at least four physical CPU cores, 16 GiB RAM, a WebGL2-capable integrated GPU, Ubuntu 24.04, plugged-in balanced power mode, stable Chromium, 1440×900 CSS pixels at DPR 1, fresh profile, and default compact quality. Every result replaces the minimum profile with exact make/model, CPU/GPU/driver, RAM, kernel, browser build/flags, power/thermal state, viewport/DPR, and source hash; a result without those fields is invalid evidence.
 
 ROS 1 evidence must include the exact isolated container/VM digest, host requirements, known residual risk, last verified date, and retirement trigger. Retire a tier if its pinned environment cannot be reproduced, has an unmitigated critical vulnerability, or cannot run on supported hosts.
+
+## Verified generation-specific bridge environment
+
+Last verified: **2026-09-02** on Linux Docker Engine with host networking and headless Firefox 154.
+
+| Lane | Pinned base | Built image evidence | Host requirements | Residual risk / retirement trigger |
+|---|---|---|---|---|
+| ROS1 Noetic | `ros:noetic-ros-core-focal@sha256:fd6279f04e51fa61201a791da9a156129941887b95b614ae0cec7865ef49de4f` | `sha256:155a8d8355df9dcf1394efc6190852269fc096791443e2773ebfb7e6b4a082e7` | Linux host networking; reachable ROS master; allowlisted topics | Ubuntu Focal/Noetic is legacy. Retire if the pinned image no longer rebuilds, cannot be vulnerability-mitigated, or supported hosts lose host-network compatibility. |
+| ROS2 Jazzy | `ros:jazzy-ros-core@sha256:fb9a5620bb92e133047c62555e307a2a481bde384c70595ceae464bc84e51df1` | `sha256:c4d71245967011bd9a3b527176af9e3635bc9b050c64d7b2cd4bb0bae8acb3cd` | Linux host networking; DDS domain reachability; UDPv4 Fast DDS | DDS discovery and QoS remain robot-network specific. Retire or repin on unsupported Jazzy/base image, critical vulnerability, or middleware incompatibility. |
+
+These image IDs identify the locally verified builds, not a public registry guarantee. A rebuild after dependency repository changes must record a new ID and rerun both live browser gates.
 
 ## Degraded and unsupported rules
 

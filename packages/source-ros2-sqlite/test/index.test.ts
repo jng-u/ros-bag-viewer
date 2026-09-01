@@ -32,10 +32,11 @@ class TestEpoch implements SourceEpochPort {
     return this.#controller.signal;
   }
 
-  advance(): void {
+  advance(): number {
     this.#controller.abort("fixture epoch advanced");
     this.#epoch += 1;
     this.#controller = new AbortController();
+    return this.#epoch;
   }
 }
 
@@ -281,7 +282,16 @@ describe("ROS2 SQLite SourceBundle adapter", () => {
       [20n, 1, [21]],
       [30n, 0, [30]],
     ]);
-    expect(session.telemetry()).toMatchObject({ partsOpened: 2, peakRowsBuffered: 2, messagesYielded: 4 });
+    const latest = [];
+    for await (const message of session.readMessages({ endTimeNanos: 20n, topics: ["/points"], limit: 3, order: "descending" })) {
+      latest.push(message);
+    }
+    expect(latest.map((message) => [message.timestampNanos, message.partOrdinal, [...message.data]])).toEqual([
+      [20n, 1, [21]],
+      [20n, 0, [20]],
+      [15n, 1, [15]],
+    ]);
+    expect(session.telemetry()).toMatchObject({ partsOpened: 2, peakRowsBuffered: 2, messagesYielded: 7 });
     emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "local-ros2-sqlite", facts: {
       messages: messages.length, partsOpened: session.telemetry().partsOpened, peakRowsBuffered: session.telemetry().peakRowsBuffered,
     } });
@@ -334,6 +344,8 @@ describe("ROS2 SQLite SourceBundle adapter", () => {
         maxMessagesPerRead: 10,
       },
     });
+    await expect(session.readMessages().next()).rejects.toMatchObject({ code: "RESOURCE_LIMIT" });
+    expect(session.advanceEpoch("seek superseded old query")).toBe(1);
     await expect(session.readMessages().next()).rejects.toMatchObject({ code: "RESOURCE_LIMIT" });
     epoch.advance();
     expect(() => session.readMessages()).toThrowError(expect.objectContaining({ code: "STALE_EPOCH" }));

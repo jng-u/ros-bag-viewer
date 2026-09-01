@@ -53,6 +53,7 @@ export interface TopicSummary {
   readonly compatibility: CompatibilityTier;
   readonly schemaCapability: "schema-present" | "schema-resolvable" | "opaque";
   readonly availableDisplays: readonly DisplayKind[];
+  readonly messageCount?: bigint;
 }
 
 export interface OpenLocalResult {
@@ -107,6 +108,10 @@ export interface LiveTelemetrySummary {
   readonly acceptedMessages: number;
   readonly deliveredMessages: number;
   readonly droppedMessages: number;
+  readonly latestRelayLatencyMs?: number;
+  readonly maxRelayLatencyMs?: number;
+  readonly latestBrowserDeliveryLatencyMs?: number;
+  readonly maxBrowserDeliveryLatencyMs?: number;
   readonly diagnostic?: string;
 }
 
@@ -312,7 +317,7 @@ export class DesktopShellController {
       this.#state = {
         ...this.#state,
         phase: result.indexState === "sequential" ? "degraded" : "ready",
-        sourceLabel: "Hosted recording",
+        sourceLabel: result.sourceLabel,
         sourceHash: result.sourceHash,
         durationNanos: result.durationNanos,
         epoch: result.epoch,
@@ -416,12 +421,17 @@ export class DesktopShellController {
     const notice = `${result.telemetry.diagnostic === undefined ? "" : `${result.telemetry.diagnostic} `}${routedNotice}${staleNotice}`;
     this.#state = {
       ...this.#state,
-      phase: result.telemetry.state === "degraded" || errors > 0 ? "degraded" : "ready",
+      phase: result.telemetry.state === "disconnected"
+        ? "error"
+        : result.telemetry.state === "connecting" || result.telemetry.state === "reconnecting"
+          ? "loading"
+          : result.telemetry.state === "degraded" || errors > 0 ? "degraded" : "ready",
       epoch: result.epoch,
       currentTimeNanos: result.latestSourceTimeNanos ?? this.#state.currentTimeNanos,
       liveState: result.telemetry.state,
       liveTelemetry: result.telemetry,
       notice,
+      blockingError: result.telemetry.state === "disconnected" ? result.telemetry.diagnostic ?? "Live relay disconnected." : undefined,
     };
     return result;
   }
@@ -671,7 +681,7 @@ export function renderDesktopShell(controller: DesktopShellController): string {
         ? "hosted · read-only"
         : `local ${state.sourceFormat ?? "recording"}`;
   const liveTelemetry = state.liveTelemetry
-    ? `<span>Queue: ${state.liveTelemetry.queuedMessages} messages / ${state.liveTelemetry.queuedBytes} bytes</span><span>Dropped: ${state.liveTelemetry.droppedMessages}</span>`
+    ? `<span>Queue: ${state.liveTelemetry.queuedMessages} messages / ${state.liveTelemetry.queuedBytes} bytes</span><span>Dropped: ${state.liveTelemetry.droppedMessages}</span>${state.liveTelemetry.latestRelayLatencyMs === undefined ? "" : `<span>Relay: ${state.liveTelemetry.latestRelayLatencyMs.toFixed(2)} ms</span>`}${state.liveTelemetry.latestBrowserDeliveryLatencyMs === undefined ? "" : `<span>Display: ${state.liveTelemetry.latestBrowserDeliveryLatencyMs.toFixed(2)} ms</span>`}`
     : "";
   const hostedObservability = state.hostedObservability
     ? `<span>Hosted reads: ${state.hostedObservability.rangeRequests} ranges / ${state.hostedObservability.transferredBytes} bytes</span><span>Denied: ${state.hostedObservability.deniedRequests}</span><span>Active readers: ${state.hostedObservability.activeReaders}</span>`

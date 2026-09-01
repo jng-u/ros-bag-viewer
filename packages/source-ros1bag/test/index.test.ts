@@ -205,10 +205,16 @@ describe("ROS1 bag SourceBundle adapter", () => {
     expect(messages.map((message) => [message.sequence, message.timeNanos, [...message.data]])).toEqual([
       [0n, 2_000_000_020n, [4, 5, 6]],
     ]);
+    const latest = [];
+    for await (const message of session.readIndexed({ endTime: 2_000_000_020n, reverse: true })) latest.push(message);
+    expect(latest.map((message) => [message.timeNanos, [...message.data]])).toEqual([
+      [2_000_000_020n, [4, 5, 6]],
+      [1_000_000_010n, [1, 2, 3]],
+    ]);
     expect(reader.snapshotTelemetry()).toMatchObject({ peakInFlightBytes: expect.any(Number) });
     expect(reader.snapshotTelemetry().readCalls).toBeGreaterThan(8);
     expect(reader.snapshotTelemetry().peakInFlightBytes).toBeLessThan(bytes.byteLength);
-    expect(session.telemetry()).toMatchObject({ mode: "indexed", messagesRead: 1 });
+    expect(session.telemetry()).toMatchObject({ mode: "indexed", messagesRead: 3 });
     emitV1SemanticEvent({ schemaVersion: 1, domain: "source", result: "pass", code: "local-ros1-bag-indexed", facts: {
       mode: session.mode, messages: messages.length, readCalls: reader.snapshotTelemetry().readCalls,
     } });
@@ -243,6 +249,19 @@ describe("ROS1 bag SourceBundle adapter", () => {
       detail: codec,
       message: expect.stringContaining(codec),
     });
+  });
+
+  it("keeps decompression work cumulative telemetry without bricking repeated indexed reads", async () => {
+    const session = await Ros1BagSourceSession.open(boundedReader(fixture({ compression: "bz2" })), undefined, {
+      limits: { ...DEFAULT_ROS1_BAG_LIMITS, maxTotalDecompressedBytes: 1 },
+      decompressors: { bz2: (bytes) => bytes },
+    });
+    for (let iteration = 0; iteration < 10; iteration += 1) {
+      const messages = [];
+      for await (const message of session.readIndexed()) messages.push(message);
+      expect(messages).toHaveLength(2);
+    }
+    expect(session.telemetry().decompressedBytes).toBeGreaterThan(1);
   });
 
   it("rejects corrupt, truncated, oversized, and multipart inputs deterministically", async () => {

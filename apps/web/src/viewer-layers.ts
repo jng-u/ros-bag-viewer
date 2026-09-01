@@ -1,0 +1,93 @@
+import type { SemanticSceneSummary } from "@ros-web-viewer/displays-core";
+
+import type { DisplayKind, TopicSummary } from "./shell.js";
+
+export type ViewerLayerStatus = "error" | "loading" | "ready" | "waiting";
+
+export interface ViewerLayer {
+  readonly id: string;
+  readonly topic: TopicSummary;
+  readonly kind: DisplayKind;
+  readonly visible: boolean;
+  readonly status: ViewerLayerStatus;
+  readonly colorIndex: number;
+  readonly color?: readonly [number, number, number, number];
+  readonly fieldPath?: string;
+  readonly messageTimeNanos?: bigint;
+  readonly summary?: SemanticSceneSummary;
+  readonly error?: string;
+}
+
+export class ViewerLayerRegistry {
+  #layers: ViewerLayer[] = [];
+  #selectedId?: string;
+  #nextId = 1;
+
+  get layers(): readonly ViewerLayer[] { return this.#layers; }
+  get visibleLayers(): readonly ViewerLayer[] { return this.#layers.filter(({ visible }) => visible); }
+  get selected(): ViewerLayer | undefined { return this.#layers.find(({ id }) => id === this.#selectedId); }
+
+  add(topic: TopicSummary, kind: DisplayKind, fieldPath?: string): ViewerLayer {
+    const existing = this.#layers.find((layer) => layer.topic.id === topic.id && layer.kind === kind && layer.fieldPath === fieldPath);
+    if (existing) {
+      this.#selectedId = existing.id;
+      return existing;
+    }
+    const layer: ViewerLayer = {
+      id: `layer-${this.#nextId++}`,
+      topic,
+      kind,
+      visible: true,
+      status: "waiting",
+      colorIndex: this.#layers.length,
+      ...(fieldPath ? { fieldPath } : {}),
+    };
+    this.#layers = [...this.#layers, layer];
+    this.#selectedId = layer.id;
+    return layer;
+  }
+
+  clear(): void {
+    this.#layers = [];
+    this.#selectedId = undefined;
+    this.#nextId = 1;
+  }
+
+  remove(id: string): void {
+    if (!this.#layers.some((layer) => layer.id === id)) throw new Error(`unknown viewer layer ${id}`);
+    this.#layers = this.#layers.filter((layer) => layer.id !== id);
+    if (this.#selectedId === id) this.#selectedId = this.#layers.at(-1)?.id;
+  }
+
+  select(id: string): void {
+    if (!this.#layers.some((layer) => layer.id === id)) throw new Error(`unknown viewer layer ${id}`);
+    this.#selectedId = id;
+  }
+
+  toggle(id: string): void {
+    this.#replace(id, (layer) => ({ ...layer, visible: !layer.visible }));
+  }
+
+  setColor(id: string, color: readonly [number, number, number, number]): void {
+    if (color.some((component) => !Number.isFinite(component) || component < 0 || component > 1)) throw new Error("layer color is invalid");
+    this.#replace(id, (layer) => ({ ...layer, color }));
+  }
+
+  update(id: string, patch: Partial<Pick<ViewerLayer, "error" | "messageTimeNanos" | "status" | "summary">>): void {
+    this.#replace(id, (layer) => {
+      const next = { ...layer, ...patch };
+      if ("error" in patch && patch.error === undefined) delete (next as { error?: string }).error;
+      return next;
+    });
+  }
+
+  #replace(id: string, update: (layer: ViewerLayer) => ViewerLayer): void {
+    let found = false;
+    this.#layers = this.#layers.map((layer) => {
+      if (layer.id !== id) return layer;
+      found = true;
+      return update(layer);
+    });
+    if (!found) throw new Error(`unknown viewer layer ${id}`);
+  }
+}

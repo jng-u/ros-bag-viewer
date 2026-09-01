@@ -229,7 +229,7 @@ export interface DisplayLifecycle {
   instantiate(): void;
   configure(config: unknown): void;
   attachSource(epoch: SourceEpoch): void;
-  update(message: NormalizedMessageEnvelope): void;
+  update(message: NormalizedMessageEnvelope): void | Promise<void>;
   render(): void;
   suspend(): void;
   handleError(error: Error): void;

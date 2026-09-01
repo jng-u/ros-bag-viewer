@@ -99,7 +99,7 @@ describe("PointCloud2Display", () => {
   it("dogfoods lifecycle transitions and emits a deterministic bounded scene", () => {
     const renderer = new MockRenderer();
     const display = new PointCloud2Display("cloud", renderer);
-    display.configure({ maxPoints: 3, maxInputBytes: 1024, color: [1, 0, 0, 1] });
+    display.configure({ maxPoints: 5, maxInputBytes: 1024, color: [1, 0, 0, 1] });
     display.attachSource(4);
 
     const summary = display.update(
@@ -119,17 +119,17 @@ describe("PointCloud2Display", () => {
       frameId: "map",
       primitive: "points",
       inputVertices: 5,
-      renderedVertices: 3,
-      droppedVertices: 2,
+      renderedVertices: 5,
+      droppedVertices: 0,
       bounds: { min: [0, 0, 0], max: [4, 4, 4] },
     });
-    expect(renderer.inputs[0]?.positions).toEqual(new Float32Array([0, 0, 0, 2, 2, 2, 4, 4, 4]));
+    expect(renderer.inputs[0]?.positions).toEqual(new Float32Array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]));
     expect(renderer.inputs[0]?.topology).toBe("points");
     expect(display.telemetry()).toMatchObject({
       state: "rendering",
       updates: 1,
       renders: 1,
-      decimatedVertices: 2,
+      decimatedVertices: 0,
     });
 
     display.dispose();
@@ -147,6 +147,15 @@ describe("PointCloud2Display", () => {
     expect(() => display.update(pointCloud([[0, 0, 0], [1, 1, 1]]), 1)).toThrow(/byte budget exceeded/);
     expect(renderer.inputs).toHaveLength(0);
     expect(display.telemetry()).toMatchObject({ state: "error", rejectedMessages: 1 });
+  });
+
+  it("rejects an over-budget cloud instead of silently sampling it", () => {
+    const renderer = new MockRenderer();
+    const display = new PointCloud2Display("cloud", renderer);
+    display.configure({ maxPoints: 2, maxInputBytes: 1024 });
+    display.attachSource(1);
+    expect(() => display.update(pointCloud([[0, 0, 0], [1, 1, 1], [2, 2, 2]]), 1)).toThrow(/full-data limit/);
+    expect(renderer.inputs).toHaveLength(0);
   });
 
   it("rejects unbounded field metadata before parsing payloads", () => {
@@ -175,10 +184,10 @@ describe("PointCloud2Display", () => {
 });
 
 describe("PathDisplay", () => {
-  it("decimates a path into a line strip with bounded semantic evidence", () => {
+  it("renders a path in full without hidden sampling", () => {
     const renderer = new MockRenderer();
     const display = new PathDisplay("path", renderer);
-    display.configure({ maxPoses: 2, maxInputBytes: 1024 });
+    display.configure({ maxPoses: 5, maxInputBytes: 1024 });
     display.attachSource(7);
 
     const summary = display.update(path(5), 7);
@@ -189,12 +198,19 @@ describe("PathDisplay", () => {
       frameId: "map",
       primitive: "line-strip",
       inputVertices: 5,
-      renderedVertices: 2,
-      droppedVertices: 3,
-      bounds: { min: [0, 0, 0], max: [3, 6, 0] },
+      renderedVertices: 5,
+      droppedVertices: 0,
+      bounds: { min: [0, 0, 0], max: [4, 8, 0] },
     });
-    expect(renderer.inputs[0]?.positions).toEqual(new Float32Array([0, 0, 0, 3, 6, 0]));
+    expect(renderer.inputs[0]?.positions).toEqual(new Float32Array([0, 0, 0, 1, 2, 0, 2, 4, 0, 3, 6, 0, 4, 8, 0]));
     expect(renderer.resources.get("path")?.draws).toBe(1);
+  });
+
+  it("rejects an over-budget path instead of silently sampling it", () => {
+    const display = new PathDisplay("path", new MockRenderer());
+    display.configure({ maxPoses: 2, maxInputBytes: 1024 });
+    display.attachSource(1);
+    expect(() => display.update(path(3), 1)).toThrow(/full-data limit/);
   });
 });
 
@@ -260,6 +276,24 @@ describe("M2 geometry displays", () => {
     ]);
   });
 
+  it("rejects over-budget scan, marker, and map geometry instead of sampling", () => {
+    const renderer = new MockRenderer();
+    const scan = new LaserScanDisplay("scan", renderer);
+    scan.configure({ maxRanges: 2, maxInputBytes: 64 });
+    scan.attachSource(1);
+    expect(() => scan.update({ frameId: "laser", angleMin: 0, angleIncrement: 1, rangeMin: 0.1, rangeMax: 10, ranges: [1, 2, 3] }, 1)).toThrow(/full-data limit/);
+
+    const marker = new MarkerDisplay("marker-limit", renderer);
+    marker.configure({ maxMarkers: 1, maxPoints: 2, maxInputBytes: 1024 });
+    marker.attachSource(1);
+    expect(() => marker.update({ frameId: "map", namespace: "n", id: 1, action: "add", type: "points", points: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }] }, 1)).toThrow(/full-data limit/);
+
+    const map = new OccupancyGridDisplay("map-limit", renderer);
+    map.configure({ occupiedThreshold: 50, maxCells: 1, maxInputBytes: 4 });
+    map.attachSource(1);
+    expect(() => map.update({ frameId: "map", width: 2, height: 1, resolution: 1, origin: { x: 0, y: 0, z: 0 }, data: Int8Array.from([100, 100]) }, 1)).toThrow(/full-data limit/);
+  });
+
   it("builds fixed-frame TF lines, rejects cycles, and creates a bounded grid", () => {
     const renderer = new MockRenderer();
     const tf = new FrameTreeDisplay("tf", renderer);
@@ -279,6 +313,31 @@ describe("M2 geometry displays", () => {
     expect(renderer.inputs[0]?.positions).toEqual(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 0]));
 
     tf.attachSource(4);
+    tf.update(
+      {
+        transforms: [
+          {
+            parentFrameId: "map",
+            childFrameId: "odom",
+            translation: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 },
+          },
+          {
+            parentFrameId: "odom",
+            childFrameId: "base",
+            translation: { x: 1, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0, w: 1 },
+          },
+        ],
+      },
+      4,
+    );
+    expect([...(renderer.inputs.at(-1)?.positions ?? [])]).toEqual([
+      0, 0, 0, 0, 0, 0,
+      0, 0, 0, expect.closeTo(0, 6), 1, 0,
+    ]);
+
+    tf.attachSource(5);
     expect(() =>
       tf.update(
         {
@@ -287,7 +346,7 @@ describe("M2 geometry displays", () => {
             { parentFrameId: "a", childFrameId: "b", translation: { x: 0, y: 0, z: 0 } },
           ],
         },
-        4,
+        5,
       ),
     ).toThrow(/cycle/);
 
@@ -328,7 +387,7 @@ describe("M2 geometry displays", () => {
   it("bounds Marker arrays and OccupancyGrid cell conversion", () => {
     const renderer = new MockRenderer();
     const marker = new MarkerDisplay("marker", renderer);
-    marker.configure({ maxMarkers: 2, maxPoints: 2, maxInputBytes: 1024 });
+    marker.configure({ maxMarkers: 2, maxPoints: 3, maxInputBytes: 1024 });
     marker.attachSource(1);
     expect(
       marker.update(
@@ -346,14 +405,14 @@ describe("M2 geometry displays", () => {
         },
         1,
       ),
-    ).toMatchObject({ displayKind: "marker", renderedVertices: 2, droppedVertices: 1 });
+    ).toMatchObject({ displayKind: "marker", renderedVertices: 3, droppedVertices: 0 });
     marker.attachSource(2);
-    expect(() =>
+    expect(
       marker.update(
-        { frameId: "map", namespace: "mesh", id: 2, action: "add", type: "mesh-resource", points: [{ x: 0, y: 0, z: 0 }] },
+        { frameId: "map", namespace: "mesh", id: 2, action: "add", type: "pose-point", points: [{ x: 0, y: 0, z: 0 }] },
         2,
       ),
-    ).toThrow(/unsupported marker type/);
+    ).toMatchObject({ primitive: "points", renderedVertices: 1, details: { markerType: "pose-point" } });
 
     const map = new OccupancyGridDisplay("map", renderer);
     map.configure({ occupiedThreshold: 50, maxCells: 2, maxInputBytes: 16 });

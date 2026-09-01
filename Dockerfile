@@ -20,6 +20,10 @@ RUN corepack pnpm --filter @ros-web-viewer/web build:web
 
 FROM caddy:2.10-alpine AS runtime
 
+RUN setcap -r /usr/bin/caddy \
+  && addgroup -g 10001 -S rosviewer \
+  && adduser -u 10001 -S -D -H -G rosviewer rosviewer \
+  && chown -R rosviewer:rosviewer /config /data /srv
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /workspace/apps/web/dist-web /srv
 
@@ -27,4 +31,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 
+USER rosviewer
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

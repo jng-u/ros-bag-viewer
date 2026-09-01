@@ -29,7 +29,7 @@ class FixtureWritable implements IWritable {
   }
 }
 
-async function fixture(indexed: boolean): Promise<Uint8Array> {
+async function fixture(indexed: boolean, compressed = false): Promise<Uint8Array> {
   const writable = new FixtureWritable();
   const writer = new McapWriter({
     writable,
@@ -41,6 +41,7 @@ async function fixture(indexed: boolean): Promise<Uint8Array> {
     useMessageIndex: indexed,
     useChunkIndex: indexed,
     chunkSize: 32,
+    ...(compressed ? { compressChunk: (chunkData: Uint8Array) => ({ compression: "test", compressedData: chunkData }) } : {}),
   });
   await writer.start({ profile: "ros2", library: "ros-web-viewer deterministic fixture" });
   const schemaId = await writer.registerSchema({
@@ -97,6 +98,9 @@ describe("MCAP adapter", () => {
     const messages = [];
     for await (const message of session.readIndexed({ startTime: 15n, endTime: 25n })) messages.push(message);
     expect(messages.map((message) => [message.sequence, [...message.data]])).toEqual([[1n, [4, 5, 6]]]);
+    const latest = [];
+    for await (const message of session.readIndexed({ endTime: 20n, reverse: true })) latest.push(message);
+    expect(latest.map((message) => message.sequence)).toEqual([1n, 0n]);
     const telemetry = reader.snapshotTelemetry();
     expect(telemetry.readCalls).toBeGreaterThan(1);
     expect(telemetry.peakInFlightBytes).toBeLessThan(bytes.byteLength);
@@ -152,5 +156,33 @@ describe("MCAP adapter", () => {
     expect(progress).toEqual([...progress].sort((left, right) => left - right));
     expect(session.telemetry()).toMatchObject({ mode: "unindexed-degraded", messagesRead: 2, scanProgress: 1 });
     expect(reader.snapshotTelemetry().peakInFlightBytes).toBeLessThan(bytes.byteLength);
+  });
+
+  it("propagates corrupt indexed summaries instead of misclassifying them as unindexed", async () => {
+    const bytes = await fixture(true);
+    const footerLength = 37;
+    const footerCrcOffset = bytes.byteLength - footerLength + 25;
+    bytes[footerCrcOffset] = (bytes[footerCrcOffset] ?? 0) ^ 1;
+    await expect(McapSourceSession.open(boundedReader(bytes))).rejects.toThrow(/indexed initialization failed.*summary CRC/);
+  });
+
+  it("supports bounded compressed chunks without a lifetime-work kill switch", async () => {
+    const bytes = await fixture(true, true);
+    const session = await McapSourceSession.open(boundedReader(bytes), {
+      limits: {
+        sequentialReadBytes: 64,
+        maxBufferedBytes: 2048,
+        maxDecompressedBytes: 256,
+        maxDecompressionRatio: 16,
+        maxMessageIndexCacheBytes: 256,
+      },
+      decompressors: { test: (buffer) => buffer },
+    });
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const messages = [];
+      for await (const message of session.readIndexed()) messages.push(message);
+      expect(messages).toHaveLength(2);
+    }
+    expect(session.telemetry().decompressedBytes).toBeGreaterThan(256);
   });
 });

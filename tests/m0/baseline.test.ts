@@ -138,10 +138,13 @@ describe("M0 corpus evidence gate", () => {
       expect(Array.isArray(entry.types)).toBe(true);
       expect(entry.expectedFrames).toBeGreaterThanOrEqual(0);
       expect(entry.expectedMessages).toBeGreaterThanOrEqual(0);
-      expect(entry.ciUse).toBe("allowed");
+      expect(["allowed", "manual-local-only"]).toContain(entry.ciUse);
+      if (entry.license === "NOASSERTION") expect(entry.ciUse).toBe("manual-local-only");
       expect(["allowed", "prohibited-download-by-hash"]).toContain(entry.redistributionPolicy);
-      if (entry.sourceUrl.includes("://")) {
+      if (entry.sourceUrl.includes("://") && entry.license !== "NOASSERTION") {
         expect(entry.licenseEvidence, `${entry.id}.licenseEvidence`).toMatch(/^https:\/\//);
+      } else if (entry.license === "NOASSERTION") {
+        expect(entry.licenseEvidence, `${entry.id}.licenseEvidence`).toMatch(/no top-level license|not redistribut/iu);
       }
     }
   });
@@ -269,6 +272,7 @@ describe("M0 forbidden-scope guard", () => {
       "web:@ros-web-viewer/source-mcap",
       "web:@ros-web-viewer/source-ros1bag",
       "web:@ros-web-viewer/source-ros2-sqlite",
+      "web:@ros-web-viewer/tf",
       "web:@ros-web-viewer/worker-runtime",
       "web:@sqlite.org/sqlite-wasm",
       "web:lz4-lite",

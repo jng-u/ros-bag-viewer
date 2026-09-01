@@ -519,6 +519,8 @@ export class Ros1BagSourceSession {
   readonly #chunkInfos = new Map<bigint, ChunkInfo>();
   readonly #indexes: IndexEntry[] = [];
   readonly #diagnostics: string[] = [];
+  readonly #decompressedCache = new Map<bigint, Uint8Array>();
+  readonly #decompressionInFlight = new Map<bigint, Promise<Uint8Array>>();
   readonly #telemetry: MutableTelemetry;
   readonly #dataStart: bigint;
   readonly #dataEnd: bigint;
@@ -526,6 +528,7 @@ export class Ros1BagSourceSession {
   readonly #epoch?: Ros1EpochController;
   #activeEpoch: number;
   #closed = false;
+  #decompressedCacheBytes = 0;
 
   private constructor(args: {
     reader: Ros1BagReader;
@@ -777,6 +780,7 @@ export class Ros1BagSourceSession {
     readonly topics?: readonly string[];
     readonly startTime?: bigint;
     readonly endTime?: bigint;
+    readonly reverse?: boolean;
   } = {}): AsyncGenerator<Ros1Message, void, void> {
     if (this.mode !== "indexed") throw diagnostic("corrupt-bag", "random seek is unavailable for an unindexed ROS1 bag");
     this.#activeEpoch = startEpoch(this.#epoch, "ROS1 bag indexed seek");
@@ -797,13 +801,13 @@ export class Ros1BagSourceSession {
         if (left.chunkPosition !== right.chunkPosition) return left.chunkPosition < right.chunkPosition ? -1 : 1;
         return left.offset - right.offset;
       });
-    const decompressed = new Map<bigint, Uint8Array>();
+    if (options.reverse) selected.reverse();
     let sequence = 0n;
     for (const entry of selected) {
       assertActive(this.#epoch, this.#activeEpoch, this.#closed);
       const chunk = this.#chunks.get(entry.chunkPosition);
       if (!chunk) throw diagnostic("corrupt-bag", "ROS1 index references a missing chunk");
-      const message = await this.#messageAt(chunk, entry.offset, sequence, decompressed);
+      const message = await this.#messageAt(chunk, entry.offset, sequence);
       if (message.connection.id !== entry.connectionId || message.timeNanos !== entry.timeNanos) {
         throw diagnostic("corrupt-bag", "ROS1 message record disagrees with its index entry");
       }
@@ -817,7 +821,6 @@ export class Ros1BagSourceSession {
     chunk: ChunkDescriptor,
     offset: number,
     sequence: bigint,
-    decompressed: Map<bigint, Uint8Array>,
   ): Promise<Ros1Message> {
     this.#telemetry.chunksVisited += 1;
     if (chunk.compression === "none") {
@@ -832,11 +835,7 @@ export class Ros1BagSourceSession {
         this.#limits,
       );
     }
-    let bytes = decompressed.get(chunk.position);
-    if (!bytes) {
-      bytes = await this.#decompressChunk(chunk);
-      decompressed.set(chunk.position, bytes);
-    }
+    const bytes = await this.#cachedDecompressedChunk(chunk);
     const meta = readRecordMetaFromBytes(bytes, offset, this.#limits);
     return parseMessage(
       meta,
@@ -845,6 +844,30 @@ export class Ros1BagSourceSession {
       sequence,
       this.#limits,
     );
+  }
+
+  async #cachedDecompressedChunk(chunk: ChunkDescriptor): Promise<Uint8Array> {
+    const cached = this.#decompressedCache.get(chunk.position);
+    if (cached) {
+      this.#decompressedCache.delete(chunk.position);
+      this.#decompressedCache.set(chunk.position, cached);
+      return cached;
+    }
+    const existing = this.#decompressionInFlight.get(chunk.position);
+    if (existing) return existing;
+    const pending = this.#decompressChunk(chunk).then((output) => {
+      this.#decompressedCache.set(chunk.position, output);
+      this.#decompressedCacheBytes += output.byteLength;
+      while (this.#decompressedCacheBytes > this.#limits.maxTotalDecompressedBytes) {
+        const oldest = this.#decompressedCache.entries().next().value as [bigint, Uint8Array] | undefined;
+        if (!oldest) break;
+        this.#decompressedCache.delete(oldest[0]);
+        this.#decompressedCacheBytes -= oldest[1].byteLength;
+      }
+      return output;
+    }).finally(() => this.#decompressionInFlight.delete(chunk.position));
+    this.#decompressionInFlight.set(chunk.position, pending);
+    return pending;
   }
 
   async #decompressChunk(chunk: ChunkDescriptor): Promise<Uint8Array> {
@@ -870,9 +893,6 @@ export class Ros1BagSourceSession {
       throw diagnostic("corrupt-bag", `${chunk.compression} decoder returned an unexpected byte count`);
     }
     this.#telemetry.decompressedBytes += output.byteLength;
-    if (this.#telemetry.decompressedBytes > this.#limits.maxTotalDecompressedBytes) {
-      throw diagnostic("resource-limit", "ROS1 session exceeds maxTotalDecompressedBytes");
-    }
     return output;
   }
 
@@ -959,6 +979,8 @@ export class Ros1BagSourceSession {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#decompressedCache.clear();
+    this.#decompressedCacheBytes = 0;
     if (this.#epoch?.advance) this.#epoch.advance("ROS1 bag closed");
   }
 }

@@ -28,7 +28,7 @@ describe("ROS1 semantic decoding", () => {
       data: writer.finish(),
     })).toEqual({
       kind: "path",
-      message: { frameId: "map", poses: [{ position: { x: 1.25, y: -2.5, z: 3.75 } }] },
+      message: { frameId: "map", stampNanos: 1_000_000_002n, poses: [{ position: { x: 1.25, y: -2.5, z: 3.75 } }] },
     });
   });
 });

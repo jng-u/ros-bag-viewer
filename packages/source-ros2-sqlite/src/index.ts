@@ -83,6 +83,7 @@ export interface Ros2BundleAccess {
 export interface SourceEpochPort {
   readonly epoch: number;
   readonly signal: AbortSignal;
+  advance?(reason?: string): number | void;
 }
 
 export type SqliteValue = null | number | bigint | string | Uint8Array;
@@ -155,6 +156,7 @@ export interface Ros2TopicInfo {
   readonly offeredQosProfiles?: string;
   readonly typeDescriptionHash?: string;
   readonly schema: Ros2SchemaInfo;
+  readonly messageCount?: bigint;
 }
 
 export interface Ros2SqliteMessage {
@@ -481,7 +483,7 @@ export class Ros2SqliteSourceSession {
   readonly diagnostics: readonly string[];
   readonly #limits: Ros2SqliteLimits;
   readonly #epoch: SourceEpochPort;
-  readonly #openedEpoch: number;
+  #openedEpoch: number;
   readonly #parts: readonly OpenPart[];
   readonly #topics: readonly Ros2TopicInfo[];
   readonly #topicsByName: ReadonlyMap<string, Ros2TopicInfo>;
@@ -816,6 +818,7 @@ export class Ros2SqliteSourceSession {
     }
 
     const schemasByName = new Map<string, Ros2SchemaInfo>();
+    const metadataTopicsByName = new Map(metadata.topics.map((topic) => [topic.name, topic]));
     const topics = [...topicRecords.values()].sort((left, right) => left.name.localeCompare(right.name)).map((topic): Ros2TopicInfo => {
       const definition = definitions.get(topic.type);
       let schema = schemasByName.get(topic.type);
@@ -843,7 +846,8 @@ export class Ros2SqliteSourceSession {
             };
         schemasByName.set(topic.type, schema);
       }
-      return { ...topic, schema };
+      const metadataTopic = metadataTopicsByName.get(topic.name);
+      return { ...topic, schema, ...(metadataTopic?.messageCount === undefined ? {} : { messageCount: metadataTopic.messageCount }) };
     });
 
     let timeRange: Ros2TimeRange | undefined;
@@ -875,6 +879,13 @@ export class Ros2SqliteSourceSession {
     });
   }
 
+  advanceEpoch(reason = "ROS2 SQLite source epoch advanced"): number {
+    if (this.#closed) throw abortError("ROS2 SQLite source is closed");
+    if (!this.#epoch.advance) throw new Error("ROS2 SQLite epoch controller cannot advance");
+    this.#openedEpoch = this.#epoch.advance(reason) ?? this.#epoch.epoch;
+    return this.#openedEpoch;
+  }
+
   topics(): readonly Ros2TopicInfo[] {
     this.#assertOpen();
     return this.#topics;
@@ -899,6 +910,7 @@ export class Ros2SqliteSourceSession {
     readonly endTimeNanos?: bigint;
     readonly topics?: readonly string[];
     readonly limit?: number;
+    readonly order?: "ascending" | "descending";
   } = {}): AsyncGenerator<Ros2SqliteMessage, void, void> {
     this.#assertOpen();
     const startTime = options.startTimeNanos ?? this.#timeRange?.startTimeNanos ?? 0n;
@@ -910,12 +922,17 @@ export class Ros2SqliteSourceSession {
     }
     const topicFilter = options.topics ? [...new Set(options.topics)] : undefined;
     if (topicFilter && topicFilter.length > this.#limits.maxTopics) fail("RESOURCE_LIMIT", "topic filter exceeds maxTopics");
-    return this.#iterateMessages(startTime, endTime, topicFilter, limit);
+    return this.#iterateMessages(startTime, endTime, topicFilter, limit, options.order ?? "ascending");
   }
 
   seek(
     timestampNanos: bigint,
-    options: { readonly endTimeNanos?: bigint; readonly topics?: readonly string[]; readonly limit?: number } = {},
+    options: {
+      readonly endTimeNanos?: bigint;
+      readonly topics?: readonly string[];
+      readonly limit?: number;
+      readonly order?: "ascending" | "descending";
+    } = {},
   ): AsyncGenerator<Ros2SqliteMessage, void, void> {
     return this.readMessages({ ...options, startTimeNanos: timestampNanos });
   }
@@ -953,6 +970,7 @@ export class Ros2SqliteSourceSession {
     endTime: bigint,
     topics: readonly string[] | undefined,
     limit: number,
+    order: "ascending" | "descending",
   ): AsyncGenerator<Ros2SqliteMessage, void, void> {
     type Cursor = {
       part: OpenPart;
@@ -968,7 +986,8 @@ export class Ros2SqliteSourceSession {
       const conditions = ["messages.timestamp >= ?", "messages.timestamp <= ?"];
       const parameters: SqliteValue[] = [startTime, endTime];
       if (cursor.after) {
-        conditions.push("(messages.timestamp > ? OR (messages.timestamp = ? AND messages.id > ?))");
+        const comparison = order === "ascending" ? ">" : "<";
+        conditions.push(`(messages.timestamp ${comparison} ? OR (messages.timestamp = ? AND messages.id ${comparison} ?))`);
         parameters.push(cursor.after.timestamp, cursor.after.timestamp, cursor.after.id);
       }
       if (topics && topics.length > 0) {
@@ -981,7 +1000,8 @@ export class Ros2SqliteSourceSession {
         `SELECT messages.id AS message_id, messages.timestamp AS timestamp, messages.data AS data, ` +
           `topics.name AS topic_name, topics.type AS topic_type, topics.serialization_format AS serialization_format ` +
           `FROM messages JOIN topics ON messages.topic_id = topics.id WHERE ${conditions.join(" AND ")} ` +
-          `ORDER BY messages.timestamp ASC, messages.id ASC LIMIT ?`,
+          `ORDER BY messages.timestamp ${order === "ascending" ? "ASC" : "DESC"}, ` +
+          `messages.id ${order === "ascending" ? "ASC" : "DESC"} LIMIT ?`,
         parameters,
       );
       cursor.rows = rows.map((row): InternalMessageRow => {
@@ -1010,9 +1030,14 @@ export class Ros2SqliteSourceSession {
         const selectedRow = selected?.rows[selected.index];
         const selectedOrdinal = selected?.part.ordinal;
         if (!row) continue;
-        if (!selectedRow || row.timestampNanos < selectedRow.timestampNanos ||
-          (row.timestampNanos === selectedRow.timestampNanos && selectedOrdinal !== undefined && cursor.part.ordinal < selectedOrdinal) ||
-          (row.timestampNanos === selectedRow.timestampNanos && cursor.part.ordinal === selectedOrdinal && row.rowId < selectedRow.rowId)) {
+        const beforeSelected = selectedRow === undefined || (order === "ascending"
+          ? row.timestampNanos < selectedRow.timestampNanos ||
+            (row.timestampNanos === selectedRow.timestampNanos && selectedOrdinal !== undefined && cursor.part.ordinal < selectedOrdinal) ||
+            (row.timestampNanos === selectedRow.timestampNanos && cursor.part.ordinal === selectedOrdinal && row.rowId < selectedRow.rowId)
+          : row.timestampNanos > selectedRow.timestampNanos ||
+            (row.timestampNanos === selectedRow.timestampNanos && selectedOrdinal !== undefined && cursor.part.ordinal > selectedOrdinal) ||
+            (row.timestampNanos === selectedRow.timestampNanos && cursor.part.ordinal === selectedOrdinal && row.rowId > selectedRow.rowId));
+        if (beforeSelected) {
           selected = cursor;
         }
       }

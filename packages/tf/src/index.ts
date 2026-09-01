@@ -28,6 +28,11 @@ export type TfLookupResult =
   | { readonly ok: true; readonly transform: RigidTransform; readonly interpolated: boolean }
   | { readonly ok: false; readonly reason: "missing" | "cycle" | "extrapolation" | "stale-epoch"; readonly diagnostic: string };
 
+export interface TfSnapshot {
+  readonly samples: readonly TfSample[];
+  readonly diagnostics: readonly string[];
+}
+
 const IDENTITY: RigidTransform = {
   translation: { x: 0, y: 0, z: 0 },
   rotation: { x: 0, y: 0, z: 0, w: 1 },
@@ -105,13 +110,20 @@ function interpolate(before: TfSample, after: TfSample, timeNanos: bigint): Rigi
 
 export class TfBuffer {
   readonly #maxSamples: number;
+  readonly #maxInterpolationSpanNanos: bigint;
+  readonly #maxHistoryNanos: bigint;
   readonly #samplesByChild = new Map<string, TfSample[]>();
   #epoch: number;
+  #totalSamples = 0;
 
-  constructor(epoch: number, maxSamples: number) {
+  constructor(epoch: number, maxSamples: number, maxInterpolationSpanNanos = 30_000_000_000n, maxHistoryNanos = 120_000_000_000n) {
     if (maxSamples < 1) throw new Error("TF sample limit must be positive");
+    if (maxInterpolationSpanNanos <= 0n) throw new Error("TF interpolation span must be positive");
+    if (maxHistoryNanos <= 0n) throw new Error("TF history span must be positive");
     this.#epoch = epoch;
     this.#maxSamples = maxSamples;
+    this.#maxInterpolationSpanNanos = maxInterpolationSpanNanos;
+    this.#maxHistoryNanos = maxHistoryNanos;
   }
 
   add(sample: TfSample): void {
@@ -121,16 +133,53 @@ export class TfBuffer {
     }
     normalize(sample.rotation);
     const samples = this.#samplesByChild.get(sample.childFrame) ?? [];
+    if (sample.isStatic) {
+      for (let index = samples.length - 1; index >= 0; index -= 1) {
+        if (samples[index]!.isStatic) {
+          samples.splice(index, 1);
+          this.#totalSamples -= 1;
+        }
+      }
+    }
     samples.push(sample);
+    this.#totalSamples += 1;
     samples.sort((left, right) => (left.timeNanos === right.timeNanos ? 0 : left.timeNanos < right.timeNanos ? -1 : 1));
-    while (samples.length > this.#maxSamples) samples.shift();
+    const newestDynamicTime = [...samples].reverse().find((candidate) => !candidate.isStatic)?.timeNanos;
+    if (newestDynamicTime !== undefined) {
+      const cutoff = newestDynamicTime > this.#maxHistoryNanos ? newestDynamicTime - this.#maxHistoryNanos : 0n;
+      for (let index = samples.length - 1; index >= 0; index -= 1) {
+        const candidate = samples[index]!;
+        if (!candidate.isStatic && candidate.timeNanos < cutoff) { samples.splice(index, 1); this.#totalSamples -= 1; }
+      }
+    }
     this.#samplesByChild.set(sample.childFrame, samples);
+    while (this.#totalSamples > this.#maxSamples) this.#evictOldest();
   }
 
   advanceEpoch(epoch: number): void {
     if (epoch <= this.#epoch) throw new Error("TF epoch must advance monotonically");
     this.#epoch = epoch;
     this.#samplesByChild.clear();
+    this.#totalSamples = 0;
+  }
+
+  #evictOldest(): void {
+    let selectedChild: string | undefined;
+    let selectedIndex = -1;
+    let selectedTime: bigint | undefined;
+    for (const [child, samples] of this.#samplesByChild) {
+      const dynamicIndex = samples.findIndex((sample) => !sample.isStatic);
+      const index = dynamicIndex >= 0 ? dynamicIndex : 0;
+      const candidate = samples[index];
+      if (candidate && (selectedTime === undefined || candidate.timeNanos < selectedTime)) {
+        selectedChild = child; selectedIndex = index; selectedTime = candidate.timeNanos;
+      }
+    }
+    if (selectedChild === undefined) return;
+    const samples = this.#samplesByChild.get(selectedChild)!;
+    samples.splice(selectedIndex, 1);
+    this.#totalSamples -= 1;
+    if (samples.length === 0) this.#samplesByChild.delete(selectedChild);
   }
 
   lookup(targetFrame: string, sourceFrame: string, timeNanos: bigint, epoch: number): TfLookupResult {
@@ -149,6 +198,41 @@ export class TfBuffer {
       transform: compose(inverse(commonFromTarget), commonFromSource),
       interpolated: sourceChain.interpolated || targetChain.interpolated,
     };
+  }
+
+  /** Selects one bounded, query-time transform per child for frame-tree rendering. */
+  snapshot(timeNanos: bigint, epoch: number): TfSnapshot {
+    if (epoch !== this.#epoch) return { samples: [], diagnostics: ["TF snapshot belongs to a stale source epoch"] };
+    const samples: TfSample[] = [];
+    const diagnostics: string[] = [];
+    for (const childFrame of [...this.#samplesByChild.keys()].sort()) {
+      const selected = this.#select(childFrame, timeNanos);
+      if (!selected.ok) {
+        diagnostics.push(selected.diagnostic);
+        continue;
+      }
+      samples.push({
+        ...selected.transform,
+        parentFrame: selected.sample.parentFrame,
+        childFrame,
+        timeNanos,
+        isStatic: selected.sample.isStatic,
+        epoch,
+      });
+    }
+    return { samples, diagnostics };
+  }
+
+  /** Latest-per-child snapshot for a live tree view, where future brackets do not exist yet. */
+  latestSnapshot(epoch: number): TfSnapshot {
+    if (epoch !== this.#epoch) return { samples: [], diagnostics: ["TF snapshot belongs to a stale source epoch"] };
+    const samples: TfSample[] = [];
+    for (const childFrame of [...this.#samplesByChild.keys()].sort()) {
+      const history = this.#samplesByChild.get(childFrame) ?? [];
+      const selected = history.find((sample) => sample.isStatic) ?? history.at(-1);
+      if (selected) samples.push(selected);
+    }
+    return { samples, diagnostics: [] };
   }
 
   #chainToRoot(frame: string, timeNanos: bigint):
@@ -193,14 +277,24 @@ export class TfBuffer {
       }
     }
     if (!before || !after) {
+      const first = samples.find((sample) => !sample.isStatic)?.timeNanos;
+      const last = [...samples].reverse().find((sample) => !sample.isStatic)?.timeNanos;
+      const available = first === undefined || last === undefined ? "none" : `${first}-${last}`;
       return {
         ok: false,
         reason: "extrapolation",
-        diagnostic: `historical TF lookup for ${childFrame} requires bracketing samples; latest fallback is forbidden`,
+        diagnostic: `historical TF lookup for ${childFrame} at ${timeNanos} requires bracketing samples (available ${available}); latest fallback is forbidden`,
       };
     }
     if (before.parentFrame !== after.parentFrame) {
       return { ok: false, reason: "missing", diagnostic: `TF parent changed across interpolation for ${childFrame}` };
+    }
+    if (after.timeNanos - before.timeNanos > this.#maxInterpolationSpanNanos) {
+      return {
+        ok: false,
+        reason: "extrapolation",
+        diagnostic: `historical TF lookup for ${childFrame} exceeds the interpolation horizon`,
+      };
     }
     return {
       ok: true,

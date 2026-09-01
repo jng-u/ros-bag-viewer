@@ -24,6 +24,7 @@ class MockWebGl2 {
   bufferAllocations: number[] = [];
   bufferUploads: number[] = [];
   draws: Array<{ mode: number; count: number }> = [];
+  matrices: Float32List[] = [];
 
   createBuffer(): WebGLBuffer {
     this.createdBuffers += 1;
@@ -81,7 +82,7 @@ class MockWebGl2 {
   useProgram(): void {}
   enableVertexAttribArray(): void {}
   vertexAttribPointer(): void {}
-  uniformMatrix4fv(): void {}
+  uniformMatrix4fv(_location: WebGLUniformLocation | null, _transpose: boolean, value: Float32List): void { this.matrices.push(Array.from(value)); }
   uniform4fv(): void {}
 
   drawArrays(mode: number, _first: number, count: number): void {
@@ -124,23 +125,24 @@ describe("WebGl2Renderer", () => {
     });
   });
 
-  it("deterministically decimates before allocation", () => {
+  it("rejects over-cap geometry instead of silently decimating", () => {
     const { gl, renderer: value } = renderer({ maxVerticesPerGeometry: 2 });
-    const geometry = value.upsert({
+    expect(() => value.upsert({
       id: "bounded-cloud",
       topology: "points",
-      positions: new Float32Array([
-        0, 0, 0,
-        1, 0, 0,
-        2, 0, 0,
-        3, 0, 0,
-        4, 0, 0,
-      ]),
-    });
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 2, 0, 0]),
+    })).toThrow(/hidden decimation is forbidden/u);
+    expect(gl.bufferAllocations).toEqual([]);
+    expect(value.telemetry()).toMatchObject({ rejectedAllocations: 1, decimatedVertices: 0 });
+  });
 
-    expect(geometry.vertexCount).toBe(2);
-    expect(gl.bufferAllocations).toEqual([24]);
-    expect(value.telemetry().decimatedVertices).toBe(3);
+  it("applies and preserves a per-geometry model transform across updates", () => {
+    const { gl, renderer: value } = renderer();
+    value.upsert({ id: "sensor", topology: "points", positions: new Float32Array([0, 0, 0]) });
+    const transform = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 3, 4, 5, 1]);
+    value.setTransform("sensor", transform);
+    value.upsert({ id: "sensor", topology: "points", positions: new Float32Array([1, 0, 0]) }).draw();
+    expect(gl.matrices.at(-1)).toEqual(Array.from(transform));
   });
 
   it("reuses exact-capacity pooled buffers and deletes every buffer on disposal", () => {

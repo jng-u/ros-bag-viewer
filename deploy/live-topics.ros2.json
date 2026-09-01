@@ -1,0 +1,13 @@
+[
+  {"id":"tf","name":"/tf","typeName":"tf2_msgs/msg/TFMessage","maxRateHz":120,"maxMessageBytes":4194304},
+  {"id":"tf-static","name":"/tf_static","typeName":"tf2_msgs/msg/TFMessage","maxRateHz":10,"maxMessageBytes":4194304},
+  {"id":"points","name":"/points","typeName":"sensor_msgs/msg/PointCloud2","maxRateHz":30,"maxMessageBytes":4194304},
+  {"id":"scan","name":"/scan","typeName":"sensor_msgs/msg/LaserScan","maxRateHz":60,"maxMessageBytes":4194304},
+  {"id":"odom","name":"/odom","typeName":"nav_msgs/msg/Odometry","maxRateHz":120,"maxMessageBytes":1048576},
+  {"id":"path","name":"/path","typeName":"nav_msgs/msg/Path","maxRateHz":30,"maxMessageBytes":4194304},
+  {"id":"map","name":"/map","typeName":"nav_msgs/msg/OccupancyGrid","maxRateHz":10,"maxMessageBytes":4194304},
+  {"id":"image","name":"/camera/image_raw","typeName":"sensor_msgs/msg/Image","maxRateHz":30,"maxMessageBytes":4194304},
+  {"id":"camera-info","name":"/camera/camera_info","typeName":"sensor_msgs/msg/CameraInfo","maxRateHz":30,"maxMessageBytes":1048576},
+  {"id":"markers","name":"/visualization_marker","typeName":"visualization_msgs/msg/Marker","maxRateHz":60,"maxMessageBytes":4194304},
+  {"id":"viewer-plane","name":"/viewer/plane","typeName":"shape_msgs/msg/Plane","maxRateHz":30,"maxMessageBytes":65536}
+]

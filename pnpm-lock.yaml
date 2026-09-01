@@ -62,6 +62,9 @@ importers:
       '@ros-web-viewer/source-ros2-sqlite':
         specifier: workspace:*
         version: link:../../packages/source-ros2-sqlite
+      '@ros-web-viewer/tf':
+        specifier: workspace:*
+        version: link:../../packages/tf
       '@ros-web-viewer/worker-runtime':
         specifier: workspace:*
         version: link:../../packages/worker-runtime

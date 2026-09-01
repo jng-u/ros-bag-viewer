@@ -34,8 +34,8 @@
       "id": "local-mcap",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:c88b6721f1f289ae14317ae9eeec681bcc6a81c5a4c224e328b8491ac1d82cb8",
-      "evidenceDigest": "sha256:db192d20fd54920194ebeb25c14c430ce20d218e67fc507b2609c9949f28dde9",
+      "resultDigest": "sha256:0b8aaf173ada743b2c1e90291f8b42031b2a922806660d8863abd53a296fe7f2",
+      "evidenceDigest": "sha256:02b1c86aefa9fc6dace332c0614ead5eaba86dd1fadf7a445f132adcfdd52ea9",
       "testName": "MCAP adapter uses bounded official-reader range seeks for indexed MCAP",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -45,7 +45,7 @@
         "facts": {
           "mode": "indexed",
           "messages": 1,
-          "readCalls": 6
+          "readCalls": 9
         }
       }
     },
@@ -53,8 +53,8 @@
       "id": "local-ros1-bag",
       "result": "pass",
       "evidence": "packages/source-ros1bag/test/index.test.ts",
-      "resultDigest": "sha256:1894d0702759fac253b67c1e58bbf3be78041e42cf4473bd3d4765b28e1a7167",
-      "evidenceDigest": "sha256:38240add5ba28a8198c3affd03b4955c19e3349848ca2d3a96303faed26afe69",
+      "resultDigest": "sha256:77a1fded6fb2c65d3e9710e94faf94ef4033105369343a7640e75fa32bea3958",
+      "evidenceDigest": "sha256:e656240aa4038fe3510e1c887c84c0f90bf6bceb828fd1d20b34c9d253bc9f51",
       "testName": "ROS1 bag SourceBundle adapter uses bounded v2 header/index/chunk/message traversal with schema provenance",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -64,7 +64,7 @@
         "facts": {
           "mode": "indexed",
           "messages": 1,
-          "readCalls": 23
+          "readCalls": 31
         }
       }
     },
@@ -72,8 +72,8 @@
       "id": "local-ros2-sqlite",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:4fdb00a7a741b1924c822c3eaec0468e95adbbeaa57c86e46ce144c86dfb83b9",
-      "evidenceDigest": "sha256:a742ce5968ef960bd9345b903626a433d4c6c2e408be6ab301925c65d61e1c07",
+      "resultDigest": "sha256:f4ece904aee55cd380c4f824359ab479da5044582607e8c6872ace6913ff2bab",
+      "evidenceDigest": "sha256:2241274cb4836de41780f7c4ceea0af81cf36ec3e63a14f80e4b04f6bbc981b7",
       "testName": "ROS2 SQLite SourceBundle adapter opens real multipart SQLite fixtures and merges seek results deterministically with bounded queries",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -152,8 +152,8 @@
       "id": "schema-present",
       "result": "pass",
       "evidence": "packages/source-mcap/test/index.test.ts",
-      "resultDigest": "sha256:52711df4f11def44b031e2d25e088074eda285dee9a61fc4ece3c44080bcb787",
-      "evidenceDigest": "sha256:db192d20fd54920194ebeb25c14c430ce20d218e67fc507b2609c9949f28dde9",
+      "resultDigest": "sha256:4e29568965695941b0a64e4076003fc7aa53ad2aabbc0eff8467b0fae1cf1d2d",
+      "evidenceDigest": "sha256:02b1c86aefa9fc6dace332c0614ead5eaba86dd1fadf7a445f132adcfdd52ea9",
       "testName": "MCAP adapter exposes embedded schema bytes as schema-present",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -170,8 +170,8 @@
       "id": "schema-resolvable",
       "result": "pass",
       "evidence": "packages/source-ros2-sqlite/test/index.test.ts",
-      "resultDigest": "sha256:a3bbf0ee4ee10f9877b6f3ec3a0f1d78af430d3320f3dcdf262ecf74e6b8cfa0",
-      "evidenceDigest": "sha256:a742ce5968ef960bd9345b903626a433d4c6c2e408be6ab301925c65d61e1c07",
+      "resultDigest": "sha256:040df4a8eef083bf16f41a374393faaa772b96cd34b57d1d0783444dd60e017e",
+      "evidenceDigest": "sha256:2241274cb4836de41780f7c4ceea0af81cf36ec3e63a14f80e4b04f6bbc981b7",
       "testName": "ROS2 SQLite SourceBundle adapter exposes metadata-only schemas as schema-resolvable",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -188,8 +188,8 @@
       "id": "opaque",
       "result": "pass",
       "evidence": "packages/displays-core/test/index.test.ts",
-      "resultDigest": "sha256:18b2d677d375ea6502af36e290ebae19960cb1c4ecd436a0e9230307d288861f",
-      "evidenceDigest": "sha256:8e873576e45bd6eaa86dd1103dbb3508bfccffbb192ef52a01c1edb44bc926a5",
+      "resultDigest": "sha256:50a2c46f1613b497b02f4c735745778e49f10ab6893da605377e0cdcafbc480d",
+      "evidenceDigest": "sha256:8af39de2bd7a8100192248e1426af7e6ac419fe2227955b4314ef7bb1b1f6cdb",
       "testName": "M2 raster and generic fallback displays keeps schema-backed trees bounded and opaque payloads byte-only",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -303,8 +303,8 @@
       "id": "tf-interpolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:e2f2dda5187324c8553ca7963a445aefd32f665fa5370ccb5d715fed18db5be0",
-      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "resultDigest": "sha256:b58d2cf70436ed5a5e6651459a222d2be85c7f1bdbca716f5297fed2f20bae21",
+      "evidenceDigest": "sha256:ef6e604bc3f028e7ab44a5c85f64495e77af408cafc55191a91e95c22666d94b",
       "testName": "TF buffer interpolates bracketing transforms without latest fallback",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -321,8 +321,8 @@
       "id": "tf-missing",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:ab9d27f86050697c8d60a38b55eaa2c2e5c9ff104bcc7f946cf5115329480048",
-      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "resultDigest": "sha256:3d018bacb019ab700fd6c54df922005f1018e92ba3a574f720e1f1f2e8829239",
+      "evidenceDigest": "sha256:ef6e604bc3f028e7ab44a5c85f64495e77af408cafc55191a91e95c22666d94b",
       "testName": "TF buffer composes static chains and reports missing paths",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -339,8 +339,8 @@
       "id": "tf-extrapolation",
       "result": "pass",
       "evidence": "packages/tf/test/index.test.ts",
-      "resultDigest": "sha256:e6128c82bdbf1ad0c8c3f6eb82621d781769444f6b43d7e66a3af6e703027161",
-      "evidenceDigest": "sha256:2fbd23ce179fd529698d7475af9dee3eceab74b8147fe717b8813e2b748b0718",
+      "resultDigest": "sha256:035da59160ca34e039410c9c0195647d0ba46998a736fbe4e83f0c6bd1c82c80",
+      "evidenceDigest": "sha256:ef6e604bc3f028e7ab44a5c85f64495e77af408cafc55191a91e95c22666d94b",
       "testName": "TF buffer rejects extrapolation outside bracketing samples",
       "semanticEvent": {
         "schemaVersion": 1,

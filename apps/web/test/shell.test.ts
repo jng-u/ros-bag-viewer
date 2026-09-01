@@ -245,4 +245,29 @@ describe("minimum desktop shell", () => {
       "ros2-sqlite:fixture-ros2-sqlite",
     ]);
   });
+
+  it("does not report a closed live relay as ready", async () => {
+    const telemetry = {
+      state: "connected" as const,
+      sourceEpoch: 1,
+      queuedMessages: 0,
+      queuedBytes: 0,
+      acceptedMessages: 0,
+      deliveredMessages: 0,
+      droppedMessages: 0,
+    };
+    const controller = new DesktopShellController({
+      seek: vi.fn(async (currentTimeNanos) => ({ epoch: 1, currentTimeNanos })),
+      connectLive: vi.fn(async () => ({ sourceLabel: "relay", epoch: 1, topics: [], telemetry })),
+      pollLive: vi.fn(() => ({
+        epoch: 1,
+        messageCount: 0,
+        telemetry: { ...telemetry, state: "disconnected" as const, diagnostic: "transport closed" },
+      })),
+    });
+    await controller.connectLive({ browserOrigin: "http://localhost:8080", sessionToken: "secret" });
+    expect(controller.state.phase).toBe("ready");
+    controller.pollLive();
+    expect(controller.state).toMatchObject({ phase: "error", liveState: "disconnected", blockingError: "transport closed" });
+  });
 });

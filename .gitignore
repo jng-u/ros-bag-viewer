@@ -1,4 +1,6 @@
 node_modules/
+__pycache__/
+*.pyc
 dist/
 dist-web/
 coverage/
@@ -8,7 +10,11 @@ coverage/
 licenses.json
 sbom.cdx.json
 artifacts/
+!benchmarks/artifacts/
+!benchmarks/artifacts/public-browser-cartographer.json
+!benchmarks/artifacts/public-browser-seav-ros2.json
 .impeccable/
 apps/web/public/demo.mcap
 apps/web/public/demo-ros1.bag
 apps/web/public/demo-ros2/
+benchmarks/downloads/

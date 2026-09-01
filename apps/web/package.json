@@ -18,6 +18,7 @@
     "@ros-web-viewer/source-mcap": "workspace:*",
     "@ros-web-viewer/source-ros1bag": "workspace:*",
     "@ros-web-viewer/source-ros2-sqlite": "workspace:*",
+    "@ros-web-viewer/tf": "workspace:*",
     "@ros-web-viewer/worker-runtime": "workspace:*",
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",
     "lz4-lite": "1.1.2",

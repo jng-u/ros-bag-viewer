@@ -66,6 +66,12 @@ export interface SemanticSceneSummary {
 
 type GeometrySceneSummary = SemanticSceneSummary & { readonly primitive: PrimitiveTopology };
 
+export interface PreparedPointCloud2 {
+  readonly positions: Float32Array;
+  readonly color?: readonly [number, number, number, number];
+  readonly summary: GeometrySceneSummary;
+}
+
 export interface DisplayTelemetry {
   readonly state: DisplayState;
   readonly updates: number;
@@ -204,11 +210,28 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
   }
 
   update(message: TMessage, epoch: number): SemanticSceneSummary {
+    return this.updateConverted(() => {
+      if (this.config === undefined) throw new Error("display has no configured source");
+      return this.convert(message, this.config);
+    }, epoch);
+  }
+
+  protected updatePreparedGeometry(
+    converted: { positions: Float32Array; color?: readonly [number, number, number, number]; summary: GeometrySceneSummary },
+    epoch: number,
+  ): SemanticSceneSummary {
+    return this.updateConverted(() => converted, epoch);
+  }
+
+  private updateConverted(
+    convert: () => { positions: Float32Array; color?: readonly [number, number, number, number]; summary: GeometrySceneSummary },
+    epoch: number,
+  ): SemanticSceneSummary {
     this.#assertNotDisposed();
     if (this.config === undefined || this.#epoch === undefined) throw new Error("display has no configured source");
     if (epoch !== this.#epoch) throw new Error("stale source epoch");
     try {
-      const converted = this.convert(message, this.config);
+      const converted = convert();
       this.#resource?.dispose();
       this.#resource = this.renderer.upsert({
         id: this.id,
@@ -276,6 +299,69 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
 const FLOAT32_DATATYPE = 7;
 const MAX_POINT_FIELDS = 64;
 
+export function preparePointCloud2(message: PointCloud2Message, config: PointCloud2DisplayConfig): PreparedPointCloud2 {
+  assertLimit(config.maxPoints, "maxPoints");
+  assertLimit(config.maxInputBytes, "maxInputBytes");
+  assertColor(config.color);
+  assertLimit(message.width, "point cloud width");
+  assertLimit(message.height, "point cloud height");
+  assertLimit(message.pointStep, "pointStep");
+  assertLimit(message.rowStep, "rowStep");
+  if (message.data.byteLength > config.maxInputBytes) throw new Error("PointCloud2 input byte budget exceeded");
+  const pointCount = message.width * message.height;
+  if (!Number.isSafeInteger(pointCount)) throw new Error("PointCloud2 dimensions overflow");
+  if (pointCount > config.maxPoints) throw new Error("PointCloud2 point count exceeds the configured full-data limit");
+  const packedRowBytes = message.width * message.pointStep;
+  const requiredBytes = message.rowStep * message.height;
+  if (!Number.isSafeInteger(packedRowBytes) || !Number.isSafeInteger(requiredBytes)) {
+    throw new Error("PointCloud2 byte dimensions overflow");
+  }
+  if (message.rowStep < packedRowBytes) throw new Error("PointCloud2 rowStep is too small");
+  if (requiredBytes > message.data.byteLength) throw new Error("PointCloud2 data is truncated");
+  if (message.fields.length > MAX_POINT_FIELDS) throw new Error("PointCloud2 field count exceeds limit");
+
+  const axes = ["x", "y", "z"].map((name) => {
+    const field = message.fields.find((candidate) => candidate.name === name);
+    if (field === undefined || field.datatype !== FLOAT32_DATATYPE || field.count !== 1) {
+      throw new Error(`PointCloud2 requires scalar FLOAT32 field ${name}`);
+    }
+    if (!Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset + 4 > message.pointStep) {
+      throw new Error(`PointCloud2 field ${name} exceeds pointStep`);
+    }
+    return field;
+  });
+
+  const positions = new Float32Array(pointCount * 3);
+  const view = new DataView(message.data.buffer, message.data.byteOffset, message.data.byteLength);
+  let outputCount = 0;
+  for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+    const row = Math.floor(pointIndex / message.width);
+    const column = pointIndex % message.width;
+    const pointOffset = row * message.rowStep + column * message.pointStep;
+    const x = view.getFloat32(pointOffset + (axes[0]?.offset ?? 0), !message.isBigEndian);
+    const y = view.getFloat32(pointOffset + (axes[1]?.offset ?? 0), !message.isBigEndian);
+    const z = view.getFloat32(pointOffset + (axes[2]?.offset ?? 0), !message.isBigEndian);
+    if (!finitePosition({ x, y, z })) continue;
+    const target = outputCount * 3;
+    positions[target] = x;
+    positions[target + 1] = y;
+    positions[target + 2] = z;
+    outputCount += 1;
+  }
+  if (outputCount === 0) throw new Error("PointCloud2 contains no finite points");
+  const bounded = positions.slice(0, outputCount * 3);
+  const summary: GeometrySceneSummary = {
+    displayKind: "pointcloud2",
+    frameId: message.frameId,
+    primitive: "points",
+    inputVertices: pointCount,
+    renderedVertices: outputCount,
+    droppedVertices: pointCount - outputCount,
+    bounds: boundsFor(bounded),
+  };
+  return { positions: bounded, color: config.color, summary };
+}
+
 export class PointCloud2Display extends GeometryDisplay<PointCloud2Message, PointCloud2DisplayConfig> {
   readonly kind = "pointcloud2" as const;
 
@@ -286,64 +372,14 @@ export class PointCloud2Display extends GeometryDisplay<PointCloud2Message, Poin
   }
 
   protected convert(message: PointCloud2Message, config: PointCloud2DisplayConfig) {
-    assertLimit(message.width, "point cloud width");
-    assertLimit(message.height, "point cloud height");
-    assertLimit(message.pointStep, "pointStep");
-    assertLimit(message.rowStep, "rowStep");
-    if (message.data.byteLength > config.maxInputBytes) throw new Error("PointCloud2 input byte budget exceeded");
-    const pointCount = message.width * message.height;
-    if (!Number.isSafeInteger(pointCount)) throw new Error("PointCloud2 dimensions overflow");
-    const packedRowBytes = message.width * message.pointStep;
-    const requiredBytes = message.rowStep * message.height;
-    if (!Number.isSafeInteger(packedRowBytes) || !Number.isSafeInteger(requiredBytes)) {
-      throw new Error("PointCloud2 byte dimensions overflow");
-    }
-    if (message.rowStep < packedRowBytes) throw new Error("PointCloud2 rowStep is too small");
-    if (requiredBytes > message.data.byteLength) throw new Error("PointCloud2 data is truncated");
-    if (message.fields.length > MAX_POINT_FIELDS) throw new Error("PointCloud2 field count exceeds limit");
+    return preparePointCloud2(message, config);
+  }
 
-    const axes = ["x", "y", "z"].map((name) => {
-      const field = message.fields.find((candidate) => candidate.name === name);
-      if (field === undefined || field.datatype !== FLOAT32_DATATYPE || field.count !== 1) {
-        throw new Error(`PointCloud2 requires scalar FLOAT32 field ${name}`);
-      }
-      if (!Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset + 4 > message.pointStep) {
-        throw new Error(`PointCloud2 field ${name} exceeds pointStep`);
-      }
-      return field;
-    });
-
-    const sampleStride = Math.max(1, Math.ceil(pointCount / config.maxPoints));
-    const capacity = Math.min(config.maxPoints, Math.ceil(pointCount / sampleStride));
-    const positions = new Float32Array(capacity * 3);
-    const view = new DataView(message.data.buffer, message.data.byteOffset, message.data.byteLength);
-    let outputCount = 0;
-    for (let pointIndex = 0; pointIndex < pointCount && outputCount < capacity; pointIndex += sampleStride) {
-      const row = Math.floor(pointIndex / message.width);
-      const column = pointIndex % message.width;
-      const pointOffset = row * message.rowStep + column * message.pointStep;
-      const x = view.getFloat32(pointOffset + (axes[0]?.offset ?? 0), !message.isBigEndian);
-      const y = view.getFloat32(pointOffset + (axes[1]?.offset ?? 0), !message.isBigEndian);
-      const z = view.getFloat32(pointOffset + (axes[2]?.offset ?? 0), !message.isBigEndian);
-      if (!finitePosition({ x, y, z })) continue;
-      const target = outputCount * 3;
-      positions[target] = x;
-      positions[target + 1] = y;
-      positions[target + 2] = z;
-      outputCount += 1;
+  updatePrepared(prepared: PreparedPointCloud2, epoch: number): SemanticSceneSummary {
+    if (!(prepared.positions instanceof Float32Array) || prepared.positions.length !== prepared.summary.renderedVertices * 3 || prepared.summary.displayKind !== "pointcloud2" || prepared.summary.primitive !== "points") {
+      throw new Error("Prepared PointCloud2 geometry is invalid");
     }
-    if (outputCount === 0) throw new Error("PointCloud2 contains no finite sampled points");
-    const bounded = positions.subarray(0, outputCount * 3);
-    const summary: GeometrySceneSummary = {
-      displayKind: "pointcloud2",
-      frameId: message.frameId,
-      primitive: "points",
-      inputVertices: pointCount,
-      renderedVertices: outputCount,
-      droppedVertices: pointCount - outputCount,
-      bounds: boundsFor(bounded),
-    };
-    return { positions: bounded, color: config.color, summary };
+    return this.updatePreparedGeometry(prepared, epoch);
   }
 }
 
@@ -363,11 +399,10 @@ export class PathDisplay extends GeometryDisplay<PathMessage, PathDisplayConfig>
     if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes > config.maxInputBytes) {
       throw new Error("Path input byte budget exceeded");
     }
-    const sampleStride = Math.max(1, Math.ceil(inputCount / config.maxPoses));
-    const capacity = Math.min(config.maxPoses, Math.ceil(inputCount / sampleStride));
-    const positions = new Float32Array(capacity * 3);
+    if (inputCount > config.maxPoses) throw new Error("Path pose count exceeds the configured full-data limit");
+    const positions = new Float32Array(inputCount * 3);
     let outputCount = 0;
-    for (let index = 0; index < inputCount && outputCount < capacity; index += sampleStride) {
+    for (let index = 0; index < inputCount; index += 1) {
       const position = message.poses[index]?.position;
       if (position === undefined || !finitePosition(position)) continue;
       const target = outputCount * 3;
@@ -376,8 +411,8 @@ export class PathDisplay extends GeometryDisplay<PathMessage, PathDisplayConfig>
       positions[target + 2] = position.z;
       outputCount += 1;
     }
-    if (outputCount === 0) throw new Error("Path contains no finite sampled poses");
-    const bounded = positions.subarray(0, outputCount * 3);
+    if (outputCount === 0) throw new Error("Path contains no finite poses");
+    const bounded = positions.slice(0, outputCount * 3);
     const summary: GeometrySceneSummary = {
       displayKind: "path",
       frameId: message.frameId,
@@ -523,10 +558,10 @@ export class LaserScanDisplay extends GeometryDisplay<LaserScanMessage, LaserSca
     if (!Number.isSafeInteger(inputBytes) || inputBytes > config.maxInputBytes) {
       throw new Error("LaserScan input byte budget exceeded");
     }
-    const stride = Math.max(1, Math.ceil(inputCount / config.maxRanges));
-    const positions = new Float32Array(Math.ceil(inputCount / stride) * 3);
+    if (inputCount > config.maxRanges) throw new Error("LaserScan range count exceeds the configured full-data limit");
+    const positions = new Float32Array(inputCount * 3);
     let outputCount = 0;
-    for (let index = 0; index < inputCount; index += stride) {
+    for (let index = 0; index < inputCount; index += 1) {
       const range = message.ranges[index];
       if (range === undefined || !Number.isFinite(range) || range < message.rangeMin || range > message.rangeMax) continue;
       const angle = message.angleMin + index * message.angleIncrement;
@@ -536,7 +571,7 @@ export class LaserScanDisplay extends GeometryDisplay<LaserScanMessage, LaserSca
       outputCount += 1;
     }
     if (outputCount === 0) throw new Error("LaserScan contains no finite in-range samples");
-    const bounded = positions.subarray(0, outputCount * 3);
+    const bounded = positions.slice(0, outputCount * 3);
     return {
       positions: bounded,
       color: config.color,
@@ -557,6 +592,7 @@ export interface FrameTransform {
   readonly parentFrameId: string;
   readonly childFrameId: string;
   readonly translation: Readonly<{ x: number; y: number; z: number }>;
+  readonly rotation?: Readonly<{ x: number; y: number; z: number; w: number }>;
 }
 
 export interface FrameTreeMessage {
@@ -597,25 +633,94 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
     }
     if (!frames.has(config.fixedFrame)) throw new Error(`TF fixed frame is missing: ${config.fixedFrame}`);
 
-    const resolved = new Map<string, readonly [number, number, number]>([[config.fixedFrame, [0, 0, 0]]]);
-    const resolving = new Set<string>();
-    const resolve = (frame: string): readonly [number, number, number] => {
-      const existing = resolved.get(frame);
-      if (existing !== undefined) return existing;
-      if (resolving.has(frame)) throw new Error(`TF cycle detected at frame ${frame}`);
-      const edge = byChild.get(frame);
-      if (edge === undefined) throw new Error(`TF frame ${frame} is disconnected from fixed frame ${config.fixedFrame}`);
-      resolving.add(frame);
-      const parent = resolve(edge.parentFrameId);
-      resolving.delete(frame);
-      const value: readonly [number, number, number] = [
-        parent[0] + edge.translation.x,
-        parent[1] + edge.translation.y,
-        parent[2] + edge.translation.z,
-      ];
-      resolved.set(frame, value);
-      return value;
+    type ResolvedTransform = Readonly<{
+      translation: readonly [number, number, number];
+      rotation: readonly [number, number, number, number];
+    }>;
+    const normalizeQuaternion = (rotation: readonly [number, number, number, number]): readonly [number, number, number, number] => {
+      const norm = Math.hypot(...rotation);
+      if (!Number.isFinite(norm) || norm === 0) throw new Error("TF quaternion must be finite and non-zero");
+      return [rotation[0] / norm, rotation[1] / norm, rotation[2] / norm, rotation[3] / norm];
     };
+    const multiplyQuaternion = (
+      left: readonly [number, number, number, number],
+      right: readonly [number, number, number, number],
+    ): readonly [number, number, number, number] => [
+      left[3] * right[0] + left[0] * right[3] + left[1] * right[2] - left[2] * right[1],
+      left[3] * right[1] - left[0] * right[2] + left[1] * right[3] + left[2] * right[0],
+      left[3] * right[2] + left[0] * right[1] - left[1] * right[0] + left[2] * right[3],
+      left[3] * right[3] - left[0] * right[0] - left[1] * right[1] - left[2] * right[2],
+    ];
+    const rotate = (
+      rotation: readonly [number, number, number, number],
+      translation: Readonly<{ x: number; y: number; z: number }>,
+    ): readonly [number, number, number] => {
+      const vector: readonly [number, number, number, number] = [translation.x, translation.y, translation.z, 0];
+      const conjugate: readonly [number, number, number, number] = [-rotation[0], -rotation[1], -rotation[2], rotation[3]];
+      const result = multiplyQuaternion(multiplyQuaternion(rotation, vector), conjugate);
+      return [result[0], result[1], result[2]];
+    };
+    for (const frame of frames) {
+      const visited = new Set<string>();
+      let current = frame;
+      while (byChild.has(current)) {
+        if (visited.has(current)) throw new Error(`TF cycle detected at frame ${current}`);
+        visited.add(current);
+        current = byChild.get(current)!.parentFrameId;
+      }
+    }
+    const identity: ResolvedTransform = { translation: [0, 0, 0], rotation: [0, 0, 0, 1] };
+    const compose = (fixedFromParent: ResolvedTransform, parentFromChild: ResolvedTransform): ResolvedTransform => {
+      const translated = rotate(fixedFromParent.rotation, {
+        x: parentFromChild.translation[0], y: parentFromChild.translation[1], z: parentFromChild.translation[2],
+      });
+      return {
+        translation: [
+          fixedFromParent.translation[0] + translated[0],
+          fixedFromParent.translation[1] + translated[1],
+          fixedFromParent.translation[2] + translated[2],
+        ],
+        rotation: normalizeQuaternion(multiplyQuaternion(fixedFromParent.rotation, parentFromChild.rotation)),
+      };
+    };
+    const inverse = (parentFromChild: ResolvedTransform): ResolvedTransform => {
+      const rotation = normalizeQuaternion([
+        -parentFromChild.rotation[0], -parentFromChild.rotation[1], -parentFromChild.rotation[2], parentFromChild.rotation[3],
+      ]);
+      const translation = rotate(rotation, {
+        x: -parentFromChild.translation[0], y: -parentFromChild.translation[1], z: -parentFromChild.translation[2],
+      });
+      return { translation, rotation };
+    };
+    const adjacency = new Map<string, { readonly frame: string; readonly transform: ResolvedTransform }[]>();
+    for (const edge of message.transforms) {
+      const parentFromChild: ResolvedTransform = {
+        translation: [edge.translation.x, edge.translation.y, edge.translation.z],
+        rotation: normalizeQuaternion(edge.rotation
+          ? [edge.rotation.x, edge.rotation.y, edge.rotation.z, edge.rotation.w]
+          : [0, 0, 0, 1]),
+      };
+      const fromParent = adjacency.get(edge.parentFrameId) ?? [];
+      fromParent.push({ frame: edge.childFrameId, transform: parentFromChild });
+      adjacency.set(edge.parentFrameId, fromParent);
+      const fromChild = adjacency.get(edge.childFrameId) ?? [];
+      fromChild.push({ frame: edge.parentFrameId, transform: inverse(parentFromChild) });
+      adjacency.set(edge.childFrameId, fromChild);
+    }
+    const resolved = new Map<string, ResolvedTransform>([[config.fixedFrame, identity]]);
+    const queue = [config.fixedFrame];
+    for (let index = 0; index < queue.length; index += 1) {
+      const frame = queue[index]!;
+      const fixedFromFrame = resolved.get(frame)!;
+      for (const neighbor of adjacency.get(frame) ?? []) {
+        if (resolved.has(neighbor.frame)) continue;
+        resolved.set(neighbor.frame, compose(fixedFromFrame, neighbor.transform));
+        queue.push(neighbor.frame);
+      }
+    }
+    for (const frame of frames) {
+      if (!resolved.has(frame)) throw new Error(`TF frame ${frame} is disconnected from fixed frame ${config.fixedFrame}`);
+    }
 
     const ordered = [...message.transforms].sort((left, right) => {
       const leftKey = `${left.parentFrameId}\u0000${left.childFrameId}`;
@@ -624,9 +729,9 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
     });
     const positions = new Float32Array(ordered.length * 6);
     ordered.forEach((edge, index) => {
-      const parent = resolve(edge.parentFrameId);
-      const child = resolve(edge.childFrameId);
-      positions.set([...parent, ...child], index * 6);
+      const parent = resolved.get(edge.parentFrameId)!;
+      const child = resolved.get(edge.childFrameId)!;
+      positions.set([...parent.translation, ...child.translation], index * 6);
     });
     if (ordered.length === 0) throw new Error("TF frame tree contains no transforms");
     return {
@@ -1049,22 +1154,19 @@ export class MarkerDisplay extends GeometryDisplay<MarkerMessage | MarkerArrayMe
     const updateTime = markers.reduce((latest, marker) => marker.stampNanos !== undefined && marker.stampNanos > latest ? marker.stampNanos : latest, 0n);
     const active = this.#store.apply(message, updateTime, config.maxMarkers);
     if (active.length === 0) throw new Error("marker actions left no renderable markers");
+    if (new Set(active.map((marker) => marker.frameId)).size !== 1) throw new Error("mixed marker frames require separate displays");
     const types = new Set(active.map((marker) => marker.type));
-    if ([...types].some((type) => type !== "points" && type !== "line-strip" && type !== "line-list")) {
-      throw new Error(`unsupported marker type: ${[...types].find((type) => type !== "points" && type !== "line-strip" && type !== "line-list")}`);
-    }
-    if (types.size !== 1) throw new Error("mixed marker primitive types are unsupported in one display update");
-    const type = active[0]?.type as MarkerType;
     const allPoints = active.flatMap((marker) => [...marker.points]);
     if (allPoints.length < 1) throw new Error("marker contains no points");
+    if (allPoints.length > config.maxPoints) throw new Error("marker point count exceeds the configured full-data limit");
     const inputBytes = allPoints.length * 3 * Float64Array.BYTES_PER_ELEMENT;
     if (inputBytes > config.maxInputBytes) throw new Error("marker input byte budget exceeded");
-    const stride = Math.max(1, Math.ceil(allPoints.length / config.maxPoints));
-    const selected = allPoints.filter((_point, index) => index % stride === 0).slice(0, config.maxPoints);
-    if (selected.some((point) => !finitePosition(point))) throw new Error("marker points must be finite");
-    const positions = new Float32Array(selected.length * 3);
-    selected.forEach((point, index) => positions.set([point.x, point.y, point.z], index * 3));
-    const topology: PrimitiveTopology = type === "points" ? "points" : type === "line-strip" ? "line-strip" : "lines";
+    if (allPoints.some((point) => !finitePosition(point))) throw new Error("marker points must be finite");
+    const positions = new Float32Array(allPoints.length * 3);
+    allPoints.forEach((point, index) => positions.set([point.x, point.y, point.z], index * 3));
+    const topology: PrimitiveTopology = types.size === 1 && types.has("line-strip")
+      ? "line-strip"
+      : types.size === 1 && types.has("line-list") ? "lines" : "points";
     return {
       positions,
       color: config.color,
@@ -1073,10 +1175,10 @@ export class MarkerDisplay extends GeometryDisplay<MarkerMessage | MarkerArrayMe
         frameId: active[0]?.frameId ?? "",
         primitive: topology,
         inputVertices: allPoints.length,
-        renderedVertices: selected.length,
-        droppedVertices: allPoints.length - selected.length,
+        renderedVertices: allPoints.length,
+        droppedVertices: 0,
         bounds: boundsFor(positions),
-        details: { markers: active.length, actionDeletes: markers.length - active.length, markerType: type },
+        details: { markers: active.length, actionDeletes: markers.length - active.length, markerType: types.size === 1 ? [...types][0] : "mixed", markerTypes: [...types].sort().join(",") },
       },
     };
   }
@@ -1139,10 +1241,9 @@ export class OccupancyGridDisplay extends GeometryDisplay<OccupancyGridMessage, 
       else if (value >= config.occupiedThreshold) occupiedIndices.push(index);
     }
     if (occupiedIndices.length === 0) throw new Error("OccupancyGrid contains no cells at or above occupiedThreshold");
-    const stride = Math.max(1, Math.ceil(occupiedIndices.length / config.maxCells));
-    const selected = occupiedIndices.filter((_value, index) => index % stride === 0).slice(0, config.maxCells);
-    const positions = new Float32Array(selected.length * 3);
-    selected.forEach((cellIndex, index) => {
+    if (occupiedIndices.length > config.maxCells) throw new Error("OccupancyGrid occupied cell count exceeds the configured full-data limit");
+    const positions = new Float32Array(occupiedIndices.length * 3);
+    occupiedIndices.forEach((cellIndex, index) => {
       const column = cellIndex % message.width;
       const row = Math.floor(cellIndex / message.width);
       const localX = (column + 0.5) * message.resolution;
@@ -1167,8 +1268,8 @@ export class OccupancyGridDisplay extends GeometryDisplay<OccupancyGridMessage, 
         frameId: message.frameId,
         primitive: "points" as const,
         inputVertices: occupiedIndices.length,
-        renderedVertices: selected.length,
-        droppedVertices: occupiedIndices.length - selected.length,
+        renderedVertices: occupiedIndices.length,
+        droppedVertices: 0,
         bounds: boundsFor(positions),
         details: { width: message.width, height: message.height, resolution: message.resolution, unknownCells: unknown },
       },

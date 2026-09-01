@@ -1,6 +1,6 @@
 # Corpus manifest and licensing gate (M0)
 
-**Gate status:** **APPROVED FOR M0.** The machine-readable source of truth is [`benchmarks/corpus-manifest.json`](../benchmarks/corpus-manifest.json). It admits one private generated contract fixture and three immutable public fixtures with locally verified size/SHA-256 and upstream license evidence: a Cartographer ROS 1 SLAM bag, a ROS 2 Humble SQLite bag, and an MCAP format fixture. This approval covers M0 metadata/contract checks, not M1 render or performance claims.
+**Gate status:** **APPROVED FOR M0.** The machine-readable source of truth is [`benchmarks/corpus-manifest.json`](../benchmarks/corpus-manifest.json). Licensed/generated fixtures remain automatic CI inputs. The additional SEAV ROS2 navigation bag is pinned by commit and SHA-256 but has no upstream repository-level license, so it is never redistributed and is operator-triggered local evidence only.
 
 ## Required manifest fields
 

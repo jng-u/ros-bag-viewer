@@ -22,7 +22,7 @@
   "workload": {
     "pointCount": 120000,
     "pointTopicRateHz": 10,
-    "maxRenderedPoints": 60000,
+    "maxRenderedPoints": 120000,
     "pathPoseCount": 2000,
     "pathTopicRateHz": 5,
     "maxRenderedPathPoses": 2000,

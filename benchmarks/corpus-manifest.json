@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "status": "approved-for-m0",
-  "statusReason": "The M0 corpus admits a checked-in generated contract fixture plus immutable, checksummed public ROS 1 SLAM, ROS 2 SQLite, and MCAP format fixtures whose upstream license terms permit CI use. Larger ROS 2 SLAM and dense-render corpora remain scheduled hardware-runner additions and do not block the repository/contract baseline.",
-  "reviewedAt": "2026-08-31",
+  "statusReason": "The baseline uses licensed or internally generated CI fixtures. The pinned SEAV ROS 2 navigation bag has no repository-level license, is never redistributed, and is admitted only for an operator-triggered local benchmark after download and SHA-256 verification.",
+  "reviewedAt": "2026-09-02",
   "entries": [
     {
       "id": "generated-m0-source-bundle-smoke-v1",
@@ -76,6 +76,37 @@
       "purpose": "Public, pinned ROS 2 SQLite storage/schema-generation compatibility fixture; not a performance corpus."
     },
     {
+      "id": "seav-ros2-humble-navigation-2025-03-30",
+      "kind": "public-ros2-slam-odometry-medium",
+      "rosGeneration": "ROS 2 Humble",
+      "sourceUrl": "https://github.com/se-buw/seav/tree/fa609c6a0a546248a354d72ff28d998d0338640d/docs/rosbag/rosbag2_2025_03_30-14_47_38",
+      "upstreamCommit": "fa609c6a0a546248a354d72ff28d998d0338640d",
+      "license": "NOASSERTION",
+      "licenseEvidence": "The pinned upstream repository has no top-level license; the only LICENSE file is inside src/rplidar_ros. The bag is never redistributed by this repository.",
+      "ciUse": "manual-local-only",
+      "redistributionPolicy": "prohibited-download-by-hash",
+      "sha256": "987109ba897916a7384d76bfdef94253d3426b2b8bef241504e6974e1fdc4f6d",
+      "metadataSha256": "54706215175ea6e0956d212ba6c2d273cff7f09ff3e9556e77beadf30f148059",
+      "byteSize": 49511976,
+      "durationNs": 546271754707,
+      "storage": "rosbag2-sqlite3",
+      "compression": "none",
+      "indexing": "sqlite-indexed",
+      "topics": [
+        { "name": "/tf", "type": "tf2_msgs/msg/TFMessage", "messages": 6345 },
+        { "name": "/tf_static", "type": "tf2_msgs/msg/TFMessage", "messages": 5424 },
+        { "name": "/odom", "type": "nav_msgs/msg/Odometry", "messages": 5423 },
+        { "name": "/scan", "type": "sensor_msgs/msg/LaserScan", "messages": 3999 },
+        { "name": "/map", "type": "nav_msgs/msg/OccupancyGrid", "messages": 47 },
+        { "name": "/slam_toolbox/graph_visualization", "type": "visualization_msgs/msg/MarkerArray", "messages": 46 },
+        { "name": "/distance", "type": "std_msgs/msg/Float32", "messages": 537 }
+      ],
+      "types": ["tf2_msgs/msg/TFMessage", "nav_msgs/msg/Odometry", "sensor_msgs/msg/LaserScan", "nav_msgs/msg/OccupancyGrid", "visualization_msgs/msg/MarkerArray", "std_msgs/msg/Float32"],
+      "expectedFrames": 2,
+      "expectedMessages": 53909,
+      "purpose": "Pinned public ROS 2 navigation/SLAM recording used for real Firefox source-open, native-display, seek, active-playback, and memory evidence. Downloaded only for local evaluation because upstream licensing is unspecified."
+    },
+    {
       "id": "mcap-upstream-demo-format",
       "kind": "public-mcap-format-compatibility",
       "rosGeneration": "ROS 1 serialization in MCAP",
@@ -101,12 +132,6 @@
     }
   ],
   "deferredCandidates": [
-    {
-      "id": "public-ros2-medium-slam-mcap",
-      "requiredCoverage": ["ROS 2", "MCAP", "medium", "SLAM/Odometry", "TF", "PointCloud2", "Path"],
-      "status": "deferred-to-m1-hardware-corpus",
-      "missingEvidence": ["approved immutable upstream artifact", "SHA-256", "topic/type inventory"]
-    },
     {
       "id": "public-ros2-large-dense-render-corpus",
       "requiredCoverage": ["ROS 2", "MCAP", "large", "dense PointCloud2", "image", "map"],

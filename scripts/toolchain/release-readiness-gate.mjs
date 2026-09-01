@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
@@ -26,12 +26,13 @@ function stablePlainData(value) {
     ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stablePlainData(value[key])])) : value;
 }
 
-function listFiles(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if ([".git", "node_modules", "coverage"].includes(entry.name)) return [];
-    const path = join(directory, entry.name);
-    return entry.isDirectory() ? listFiles(path) : [path];
+function listRepositoryFiles() {
+  const result = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+    cwd: root,
+    encoding: "buffer",
   });
+  if (result.status !== 0) fail(`git ls-files failed: ${Buffer.from(result.stderr).toString("utf8").trim()}`);
+  return Buffer.from(result.stdout).toString("utf8").split("\0").filter(Boolean).map((path) => join(root, path));
 }
 
 function requireNonEmptyStrings(values, label) {
@@ -124,9 +125,14 @@ function validateRepositoryStops() {
   const authorizedLocalContainerFiles = new Set([
     "Dockerfile",
     "deploy/Caddyfile",
+    "deploy/live-topics.ros1.json",
+    "deploy/live-topics.ros2.json",
+    "deploy/ros1-bridge.Dockerfile",
+    "deploy/ros2-bridge.Dockerfile",
+    "deploy/share.Dockerfile",
     "docker-compose.yml",
   ]);
-  for (const path of listFiles(root)) {
+  for (const path of listRepositoryFiles()) {
     const repositoryPath = relative(root, path);
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
     let bytes;
@@ -138,6 +144,8 @@ function validateRepositoryStops() {
       "artifacts/v1-conformance-execution.json",
       "artifacts/test-receipt.json",
       "benchmarks/artifacts/m1-dimensional-model.json",
+      "benchmarks/artifacts/public-browser-cartographer.json",
+      "benchmarks/artifacts/public-browser-seav-ros2.json",
     ].includes(repositoryPath) || /^artifacts\/v1-conformance-receipts\/[a-f0-9]{64}\.json(?:\.event)?$/u.test(repositoryPath);
     const stopReason = authorizedGeneratedArtifact || authorizedLocalContainerFiles.has(repositoryPath)
       ? undefined

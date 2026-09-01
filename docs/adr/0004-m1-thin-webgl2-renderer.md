@@ -6,13 +6,13 @@
 
 ## Context
 
-M1 requires bounded PointCloud2 and Path rendering while preserving explicit GPU ownership, source-epoch invalidation, deterministic semantic summaries, and disposal. The M0 baseline intentionally deferred selecting a renderer helper until evidence existed. The implemented render lane now provides a thin WebGL2 port with fixed-capacity buffers, subrange uploads, bounded decimation, exact-capacity pooling, telemetry, and explicit deletion.
+M1 requires bounded PointCloud2 and Path rendering while preserving explicit GPU ownership, source-epoch invalidation, deterministic semantic summaries, and disposal. The M0 baseline intentionally deferred selecting a renderer helper until evidence existed. The implemented render lane now provides a thin WebGL2 port with fixed-capacity buffers, subrange uploads, reject-instead-of-sample limits, exact-capacity pooling, telemetry, and explicit deletion.
 
 A heavyweight helper has not been selected, installed, or executed. Treating estimates for an unnamed library as measured results would be false. The benchmark therefore includes only an explicitly labeled synthetic lower-bound wrapper model for decision-shape comparison.
 
 ## Decision
 
-Use the thin `WebGl2Renderer` as the internal M1 renderer baseline. Dogfood it through the internal PointCloud2 and Path displays; do not expose raw WebGL through the display contract. Keep all buffers/programs renderer-owned, account for logical GPU bytes, cap allocations/vertices, decimate deterministically before allocation, and dispose every resource.
+Use the thin `WebGl2Renderer` as the internal M1 renderer baseline. Dogfood it through the internal PointCloud2 and Path displays; do not expose raw WebGL through the display contract. Keep all buffers/programs renderer-owned, account for logical GPU bytes, cap allocations/vertices, reject over-budget geometry instead of silently sampling it, and dispose every resource.
 
 Do not add a heavyweight helper for M1. Reopen this decision only for a named, license-reviewed candidate evaluated on the same fixed corpus and controlled browser/hardware protocol. Any amendment must demonstrate semantic equivalence, bounded resource ownership, disposal, bundle/dependency impact, maintainability impact, and a measured benefit that cannot be obtained with the thin port.
 

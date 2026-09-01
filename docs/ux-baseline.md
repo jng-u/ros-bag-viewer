@@ -86,7 +86,7 @@ Focus uses a 2 px high-contrast outline plus 2 px offset. Iridescence is limited
 
 - **Empty:** explain the next source/topic/display action, not merely “no data.”
 - **Loading:** name the operation and expose determinate progress when known; loading never hides cancel.
-- **Degraded:** preserve inspection while labeling sequential indexing, drops, decimation, or unsupported codecs.
+- **Degraded:** preserve inspection while labeling sequential indexing, drops, explicit geometry-limit rejection, or unsupported codecs.
 - **Error:** state what failed, the affected scope, safe recovery, and diagnostic detail; do not erase the prior source choice.
 - **TF failure:** stop affected geometry rather than substitute the latest transform; show target/source frame and query time.
 - **Offline/reconnecting:** distinguish browser-relay loss from relay-edge/ROS health and increment the source epoch after reconnect.
@@ -120,7 +120,7 @@ These values are not validated targets until the benchmark environment and corpu
 
 ## 8. Fixed evidence contract
 
-Baseline captures use **1440×900 CSS pixels at DPR 1** in the pinned stable Chromium build on the compatibility document's benchmark machine, normal power mode, default compact density, dark theme, reduced motion both off and on, and a fresh profile. Any exception records browser/version, OS, GPU, viewport, DPR, zoom, theme, power state, source hash, quality/decimation, active displays, cache state, and timestamp.
+Baseline captures use **1440×900 CSS pixels at DPR 1** in the pinned stable Chromium build on the compatibility document's benchmark machine, normal power mode, default compact density, dark theme, reduced motion both off and on, and a fresh profile. Any exception records browser/version, OS, GPU, viewport, DPR, zoom, theme, power state, source hash, quality/limit rejection, active displays, cache state, and timestamp.
 
 For source open, topic discovery, display add/configuration, timeline seek, share/live entry, loading, empty, generic error, and TF failure, capture:
 

@@ -7,5 +7,6 @@
 **/*.tsbuildinfo
 artifacts
 benchmarks/results
+benchmarks/downloads
 npm-debug.log*
 pnpm-debug.log*

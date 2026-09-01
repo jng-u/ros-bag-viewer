@@ -6,11 +6,11 @@ The machine-readable source of truth is [`docs/evidence/m5-release-readiness.jso
 
 ## Evidence boundary
 
-Repository gates currently prove only repository-static, local deterministic, local in-process, synthetic-fixture, and mock-WebGL2 behavior. They do **not** certify:
+Repository gates plus the corrective evidence now prove repository-static contracts, deterministic fixtures, a local Docker/Firefox run, a licensed pinned public ROS1 bag, an operator-downloaded non-redistributed SHA-pinned ROS2 navigation bag, and local Noetic/Jazzy bridge traffic. This still does **not** certify:
 
-- a real Chromium or Firefox build on Windows, macOS, or Ubuntu;
-- a real GPU/driver, browser heap, accessibility tree, screen reader, or pixel output;
-- a ROS 1 or ROS 2 distribution, middleware, graph, container, or operational network;
+- the required Firefox/Chromium matrix across Windows, macOS, and Ubuntu;
+- production GPU/driver behavior, browser heap, accessibility tree, screen reader, or reviewed pixel output;
+- a physical robot network or the full ROS distribution/middleware matrix beyond the locally measured Noetic/Jazzy containers;
 - deployed TLS, firewall, identity, relay, edge, object storage, retention, or deletion behavior;
 - production performance, security, availability, cost, or supply-chain operations.
 

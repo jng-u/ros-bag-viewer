@@ -1,8 +1,22 @@
 # M1 Dimensional Benchmark and Semantic Verification
 
-**Evidence status:** deterministic dimensional and operation-cost model only  
-**Production browser/hardware status:** **not measured**  
-**Decision use:** proves bounded operations, accounting formulas, deterministic semantic scenes, and the minimum WebGL2 integration shape. It does not validate candidate latency or memory targets.
+**Evidence status:** deterministic dimensional model plus a measured Docker/Firefox public-corpus run
+**Production browser/hardware status:** measured on the exact local machine recorded below; not a cross-device certification
+**Decision use:** proves bounded operations and records first-content, synchronized seek, active-playback frame timing, and peak Firefox RSS against pinned ROS1 and locally downloaded ROS2 navigation corpora.
+
+## Measured public browser runs
+
+Reproduce after downloading the manifest-pinned Cartographer bag to `benchmarks/downloads/cartographer-backpack-2d.bag`:
+
+```sh
+docker compose up -d --build
+corepack pnpm bench:public:browser
+corepack pnpm bench:public:ros2:browser
+```
+
+The checked artifact is [`public-browser-cartographer.json`](../benchmarks/artifacts/public-browser-cartographer.json). Its runner advances actual playback while collecting 120 animation-frame intervals; this is not an idle-rAF proxy. The checked budgets are 15 s open, 5 s first content, 3 s seek, 25 ms p95 active-playback frame interval, and 1 GiB peak descendant Firefox RSS. Exact observations are read from the generated artifact rather than duplicated here. Live latency is measured by the actual Noetic/Jazzy bridge E2E and is not measured by this recorded-corpus artifact.
+
+The public Cartographer recording contains MultiEchoLaserScan and IMU rather than PointCloud2, so it validates real ROS1 indexing/compression/responsiveness rather than dense point rendering. The separately checked [`public-browser-seav-ros2.json`](../benchmarks/artifacts/public-browser-seav-ros2.json) opens a 49,511,976-byte ROS2 Humble navigation bag with 53,909 messages and 25 topics. At an active-SLAM timestamp it requires TF, LaserScan, Odometry, OccupancyGrid, Marker, numeric plot, and schema-backed raw inspection to be simultaneously `READY` with zero errors. Its observed source-open/seek/playback/RSS values and exact machine/browser identity live in the artifact. The upstream SEAV repository has no top-level license, so this bag is not redistributed or automatic CI input; an operator downloads the pinned commit and the runner verifies both database and metadata SHA-256 values.
 
 ## Reproduce the checked-in artifact
 
@@ -11,6 +25,8 @@ corepack pnpm build
 node benchmarks/scenarios/run-m1-dimensional.mjs
 node benchmarks/scenarios/run-m1-dimensional.mjs --check
 corepack pnpm exec vitest run --config benchmarks/scenarios/vitest.config.ts
+corepack pnpm bench:public:check
+corepack pnpm bench:public:ros2:check
 ```
 
 The generator owns the raw artifact at [`benchmarks/artifacts/m1-dimensional-model.json`](../benchmarks/artifacts/m1-dimensional-model.json). The `--check` form fails when the artifact and generator disagree. The artifact labels `productionHardwareResult` and `browserBenchmarkResult` as `false`; its numbers are deterministic cost-model results and renderer-owned logical byte estimates, not observed browser timing or total GPU memory.
@@ -27,7 +43,7 @@ The machine-readable contract is [`m1-dimensional.config.json`](../benchmarks/sc
 | Machine/browser | `M0-LAPTOP-2026-01` / stable Chromium **candidate profiles, not executed** |
 | Viewport / DPR / zoom | 1440×900 CSS px / 1 / 100% |
 | Cache | cold model |
-| PointCloud2 | 120,000 input points at 10 Hz; 60,000 rendered cap |
+| PointCloud2 | 120,000 input points at 10 Hz; all 120,000 rendered or the message is rejected |
 | Path | 2,000 poses at 5 Hz; 2,000 rendered cap |
 | Topic rates | PointCloud2 10 Hz; Path 5 Hz |
 | Active displays | 2 |
@@ -53,9 +69,9 @@ The unindexed result is deliberately labeled degraded. Reading the complete logi
 
 The thin WebGL2 model reports:
 
-- first content: **9.935 ms modeled** (indexed read cost + point decode cost + first modeled frame);
-- p50 / p95 / p99 frame time: **4.482 / 4.764 / 4.764 ms modeled**;
-- maximum modeled frame time: **4.764 ms**;
+- first content: **12.335 ms modeled** (indexed read cost + point decode cost + first modeled frame);
+- p50 / p95 / p99 frame time: **6.882 / 7.164 / 7.164 ms modeled**;
+- maximum modeled frame time: **7.164 ms**;
 - long-task threshold: 50 ms; modeled long-task count: **0 / 60**;
 - queue capacity / modeled maximum depth / modeled drops: **4 / 1 / 0 per second**.
 
@@ -65,9 +81,9 @@ These values are not evidence that a real Chromium session meets the candidate p
 
 The generator sends deterministic PointCloud2 and Path messages through the dogfooded display implementations and the thin `WebGl2Renderer` using a mock WebGL2 operation recorder.
 
-| Display | Primitive | Input | Rendered | Dropped/decimated |
+| Display | Primitive | Input | Rendered | Dropped invalid |
 |---|---|---:|---:|---:|
-| PointCloud2 (`lidar`) | `POINTS` | 120,000 | 60,000 | 60,000 |
+| PointCloud2 (`lidar`) | `POINTS` | 120,000 | 120,000 | 0 |
 | Path (`map`) | `LINE_STRIP` | 2,000 | 2,000 | 0 |
 
 The artifact includes deterministic bounds, a SHA-256 semantic-scene digest, allocation/upload/draw traces, renderer telemetry before disposal, and zero live/pooled logical GPU bytes after disposal. The gate requires draw modes `[POINTS=0, LINE_STRIP=3]` and rejects any recorded allocation above the fixed 2,097,152-byte buffer ceiling. WebGL has no portable total-GPU-memory API; every GPU byte here is renderer-owned logical allocation accounting.
@@ -83,9 +99,9 @@ The dimensional formula is fixed as:
 | Active decoded PointCloud2 + Path | 1,488,000 |
 | Estimated retained JS | 11,364,608 |
 | Retained WASM | 0 |
-| Renderer-owned logical GPU working set | 744,000 |
+| Renderer-owned logical GPU working set | 1,464,000 |
 | Documented fixed overhead | 8,388,608 |
-| Formula result | 12,108,608 |
+| Formula result | 12,828,608 |
 
 The formula is an estimate boundary, not a heap snapshot. A controlled browser run must replace JS/WASM estimates with heap/allocation evidence and keep logical renderer GPU accounting separate from any vendor-specific GPU tooling.
 
@@ -100,10 +116,10 @@ The comparison intentionally avoids naming or pretending to execute an uninstall
 | Resource ownership | explicit allocation, pool, upload, telemetry, disposal | adds a wrapper/resource boundary |
 | M1 semantic capability | PointCloud2 + Path proven | no additional M1 capability demonstrated |
 | Retained geometry copies | renderer upload source only | assumes one additional retained copy |
-| Modeled p95 frame time | 4.764 ms | 5.741 ms under stated synthetic assumptions |
+| Modeled p95 frame time | 7.164 ms | 8.313 ms under stated synthetic assumptions |
 
 The model does **not** establish that thin WebGL2 is faster than a real helper library. It shows that the thin path meets the M1 semantic and ownership contract with less dependency and resource-ownership surface; a helper remains rejected until a named, licensed candidate demonstrates a measured advantage on the same controlled corpus.
 
 ## Controlled hardware acceptance still required
 
-A production claim requires a pinned stable Chromium run on an exactly recorded machine/OS/GPU/driver with 1440×900 CSS px at DPR 1, normal power mode, fresh profile, source SHA-256, cache state, quality/decimation, active displays, and timestamp. It must record indexed seek separately from unindexed scan, first content, raw frame samples, p50/p95/p99, >50 ms long tasks, queue depth/drops, heap/WASM observations, renderer-owned GPU bytes, and any vendor GPU observations. Until that artifact exists, the candidate budgets remain hypotheses rather than pass/fail product thresholds.
+A production claim requires a pinned stable Chromium run on an exactly recorded machine/OS/GPU/driver with 1440×900 CSS px at DPR 1, normal power mode, fresh profile, source SHA-256, cache state, quality/limit rejection, active displays, and timestamp. It must record indexed seek separately from unindexed scan, first content, raw frame samples, p50/p95/p99, >50 ms long tasks, queue depth/drops, heap/WASM observations, renderer-owned GPU bytes, and any vendor GPU observations. Until that artifact exists, the candidate budgets remain hypotheses rather than pass/fail product thresholds.

@@ -35,7 +35,7 @@ Browser credentials are never valid at the edge. Relay-edge identity is separate
 
 Edge and ROS networks have no public/browser route. Network tests prove only the relay reaches the edge. Responses avoid unnecessary private addresses or ROS topology.
 
-The M3 local reference adapters enforce private/loopback literal listeners with TLS enabled and exact relay identity verification. The current proof denies public- and browser-shaped identities in process; it does not prove deployed firewall, routing, DNS, certificate, or public reachability controls because no real network execution occurred.
+The deterministic M3 reference adapters prove protocol identity separation in process. The bundled real ROS bridges additionally refuse non-loopback binds; Docker host inspection on 2026-09-02 showed the viewer on `127.0.0.1:8080` and bridges only on `127.0.0.1:8765/8766`. Caddy has no bridge proxy route. Remote use therefore requires an operator-owned TLS proxy colocated with the ROS host; firewall, routing, DNS, certificate, and public reachability certification remain deployment-specific.
 
 ### Malicious input and schemas
 
@@ -47,7 +47,7 @@ Signed manifests contain opaque entry IDs, immutable versions, sizes, hashes, an
 
 ### Resource and supply-chain exhaustion
 
-Limit topic count, message size/rate, queue bytes, schema work, decompression, range concurrency, and GPU allocation. Backpressure reports drops/decimation. Pin dependencies, generate SBOM/license/vulnerability evidence, and review build-time extensions as privileged code. Runtime plugins and RViz ABI compatibility are excluded pending a new threat decision.
+Limit topic count, message size/rate, queue bytes, schema work, decompression, range concurrency, and GPU allocation. Backpressure reports transport drops, while over-budget geometry is rejected explicitly rather than sampled. Pin dependencies, generate SBOM/license/vulnerability evidence, and review build-time extensions as privileged code. Runtime plugins and RViz ABI compatibility are excluded pending a new threat decision.
 
 ## Verification matrix
 

@@ -96,9 +96,6 @@ function boundedDecompressHandlers(
         const output = handler(buffer, declaredSize);
         if (BigInt(output.byteLength) !== declaredSize) throw new Error(`${name} decompressor returned an unexpected byte count`);
         telemetry.decompressedBytes += output.byteLength;
-        if (telemetry.decompressedBytes > limits.maxDecompressedBytes) {
-          throw new Error("MCAP session exceeds maxDecompressedBytes");
-        }
         return output;
       },
     ]),
@@ -209,7 +206,11 @@ export class McapSourceSession {
         return new McapSourceSession(readable, "indexed", indexed, limits, decompressHandlers, telemetry);
       }
     } catch (error) {
-      indexedDiagnostic = `MCAP indexed initialization failed: ${error instanceof Error ? error.message : String(error)}`;
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!detail.includes("File is not indexed")) {
+        throw new Error(`MCAP indexed initialization failed: ${detail}`, { cause: error });
+      }
+      indexedDiagnostic = "MCAP summary indexes are unavailable";
     }
     telemetry.mode = "unindexed-degraded";
     return new McapSourceSession(
@@ -254,6 +255,7 @@ export class McapSourceSession {
     readonly topics?: readonly string[];
     readonly startTime?: bigint;
     readonly endTime?: bigint;
+    readonly reverse?: boolean;
   } = {}): AsyncGenerator<McapMessage, void, void> {
     if (!this.#indexed) throw new Error("random seek is unavailable for an unindexed MCAP source");
     for await (const message of this.#indexed.readMessages(options)) {

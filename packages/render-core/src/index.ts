@@ -93,8 +93,9 @@ interface PooledBuffer {
 const VERTEX_SHADER_SOURCE = `#version 300 es
 in vec3 aPosition;
 uniform mat4 uViewProjection;
+uniform mat4 uModel;
 void main() {
-  gl_Position = uViewProjection * vec4(aPosition, 1.0);
+  gl_Position = uViewProjection * uModel * vec4(aPosition, 1.0);
   gl_PointSize = 4.0;
 }`;
 
@@ -177,31 +178,9 @@ function primitiveMode(gl: WebGl2Context, topology: PrimitiveTopology): number {
   }
 }
 
-function boundedPositions(
-  positions: Float32Array,
-  maxVertices: number,
-): { positions: Float32Array; inputVertices: number } {
-  if (positions.length % 3 !== 0) throw new Error("positions must contain xyz triples");
-  const inputVertices = positions.length / 3;
-  if (inputVertices <= maxVertices) return { positions, inputVertices };
-
-  const stride = Math.ceil(inputVertices / maxVertices);
-  const retained = Math.ceil(inputVertices / stride);
-  const output = new Float32Array(retained * 3);
-  let outputIndex = 0;
-  for (let inputIndex = 0; inputIndex < inputVertices && outputIndex < retained; inputIndex += stride) {
-    const source = inputIndex * 3;
-    const target = outputIndex * 3;
-    output[target] = positions[source] ?? 0;
-    output[target + 1] = positions[source + 1] ?? 0;
-    output[target + 2] = positions[source + 2] ?? 0;
-    outputIndex += 1;
-  }
-  return { positions: output, inputVertices };
-}
-
 class ManagedGeometry implements GeometryResource {
   #disposed = false;
+  modelMatrix = IDENTITY_MATRIX.slice();
 
   constructor(
     readonly id: string,
@@ -235,6 +214,7 @@ export class WebGl2Renderer {
   readonly #program: WebGLProgram;
   readonly #positionLocation: number;
   readonly #viewProjectionLocation: WebGLUniformLocation | null;
+  readonly #modelLocation: WebGLUniformLocation | null;
   readonly #colorLocation: WebGLUniformLocation | null;
   readonly #resources = new Map<string, ManagedGeometry>();
   readonly #pool: PooledBuffer[] = [];
@@ -258,6 +238,7 @@ export class WebGl2Renderer {
     this.#positionLocation = gl.getAttribLocation(this.#program, "aPosition");
     if (this.#positionLocation < 0) throw new Error("WebGL2 position attribute is unavailable");
     this.#viewProjectionLocation = gl.getUniformLocation(this.#program, "uViewProjection");
+    this.#modelLocation = gl.getUniformLocation(this.#program, "uModel");
     this.#colorLocation = gl.getUniformLocation(this.#program, "uColor");
   }
 
@@ -276,21 +257,27 @@ export class WebGl2Renderer {
       throw new Error("geometry positions must be finite");
     }
 
+    if (input.positions.length % 3 !== 0) throw new Error("positions must contain xyz triples");
+    const inputVertices = input.positions.length / 3;
     const maxVerticesByBuffer = Math.floor(this.#budget.maxBufferBytes / Float32Array.BYTES_PER_ELEMENT / 3);
     const maxVertices = Math.min(this.#budget.maxVerticesPerGeometry, maxVerticesByBuffer);
     if (maxVertices < 1) throw new Error("renderer budget cannot hold one xyz vertex");
-    const bounded = boundedPositions(input.positions, maxVertices);
-    const byteLength = bounded.positions.byteLength;
+    if (inputVertices > maxVertices) {
+      this.#rejectedAllocations += 1;
+      throw new Error(`geometry has ${inputVertices} vertices; renderer limit is ${maxVertices}; hidden decimation is forbidden`);
+    }
+    const byteLength = input.positions.byteLength;
     if (byteLength === 0) throw new Error("geometry requires at least one vertex");
 
     const previous = this.#resources.get(input.id);
+    const previousModel = previous?.modelMatrix.slice();
     previous?.dispose();
 
     const buffer = this.#acquireBuffer(byteLength);
     const gl = this.#gl;
     try {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, bounded.positions);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, input.positions);
     } catch (error) {
       this.#deleteLiveBuffer(buffer, byteLength);
       throw error;
@@ -300,14 +287,14 @@ export class WebGl2Renderer {
     const resource = new ManagedGeometry(
       input.id,
       input.topology,
-      bounded.positions.length / 3,
+      inputVertices,
       byteLength,
       buffer,
       color,
       this,
     );
+    if (previousModel) resource.modelMatrix = previousModel;
     this.#resources.set(input.id, resource);
-    this.#decimatedVertices += bounded.inputVertices - resource.vertexCount;
     return resource;
   }
 
@@ -315,6 +302,16 @@ export class WebGl2Renderer {
     const resource = this.#resources.get(id);
     if (resource === undefined) throw new Error(`unknown geometry: ${id}`);
     resource.draw();
+  }
+
+  setTransform(id: string, matrix: Float32Array): void {
+    this.#assertActive();
+    if (matrix.length !== 16 || matrix.some((value) => !Number.isFinite(value))) {
+      throw new Error("model transform must be a finite 4x4 matrix");
+    }
+    const resource = this.#resources.get(id);
+    if (!resource) throw new Error(`unknown geometry: ${id}`);
+    resource.modelMatrix = matrix.slice();
   }
 
   remove(id: string): void {
@@ -330,6 +327,7 @@ export class WebGl2Renderer {
     gl.enableVertexAttribArray(this.#positionLocation);
     gl.vertexAttribPointer(this.#positionLocation, 3, gl.FLOAT, false, 0, 0);
     gl.uniformMatrix4fv(this.#viewProjectionLocation, false, this.#viewProjection);
+    gl.uniformMatrix4fv(this.#modelLocation, false, resource.modelMatrix);
     gl.uniform4fv(this.#colorLocation, resource.color);
     gl.drawArrays(primitiveMode(gl, resource.topology), 0, resource.vertexCount);
     this.#drawCalls += 1;
