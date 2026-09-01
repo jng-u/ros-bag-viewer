@@ -683,13 +683,13 @@ export class HostedSharingService {
     try {
       for (const key of ["sessionId", "entryId", "objectId", "immutableVersion"]) if (typeof parsed[key] !== "string") throw new HostedAccessError();
       if (typeof parsed.offset !== "string" || typeof parsed.length !== "string" || !/^\d+$/u.test(parsed.offset) || !/^\d+$/u.test(parsed.length)) throw new HostedAccessError();
-      return this.#issueRangeGrant(sessionCapability, { sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) });
     } catch (error) { this.#deny(); throw error instanceof HostedAccessError ? error : new HostedAccessError(); }
+    return this.#issueRangeGrant(sessionCapability, { sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) });
   }
 
   #issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
     try {
-      if (this.#grants.size >= this.#limits.maxActiveGrants) throw new HostedAccessError();
+      if (this.#grants.size >= this.#limits.maxActiveGrants) { this.#deny(); throw new HostedAccessError(); }
       const session = this.#activeSession(sessionCapability);
       const entry = session.entries.get(request.entryId);
       if (
@@ -702,11 +702,11 @@ export class HostedSharingService {
         || request.length > BigInt(this.#limits.maxRangeBytes)
         || request.offset + request.length > entry.object.sizeBytes
       ) {
-        throw new HostedAccessError();
+        this.#deny(); throw new HostedAccessError();
       }
       const now = this.#now();
       const expiresAtMs = Math.min(now + this.#limits.grantTtlMs, session.expiresAtMs);
-      if (expiresAtMs <= now) throw new HostedAccessError();
+      if (expiresAtMs <= now) { this.#deny(); throw new HostedAccessError(); }
       const grantToken = token();
       const tokenDigest = digestToken(grantToken);
       this.#grants.set(Buffer.from(tokenDigest).toString("hex"), Object.freeze({
@@ -722,7 +722,6 @@ export class HostedSharingService {
       this.#record("grant-issued");
       return Object.freeze({ ...request, token: grantToken, expiresAtMs });
     } catch (error) {
-      if (error instanceof HostedAccessError) this.#deny();
       throw error instanceof HostedAccessError ? error : new HostedAccessError();
     }
   }
@@ -732,8 +731,8 @@ export class HostedSharingService {
     try {
       for (const key of ["sessionCapability", "grantToken", "sessionId", "entryId", "objectId", "immutableVersion"]) if (typeof parsed[key] !== "string") throw new HostedAccessError();
       if (typeof parsed.offset !== "string" || typeof parsed.length !== "string" || !/^\d+$/u.test(parsed.offset) || !/^\d+$/u.test(parsed.length)) throw new HostedAccessError();
-      return this.#readGrantedRange({ sessionCapability: parsed.sessionCapability as string, grantToken: parsed.grantToken as string, sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) }, signal);
     } catch (error) { this.#deny(); throw error instanceof HostedAccessError ? error : new HostedAccessError(); }
+    return this.#readGrantedRange({ sessionCapability: parsed.sessionCapability as string, grantToken: parsed.grantToken as string, sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) }, signal);
   }
 
   async #readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
