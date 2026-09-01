@@ -274,8 +274,7 @@ describe("structured repository stop policy", () => {
   const keys = semanticMatrix.map((row) => `${row.filename}\0${row.content}`);
   it("keeps semantic probe rows unique", () => expect(new Set(keys).size).toBe(semanticMatrix.length));
   semanticMatrix.forEach((row) => {
-    const test = it;
-    test(`semantic disposition ${row.name}`, () => {
+    it(`semantic disposition ${row.name}`, () => {
       const actual = repositoryStopReason(row.filename, row.content);
       expect(actual).toBe(row.expected);
     });
