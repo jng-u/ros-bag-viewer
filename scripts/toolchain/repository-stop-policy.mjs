@@ -36,23 +36,7 @@ function jsonContainsKubernetesResource(value) {
 }
 
 function stripYamlBlockScalars(text) {
-  // Join only physically continued Python expressions; indentation is retained
-  // on statement starts so scope analysis remains conservative.
-  const physicalLines = text.split(/\r?\n/u);
-  const lines = [];
-  let logical = "";
-  let depth = 0;
-  for (const physical of physicalLines) {
-    const trimmed = physical.trim();
-    if (!logical) logical = physical;
-    else logical += ` ${trimmed}`;
-    for (const ch of trimmed) {
-      if (ch === "(" || ch === "[" || ch === "{") depth += 1;
-      else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
-    }
-    if (depth === 0 && !/\\\\\s*$/u.test(physical)) { lines.push(logical); logical = ""; }
-  }
-  if (logical) lines.push(logical);
+  const lines = text.split(/\r?\n/u);
   const kept = [];
   let payloadIndent;
   let scalarHeaderIndent;
@@ -78,6 +62,27 @@ function stripYamlBlockScalars(text) {
     kept.push(rawLine);
   }
   return kept.join("\n");
+}
+
+function pythonLogicalStatements(text) {
+  const lines = [];
+  let logical = "", depth = 0, quote;
+  for (const physical of text.split(/\r?\n/u)) {
+    if (!logical) logical = physical; else logical += ` ${physical.trim()}`;
+    let escaped = false;
+    for (const ch of physical) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (quote) { if (ch === quote) quote = undefined; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "#") break;
+      if ("([{".includes(ch)) depth += 1;
+      else if (")]}".includes(ch)) depth = Math.max(0, depth - 1);
+    }
+    if (depth === 0 && !/\\\\\s*$/u.test(physical)) { lines.push(logical); logical = ""; }
+  }
+  if (logical) lines.push(logical);
+  return lines;
 }
 
 function yamlContainsKubernetesResource(text) {
@@ -659,7 +664,7 @@ function pythonDeclaresInfrastructure(text) {
     const lambda = /^lambda\s+([A-Za-z_]\w*)\s*:\s*(.+)\s*\(\s*\1\s*\)$/u.exec(loader);
     return Boolean(lambda && isLoaderExpression(lambda[2]));
   };
-  const lines = text.split(/\r?\n/u);
+  const lines = pythonLogicalStatements(text);
   const contexts = [];
   const closeContext = () => {
     const context = contexts.pop();
