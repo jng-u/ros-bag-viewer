@@ -398,6 +398,18 @@ describe("provider-neutral hosted sharing core", () => {
 });
 
 describe("serialized hosted admission", () => {
+  it("records exactly one denial for a valid range request with an invalid capability", async () => {
+    const service = fixture({ value: 10_000 });
+    const opened = await hosted(service);
+    const scope = rangeScope(opened, 1, 0n, 1n);
+    const before = service.telemetry().deniedRequests;
+    const eventsBefore = service.auditEvents().filter((event) => event.kind === "access-denied").length;
+    expect(() => service.issueRangeGrantSerialized("invalid-session-capability", serializeRangeGrantRequest(scope))).toThrow(HostedAccessError);
+    expect(service.telemetry().deniedRequests).toBe(before + 1);
+    expect(service.auditEvents().filter((event) => event.kind === "access-denied")).toHaveLength(eventsBefore + 1);
+  });
+
+
   it("rejects hostile Proxy inputs before any trap", async () => {
     const service = new HostedSharingService();
     const traps = { get: vi.fn(), getPrototypeOf: vi.fn(), ownKeys: vi.fn(), toJSON: vi.fn() };
