@@ -34,8 +34,8 @@ Last verified: **2026-09-02** on Linux Docker Engine with host networking and he
 
 | Lane | Pinned base | Built image evidence | Host requirements | Residual risk / retirement trigger |
 |---|---|---|---|---|
-| ROS1 Noetic | `ros:noetic-ros-core-focal@sha256:fd6279f04e51fa61201a791da9a156129941887b95b614ae0cec7865ef49de4f` | `sha256:155a8d8355df9dcf1394efc6190852269fc096791443e2773ebfb7e6b4a082e7` | Linux host networking; reachable ROS master; allowlisted topics | Ubuntu Focal/Noetic is legacy. Retire if the pinned image no longer rebuilds, cannot be vulnerability-mitigated, or supported hosts lose host-network compatibility. |
-| ROS2 Jazzy | `ros:jazzy-ros-core@sha256:fb9a5620bb92e133047c62555e307a2a481bde384c70595ceae464bc84e51df1` | `sha256:c4d71245967011bd9a3b527176af9e3635bc9b050c64d7b2cd4bb0bae8acb3cd` | Linux host networking; DDS domain reachability; UDPv4 Fast DDS | DDS discovery and QoS remain robot-network specific. Retire or repin on unsupported Jazzy/base image, critical vulnerability, or middleware incompatibility. |
+| ROS1 Noetic | `ros:noetic-ros-core-focal@sha256:fd6279f04e51fa61201a791da9a156129941887b95b614ae0cec7865ef49de4f` | `sha256:43559d627df58828cbd2d7c3349d66ef477252e32e3f6103dd188c8997dcaf1b` | Linux host networking; reachable ROS master; allowlisted topics | Ubuntu Focal/Noetic is legacy. Retire if the pinned image no longer rebuilds, cannot be vulnerability-mitigated, or supported hosts lose host-network compatibility. |
+| ROS2 Jazzy | `ros:jazzy-ros-core@sha256:fb9a5620bb92e133047c62555e307a2a481bde384c70595ceae464bc84e51df1` | `sha256:acbd689ba77ada0562700a6d2eb5058ccb6f12a7ca2318a370e5871bd740db62` | Linux host networking; DDS domain reachability; UDPv4 Fast DDS | DDS discovery and QoS remain robot-network specific. Retire or repin on unsupported Jazzy/base image, critical vulnerability, or middleware incompatibility. |
 
 These image IDs identify the locally verified builds, not a public registry guarantee. A rebuild after dependency repository changes must record a new ID and rerun both live browser gates.
 

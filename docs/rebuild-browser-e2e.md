@@ -4,10 +4,10 @@ Date: 2026-09-02 (Asia/Seoul)
 
 Environment:
 
-- Viewer image: `sha256:d4dd5407621688cb7a71b7b0492b160d8b478d6d569f2d95b961f71a43dd383b`
+- Viewer image: `sha256:7af2ce86f6ea695a3fcd992846f063402b24541737f2bb7c7a34c0d30fac9c0c`
 - Share image: `sha256:8ea5961caeb0beeef805a7905be7bba1a1a6dda2d5cc20f3f9ae885e4011c920`
-- ROS1 bridge image: `sha256:155a8d8355df9dcf1394efc6190852269fc096791443e2773ebfb7e6b4a082e7`
-- ROS2 bridge image: `sha256:c4d71245967011bd9a3b527176af9e3635bc9b050c64d7b2cd4bb0bae8acb3cd`
+- ROS1 bridge image: `sha256:43559d627df58828cbd2d7c3349d66ef477252e32e3f6103dd188c8997dcaf1b`
+- ROS2 bridge image: `sha256:acbd689ba77ada0562700a6d2eb5058ccb6f12a7ca2318a370e5871bd740db62`
 - Browser: Firefox 154.0, headless, 1440 × 814 viewport
 - Driver: geckodriver 0.37.1
 - Served route: `http://127.0.0.1:8080`
@@ -48,7 +48,7 @@ Latest actual bridge observations:
 
 | Bridge | Browser result | Topics/layers | Errors | Scene |
 |---|---|---:|---:|---|
-| ROS1 Noetic `rospy.AnyMsg` | ready | 2 / 2 | 0 | TF + LaserScan, zero drops, 0.25 ms relay / 45.62 ms display in the latest run |
-| ROS2 Jazzy typed CDR | ready | 3 discovered / 2 native | 0 | TF + LaserScan plus schema-backed `shape_msgs/Plane` raw tree and `coef[0]` plot; 0.27 ms relay / 19.94 ms display in the latest run |
+| ROS1 Noetic `rospy.AnyMsg` | ready | 2 / 2 | 0 | TF + LaserScan, zero drops, 0.28 ms relay / 20.86 ms display in the latest run |
+| ROS2 Jazzy typed CDR | ready | 3 discovered / 2 native | 0 | TF + LaserScan plus schema-backed `shape_msgs/Plane` raw tree and `coef[0]` plot; 0.24 ms relay / 17.70 ms display in the latest run |
 
 The measured local acceptance targets are relay latency ≤50 ms and browser delivery latency ≤100 ms. These are machine-local targets, not internet or robot-network guarantees.
