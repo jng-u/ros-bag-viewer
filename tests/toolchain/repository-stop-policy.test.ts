@@ -204,20 +204,42 @@ const allowed = [
   ["descriptor.json", "{\"token\":\"identifier\"}"],
 ] as const;
 
-// Task112/113 hostile semantic probes are kept as named rows so policy drift is
-// visible even when source-policy remediation is intentionally deferred.
+// Task112/113 hostile semantic probes: explicit, stable, unique rows.
 const semanticMatrix = [
-  ["ts-destructured-require.ts", "const { require: load } = module; load(\"aws-cdk-lib\")", "infrastructure"],
-  ["ts-computed-require.ts", "const load = module[\"require\"]; load(\"aws-cdk-lib\")", "infrastructure"],
-  ["ts-benign-local.ts", "const load = safeLoader; load(\"aws-cdk-lib\")", undefined],
-  ["infra/py-starred.py", "load = __import__\nload(*[\"pulumi_aws\"])" , "infrastructure"],
-  ["infra/py-keyword.py", "load = __import__\nload(name=\"pulumi_aws\")", "infrastructure"],
-  ["infra/py-builtins-dict.py", "import builtins\nbuiltins.__dict__[\"__import__\"](\"pulumi_aws\")", "infrastructure"],
-  ["infra/py-delete.py", "load = print\ndel load\n__import__(\"pulumi_aws\")", "infrastructure"],
-  ["infra/py-benign-shadow.py", "load = print\nload(\"safe_package\")", undefined],
-  ["k8s/indicator.yaml", "kind: Deployment\napiVersion: apps/v1", "infrastructure"],
-  ["docs/indicator.yaml", "example: |\n  kind: Deployment\n  apiVersion: apps/v1", undefined],
-  ["batch-safe.txt", "ordinary documentation", undefined],
+  { name: "ts-destructured-require", filename: "ts-destructured-require.ts", content: "const { require: load } = module; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: true },
+  { name: "ts-computed-require", filename: "ts-computed-require.ts", content: "const load = module[\"require\"]; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: true },
+  { name: "ts-benign-shadow", filename: "ts-benign-shadow.ts", content: "const load = safeLoader; { const load = require; load(\"safe_package\") }", expected: undefined, knownGap: false },
+  { name: "ts-predeclared-shadow", filename: "ts-predeclared-shadow.ts", content: "load(\"aws-cdk-lib\"); const load = safeLoader", expected: "infrastructure", knownGap: true },
+  { name: "ts-computed-safe", filename: "ts-computed-safe.ts", content: "const key = \"require\"; const load = module[key]; load(\"safe_package\")", expected: undefined, knownGap: false },
+  { name: "py-multiline-call", filename: "py-multiline-call.py", content: "load = __import__\nload(\n  \"pulumi_aws\"\n)", expected: "infrastructure", knownGap: true },
+  { name: "py-parenthesized-call", filename: "py-parenthesized-call.py", content: "load = (__import__)\nload((\"pulumi_aws\"))", expected: "infrastructure", knownGap: true },
+  { name: "py-getattr-default", filename: "py-getattr-default.py", content: "import builtins\nload = getattr(builtins, \"__import__\", print)\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-getattr-dunder", filename: "py-getattr-dunder.py", content: "import builtins\nload = getattr(builtins, \"__dict__\")[\"__import__\"]\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-builtins-dict", filename: "py-builtins-dict.py", content: "import builtins\nbuiltins.__dict__[\"__import__\"](\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-positional", filename: "py-positional.py", content: "load = __import__\nload(\"pulumi_aws\", 0)", expected: "infrastructure", knownGap: false },
+  { name: "py-starred", filename: "py-starred.py", content: "load = __import__\nload(*[\"pulumi_aws\"])", expected: "infrastructure", knownGap: false },
+  { name: "py-keyword", filename: "py-keyword.py", content: "load = __import__\nload(name=\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-nested-function", filename: "py-nested-function.py", content: "load = print\ndef f():\n  load = __import__\n  load(\"pulumi_aws\")", expected: undefined, knownGap: true },
+  { name: "py-class-scope", filename: "py-class-scope.py", content: "load = print\nclass C:\n  load = __import__\n  load(\"pulumi_aws\")", expected: undefined, knownGap: true },
+  { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined, knownGap: true },
+  { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined, knownGap: true },
+  { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-alternate-import", filename: "py-alternate-import.py", content: "from importlib import import_module as im\nim(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
+  { name: "py-delete", filename: "py-delete.py", content: "load = __import__\ndel load\nload(\"pulumi_aws\")", expected: undefined, knownGap: true },
+  { name: "py-rebinding", filename: "py-rebinding.py", content: "load = __import__\nload = print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "py-benign-shadow", filename: "py-benign-shadow.py", content: "load = print\nload(\"safe_package\")", expected: undefined, knownGap: false },
+  { name: "yaml-indicator", filename: "k8s/indicator.yaml", content: "kind: Deployment\napiVersion: apps/v1", expected: "infrastructure", knownGap: false },
+  { name: "yaml-block-example", filename: "docs/block.yaml", content: "example: |\n  kind: Deployment\n  apiVersion: apps/v1", expected: undefined, knownGap: false },
+  { name: "yaml-sequence", filename: "k8s/sequence.yaml", content: "items:\n  - apiVersion: v1\n    kind: Deployment", expected: "infrastructure", knownGap: false },
+  { name: "yaml-flow", filename: "k8s/flow.yaml", content: "root: {apiVersion: v1, kind: Deployment}", expected: "infrastructure", knownGap: false },
+  { name: "yaml-sibling", filename: "docs/sibling.yaml", content: "example: >-\n  kind: Deployment\nnext: value", expected: undefined, knownGap: false },
+  { name: "py-safe-doc", filename: "docs/example.py", content: "load = print\nload(\"safe_package\")", expected: undefined, knownGap: false },
+  { name: "ts-safe-import", filename: "src/safe.ts", content: "import x from \"safe-package\"", expected: undefined, knownGap: false },
+  { name: "py-importlib-dict", filename: "py-importlib-dict.py", content: "import importlib\nimportlib.__dict__[\"import_module\"](\"pulumi_aws\")", expected: "infrastructure", knownGap: true },
+  { name: "py-starred-keyword", filename: "py-starred-keyword.py", content: "load = __import__\nload(*[\"pulumi_aws\"], level=0)", expected: "infrastructure", knownGap: false },
 ] as const;
 
 describe("structured repository stop policy", () => {
@@ -241,13 +263,13 @@ describe("structured repository stop policy", () => {
     expect(repositoryStopReason(filename, content)).toBeUndefined();
   });
 
-  const expanded = [...semanticMatrix, ...Array.from({ length: 20 }, (_, i) =>
-    [`named-probe-${i + 1}.py`, `load = __import__\nload("pulumi_aws")`, "infrastructure"] as const)];
-  expanded.forEach(([filename, content, expected]) => {
-    const actual = repositoryStopReason(filename, content);
-    const test = actual === expected ? it : it.fails;
-    test(`semantic disposition ${filename}`, () => {
-      expect(actual).toBe(expected);
+  const keys = semanticMatrix.map((row) => `${row.filename}\0${row.content}`);
+  it("keeps semantic probe rows unique", () => expect(new Set(keys).size).toBe(semanticMatrix.length));
+  semanticMatrix.forEach((row) => {
+    const test = row.knownGap ? it.fails : it;
+    test(`semantic disposition ${row.name}`, () => {
+      const actual = repositoryStopReason(row.filename, row.content);
+      expect(actual).toBe(row.expected);
     });
   });
 });
