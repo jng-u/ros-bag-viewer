@@ -206,10 +206,10 @@ const allowed = [
 
 // Task112/113 hostile semantic probes: explicit, stable, unique rows.
 const semanticMatrix = [
-  { name: "ts-destructured-require", filename: "ts-destructured-require.ts", content: "const { require: load } = module; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: true },
-  { name: "ts-computed-require", filename: "ts-computed-require.ts", content: "const load = module[\"require\"]; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: true },
+  { name: "ts-destructured-require", filename: "ts-destructured-require.ts", content: "const { require: load } = module; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: false },
+  { name: "ts-computed-require", filename: "ts-computed-require.ts", content: "const load = module[\"require\"]; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: false },
   { name: "ts-benign-shadow", filename: "ts-benign-shadow.ts", content: "const load = safeLoader; { const load = require; load(\"safe_package\") }", expected: undefined, knownGap: false },
-  { name: "ts-predeclared-shadow", filename: "ts-predeclared-shadow.ts", content: "load(\"aws-cdk-lib\"); const load = safeLoader", expected: "infrastructure", knownGap: true },
+  { name: "ts-predeclared-shadow", filename: "ts-predeclared-shadow.ts", content: "load(\"aws-cdk-lib\"); const load = safeLoader", expected: undefined, knownGap: false },
   { name: "ts-computed-safe", filename: "ts-computed-safe.ts", content: "const key = \"require\"; const load = module[key]; load(\"safe_package\")", expected: undefined, knownGap: false },
   { name: "py-multiline-call", filename: "py-multiline-call.py", content: "load = __import__\nload(\n  \"pulumi_aws\"\n)", expected: "infrastructure", knownGap: true },
   { name: "py-parenthesized-call", filename: "py-parenthesized-call.py", content: "load = (__import__)\nload((\"pulumi_aws\"))", expected: "infrastructure", knownGap: true },

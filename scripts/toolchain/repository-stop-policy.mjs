@@ -380,6 +380,9 @@ function typescriptDeclaresInfrastructure(text, filename) {
     node = transparentTypeScriptExpression(node);
     if (!node) return false;
     if (loaderReference(node, environment)) return true;
+    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      propertyName(node, environment) === "require" && ts.isIdentifier(node.expression) &&
+      node.expression.text === "module" && isUnshadowed(node.expression, "module")) return true;
     if (ts.isCallExpression(node) && node.arguments.length >= 1) {
       const bind = transparentTypeScriptExpression(node.expression);
       if ((ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind)) && propertyName(bind, environment) === "bind" &&
@@ -468,11 +471,19 @@ function typescriptDeclaresInfrastructure(text, filename) {
       if ([...typescriptStrings(node.moduleSpecifier, environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
       if ([...typescriptStrings(node.moduleSpecifier, environment.constants)].some((value) => infrastructureModulePattern.test(value))) found = true;
-    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+    } else if (ts.isVariableDeclaration(node)) {
       if (node.initializer) inspect(node.initializer, environment);
-      assign(environment.constants, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
-      if (isLoaderAlias(node.initializer, environment)) environment.loaders.add(node.name.text);
-      else environment.loaders.delete(node.name.text);
+      if (ts.isIdentifier(node.name)) {
+        assign(environment.constants, node.name.text, node.initializer, ts.SyntaxKind.EqualsToken);
+        if (isLoaderAlias(node.initializer, environment)) environment.loaders.add(node.name.text);
+        else environment.loaders.delete(node.name.text);
+      } else if (ts.isObjectBindingPattern(node.name) && node.initializer &&
+        (isLoaderAlias(node.initializer, environment) || (ts.isIdentifier(node.initializer) && node.initializer.text === "module" && isUnshadowed(node.initializer, "module")))) {
+        for (const element of node.name.elements) {
+          if (ts.isBindingElement(element) && ts.isIdentifier(element.name) && element.propertyName &&
+            (ts.isIdentifier(element.propertyName) || ts.isStringLiteral(element.propertyName)) && element.propertyName.text === "require") environment.loaders.add(element.name.text);
+        }
+      }
       return;
     } else if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) &&
       [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind)) {
