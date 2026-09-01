@@ -64,8 +64,8 @@
       "status": "pass-local-synthetic",
       "evidenceClass": "local-in-process",
       "commands": ["corepack pnpm check:m3"],
-      "artifacts": ["tests/m3-live/security-gate.test.ts", "docs/evidence/m3-live.json"],
-      "limitation": "ROS1/ROS2 adapters are exercised by a deterministic in-process harness; no ROS distribution or network was executed."
+      "artifacts": ["tests/m3-live/security-gate.test.ts", "apps/web/test/live-adapter.test.ts", "docs/evidence/m3-live.json"],
+      "limitation": "ROS1/ROS2 authenticated edge/relay fixtures dispatch bounded payloads through the shared normalized DisplayLifecycle in a deterministic in-process harness; no ROS distribution or external network was executed."
     },
     {
       "id": "AC-06",

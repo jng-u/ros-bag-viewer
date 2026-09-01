@@ -10,6 +10,10 @@ import {
 } from "../../apps/relay/src/index.js";
 import { parseBrowserFrameJson } from "../../packages/protocol/src/index.js";
 import {
+  createLiveDesktopShell,
+  type LiveDisplayLifecycleFactory,
+} from "../../apps/web/src/index.js";
+import {
   PrivateEdgeRuntime,
   computeAllowlistDigest,
   type EdgePlan,
@@ -317,6 +321,87 @@ describe("M3 deterministic synthetic load evidence", () => {
     expect(source.telemetry).toMatchObject({ sourceEpoch: 2, reconnects: 1 });
     await source.close();
     await fixture.edge.close();
+  });
+
+  it.each(["ros1", "ros2"] as const)("routes authenticated %s relay payloads through the normalized display lifecycle", async (generation) => {
+    const fixture = createSyntheticFixture(generation);
+    const transport = new SyntheticLiveRelayTransport(fixture);
+    const calls: string[] = [];
+    type Lifecycle = ReturnType<LiveDisplayLifecycleFactory>;
+    type Envelope = Parameters<Lifecycle["update"]>[0];
+    let state: Lifecycle["state"] = "registered";
+    let captured: {
+      readonly envelope: Envelope;
+      readonly bytes: readonly number[];
+      readonly lease: Envelope["payload"];
+    } | undefined;
+    const lifecycle: Lifecycle = {
+      get state() { return state; },
+      register() { calls.push("register"); state = "registered"; },
+      instantiate() { calls.push("instantiate"); state = "instantiated"; },
+      configure() { calls.push("configure"); state = "configured"; },
+      attachSource(epoch) { calls.push(`attach:${epoch}`); state = "attached"; },
+      update(message) {
+        captured = { envelope: message, bytes: [...message.payload.readBytes(message.epoch)], lease: message.payload };
+        calls.push(`update:${message.nativeTypeMetadata.encoding}`);
+      },
+      render() { calls.push("render"); state = "rendering"; },
+      suspend() { calls.push("suspend"); state = "suspended"; },
+      handleError(error) { calls.push(`error:${error.message}`); state = "error"; },
+      dispose() { calls.push("dispose"); state = "disposed"; },
+    };
+    const live = createLiveDesktopShell(
+      (selection) => new BoundedLiveSource(transport, selection, {
+        maxTopicsPerSubscription: 2,
+        maxMessageBytes: 2_048,
+        maxMessagesPerSecond: 100,
+        maxQueueMessages: 4,
+        maxQueueBytes: 4_096,
+      }),
+      () => lifecycle,
+    );
+
+    await live.controller.connectLive({ browserOrigin: "https://viewer.example", sessionToken: "browser-secret" });
+    await live.controller.subscribeLive(["/points"]);
+    live.controller.addDisplay("/points", "point-cloud");
+    fixture.setNow(10_001);
+    fixture.port.emit("/points", Uint8Array.of(1, 2, 3, 4));
+    expect(transport.flushFromEdge()).toBe(1);
+
+    expect(live.controller.pollLive()).toMatchObject({
+      epoch: 1,
+      messageCount: 1,
+      displayDeliveries: 1,
+      displayErrors: 0,
+      staleMessageCount: 0,
+    });
+    expect(calls).toEqual(["register", "instantiate", "configure", "attach:1", `update:${generation === "ros1" ? "ros1" : "cdr"}`, "render"]);
+    expect(captured).toMatchObject({
+      bytes: [1, 2, 3, 4],
+      envelope: {
+        sourceId: "secure-live",
+        channelId: "/points",
+        epoch: 1,
+        schedulingTime: { source: "clock", epoch: 1 },
+        schema: {
+          capability: "schema-present",
+          typeName: "sensor_msgs/msg/PointCloud2",
+          provenance: [{ providerId: "live-relay", providerVersion: "1" }],
+        },
+        nativeTypeMetadata: {
+          topicName: "/points",
+          encoding: generation === "ros1" ? "ros1" : "cdr",
+        },
+      },
+    });
+    expect(captured?.lease.released).toBe(true);
+    expect(() => captured?.lease.readBytes(captured.envelope.epoch)).toThrow(/active source epoch/);
+    expect(live.controller.state.notice).toBe("1 live display update rendered from 1 message.");
+
+    await live.controller.reconnectLive();
+    expect(calls.slice(-2)).toEqual(["suspend", "attach:2"]);
+    await live.controller.disconnectLive();
+    expect(calls.at(-1)).toBe("dispose");
   });
 
   it.each(["ros1", "ros2"] as const)("keeps %s point-cloud/image-like load bounded and reconnects by epoch", async (generation) => {
