@@ -85,6 +85,20 @@ describe("payload lease contract", () => {
     expect(() => lease.release()).toThrow(/more than retained/);
   });
 
+  it("reads retained bytes as copy-isolated data and rejects absent bytes", () => {
+    const input = new Uint8Array([1, 2, 3]);
+    const lease = new ReferenceCountedPayloadLease(epoch, input.byteLength, input);
+    input[0] = 9;
+    const output = lease.readBytes(epoch);
+    expect([...output]).toEqual([1, 2, 3]);
+    output[1] = 8;
+    expect([...lease.readBytes(epoch)]).toEqual([1, 2, 3]);
+    const absent = new ReferenceCountedPayloadLease(epoch, 0);
+    expect(() => absent.readBytes(epoch)).toThrow(/not retained/);
+    lease.invalidate();
+    expect(() => lease.readBytes(epoch)).toThrow(/active source epoch/);
+  });
+
   it("rejects stale epochs and invalidation", () => {
     const lease = new ReferenceCountedPayloadLease(epoch, 4);
     let stale = "";

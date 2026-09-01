@@ -142,6 +142,7 @@ export interface PayloadLease {
   retain(): PayloadLease;
   release(): void;
   assertUsable(epoch: SourceEpoch): void;
+  readBytes(epoch: SourceEpoch): Uint8Array;
 }
 
 export class ReferenceCountedPayloadLease implements PayloadLease {
@@ -149,13 +150,16 @@ export class ReferenceCountedPayloadLease implements PayloadLease {
   readonly byteLength: number;
   #retainCount = 1;
   #invalidated = false;
+  readonly #bytes?: Uint8Array;
 
-  constructor(epoch: SourceEpoch, byteLength: number) {
+  constructor(epoch: SourceEpoch, byteLength: number, bytes?: Uint8Array) {
     if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
       throw new Error("payload byteLength must be a non-negative safe integer");
     }
+    if (bytes !== undefined && bytes.byteLength !== byteLength) throw new Error("payload bytes length does not match lease");
     this.epoch = epoch;
     this.byteLength = byteLength;
+    this.#bytes = bytes === undefined ? undefined : new Uint8Array(bytes);
   }
 
   get retainCount(): number {
@@ -186,6 +190,12 @@ export class ReferenceCountedPayloadLease implements PayloadLease {
     if (this.epoch !== epoch || this.released) {
       throw new Error("payload lease is not valid for the active source epoch");
     }
+  }
+
+  readBytes(epoch: SourceEpoch): Uint8Array {
+    this.assertUsable(epoch);
+    if (this.#bytes === undefined) throw new Error("payload bytes were not retained");
+    return new Uint8Array(this.#bytes);
   }
 }
 
