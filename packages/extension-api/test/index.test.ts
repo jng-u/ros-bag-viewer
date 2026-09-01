@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+// @ts-expect-error Executable ESM audit seam has no declaration facade.
+import { auditSourceBatch } from "../../../scripts/toolchain/audit-extension-examples.mjs";
 
 vi.mock("@ros-web-viewer/extension-api", async () => import("../src/index.js"));
 
@@ -591,7 +593,7 @@ describe("out-of-core range summary example", () => {
 export const safe = defineTrustedExtension("safe", () => defineTrustedLifecycle(
   () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
 ));`;
-    for (const source of [
+    const hostileSources = [
       'import/*comment*/"node:fs";',
       'export/*comment*/{readFile}from"node:fs";',
       'import fs = require("node:fs");',
@@ -723,14 +725,11 @@ export const unsafe = defineTrustedExtension("unsafe", () => defineTrustedLifecy
   () => { const key = "constructor"; const { [key]: recovered } = function () {}; recovered("return globalThis")(); },
   () => {}, () => {}, () => {}, () => {}, () => {}, () => {},
 ));`,
-    ]) {
-      const probe = spawnSync(process.execPath, [
-        "scripts/toolchain/audit-extension-examples.mjs",
-        "--source-base64",
-        Buffer.from(source).toString("base64"),
-      ], { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
-      expect(probe.status, source).not.toBe(0);
-    }
+    ];
+    const hostileResults = auditSourceBatch(hostileSources.map((source) => ({ source, filename: "hostile.ts" })));
+    expect(hostileResults).toHaveLength(hostileSources.length);
+    hostileResults.forEach((result: { readonly ok: boolean; readonly error: string }, index: number) =>
+      expect(result.ok, `hostile case ${index}: ${result.error}`).toBe(false));
     const allowed = spawnSync(process.execPath, [
       "scripts/toolchain/audit-extension-examples.mjs",
       "--source-base64",

@@ -252,6 +252,20 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
   }
 }
 
+// Bounded in-process batch seam for callers that need per-case diagnostics without
+// paying a fresh Node/TypeScript startup for every source probe.
+export function auditSourceBatch(probes) {
+  if (!Array.isArray(probes) || probes.length > 256) fail("source probe batch exceeds bounded case limit");
+  return probes.map(({ source, filename = "probe.ts" }) => {
+    try {
+      auditSourceText(source, filename);
+      return { filename, ok: true, error: "" };
+    } catch (error) {
+      return { filename, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+}
+
 export function auditManifest(manifest, label = "package.json") {
   const exact = ["dependencies", "exports", "name", "private", "scripts", "type", "types"];
   if (Object.keys(manifest).sort().join("\0") !== exact.sort().join("\0")) fail(`${label} has unexpected package surfaces`);
