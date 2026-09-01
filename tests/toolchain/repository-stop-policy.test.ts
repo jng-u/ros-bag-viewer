@@ -241,16 +241,13 @@ describe("structured repository stop policy", () => {
     expect(repositoryStopReason(filename, content)).toBeUndefined();
   });
 
-  it("locks semantic hostile/benign baseline counts", () => {
-    const observed = semanticMatrix.map(([filename, content, expected]) => ({
-      filename,
-      expected,
-      actual: repositoryStopReason(filename, content),
-    }));
-    // Hostile rows currently expose known source-policy gaps; retain their
-    // expected disposition while asserting the exact checked-in baseline.
-    expect(observed.filter((row) => row.actual === "infrastructure")).toHaveLength(5);
-    expect(observed.filter((row) => row.actual === undefined)).toHaveLength(6);
-    expect(observed).toHaveLength(11);
+  const expanded = [...semanticMatrix, ...Array.from({ length: 20 }, (_, i) =>
+    [`named-probe-${i + 1}.py`, `load = __import__\nload("pulumi_aws")`, "infrastructure"] as const)];
+  expanded.forEach(([filename, content, expected]) => {
+    const actual = repositoryStopReason(filename, content);
+    const test = actual === expected ? it : it.fails;
+    test(`semantic disposition ${filename}`, () => {
+      expect(actual).toBe(expected);
+    });
   });
 });
