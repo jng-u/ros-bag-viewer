@@ -423,13 +423,24 @@ function typescriptDeclaresInfrastructure(text, filename) {
     return args && ts.isArrayLiteralExpression(args) ? args.elements[0] : undefined;
   };
 
+  const bindingNames = (name, names = new Set()) => {
+    if (!name) return names;
+    if (ts.isIdentifier(name)) names.add(name.text);
+    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) bindingNames(element.name, names);
+      }
+    }
+    return names;
+  };
+
   const inspectBlock = (node, environment) => {
     const before = copyTypeScriptEnvironment(environment);
     const declared = new Set();
     for (const statement of node.statements) {
       if (ts.isVariableStatement(statement)) {
         for (const declaration of statement.declarationList.declarations) {
-          if (ts.isIdentifier(declaration.name)) declared.add(declaration.name.text);
+          bindingNames(declaration.name, declared);
         }
       } else if (ts.isFunctionDeclaration(statement) && statement.name) declared.add(statement.name.text);
       inspect(statement, environment);
