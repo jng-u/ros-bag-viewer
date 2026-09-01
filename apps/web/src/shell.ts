@@ -115,6 +115,8 @@ export interface LivePollResult {
   readonly latestSourceTimeNanos?: bigint;
   readonly messageCount: number;
   readonly telemetry: LiveTelemetrySummary;
+  readonly displayDeliveries?: number;
+  readonly displayErrors?: number;
 }
 
 export interface DesktopShellPorts {
@@ -127,6 +129,7 @@ export interface DesktopShellPorts {
   readonly pollLive?: () => LivePollResult;
   readonly reconnectLive?: () => Promise<OpenLiveResult>;
   readonly disconnectLive?: () => Promise<void>;
+  readonly registerLiveDisplay?: (display: DisplayPanel) => void;
 }
 
 export interface DisplayConfiguration {
@@ -475,6 +478,10 @@ export class DesktopShellController {
       status: "ready",
       configuration: defaultConfiguration,
     };
+    if (this.#state.sourceMode === "live") {
+      if (!this.ports.registerLiveDisplay) throw new Error("live display registration unavailable");
+      this.ports.registerLiveDisplay(display);
+    }
     this.#state = {
       ...this.#state,
       displays: [...this.#state.displays, display],

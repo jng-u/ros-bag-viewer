@@ -8,6 +8,7 @@ import {
   type OpenLiveResult,
   type TopicSummary,
 } from "./shell.js";
+import type { DisplayLifecycle } from "@ros-web-viewer/core-model";
 
 export interface LiveAdapterTopic {
   readonly id: string;
@@ -20,11 +21,17 @@ export interface LiveAdapterTopic {
 }
 
 export interface LiveAdapterEnvelope {
+  readonly version?: 1;
   readonly sourceEpoch: number;
   readonly topicId: string;
+  readonly topicName?: string;
+  readonly sequence?: bigint;
+  readonly schema?: { readonly typeName: string; readonly encoding: string; readonly definitionHash?: string };
+  readonly payload?: Uint8Array;
   readonly sourceTimeNanos?: bigint;
   readonly time?: { readonly sourceTimeNanos: bigint };
 }
+export type LiveDisplayLifecycleFactory = (display: import("./shell.js").DisplayPanel) => DisplayLifecycle;
 
 export interface LiveAdapterTelemetry {
   readonly state: "disconnected" | "connecting" | "connected" | "degraded" | "reconnecting";
@@ -93,7 +100,7 @@ function telemetrySummary(telemetry: LiveAdapterTelemetry): LiveTelemetrySummary
 export class LiveDesktopAdapter implements DesktopShellPorts {
   #source?: LiveDesktopSourcePort;
 
-  constructor(private readonly sourceFactory: (selection: LiveConnectionSelection) => LiveDesktopSourcePort) {}
+  constructor(private readonly sourceFactory: (selection: LiveConnectionSelection) => LiveDesktopSourcePort, private readonly displayFactory?: LiveDisplayLifecycleFactory) {}
 
   async connectLive(selection: LiveConnectionSelection): Promise<OpenLiveResult> {
     await this.#source?.close();
@@ -111,6 +118,11 @@ export class LiveDesktopAdapter implements DesktopShellPorts {
   async subscribeLive(topicIds: readonly string[]): Promise<void> {
     if (!this.#source) throw new Error("connect secure live mode before subscribing");
     await this.#source.subscribe(topicIds);
+  }
+
+  registerLiveDisplay(display: import("./shell.js").DisplayPanel): void {
+    void display;
+    if (!this.displayFactory) return;
   }
 
   pollLive(): LivePollResult {
