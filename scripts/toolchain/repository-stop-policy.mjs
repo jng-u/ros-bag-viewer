@@ -567,10 +567,64 @@ function decodeQuotedText(value) {
   return undefined;
 }
 
+function pythonDelimiterEnd(text, openingIndex) {
+  const pairs = new Map([["(", ")"], ["[", "]"], ["{", "}"]]);
+  const opening = text[openingIndex];
+  if (!pairs.has(opening)) return undefined;
+  const stack = [pairs.get(opening)];
+  let quote;
+  let escaped = false;
+  for (let index = openingIndex + 1; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) { escaped = false; continue; }
+    if (character === "\\") { escaped = true; continue; }
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (pairs.has(character)) stack.push(pairs.get(character));
+    else if (")]}".includes(character)) {
+      if (stack.at(-1) !== character) return undefined;
+      stack.pop();
+      if (stack.length === 0) return index;
+    }
+  }
+  return undefined;
+}
+
+function pythonTopLevelParts(text, delimiter = ",") {
+  const parts = [];
+  const stack = [];
+  const pairs = new Map([["(", ")"], ["[", "]"], ["{", "}"]]);
+  let quote;
+  let escaped = false;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) { escaped = false; continue; }
+    if (character === "\\") { escaped = true; continue; }
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (pairs.has(character)) stack.push(pairs.get(character));
+    else if (stack.at(-1) === character) stack.pop();
+    else if (character === delimiter && stack.length === 0) {
+      parts.push(text.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+function stripPythonOuterParentheses(expression) {
+  let trimmed = expression.trim();
+  while (trimmed.startsWith("(") && pythonDelimiterEnd(trimmed, 0) === trimmed.length - 1) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 function pythonStrings(expression, constants, depth = 0) {
-  const trimmed = expression.trim();
+  const trimmed = stripPythonOuterParentheses(expression);
   if (depth > 16) return new Set();
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) return pythonStrings(trimmed.slice(1, -1), constants, depth + 1);
   if (/^[A-Za-z_]\w*$/u.test(trimmed)) return new Set(constants.get(trimmed) ?? []);
   const direct = decodeQuotedText(trimmed);
   if (direct !== undefined) return new Set([direct]);
@@ -613,45 +667,36 @@ function pythonDeclaresInfrastructure(text) {
     loaderAliases: new Set(states.flatMap(({ loaderAliases }) => [...loaderAliases])),
   });
   const normalizeLoaderExpression = (expression) => {
-    let normalized = expression.trim();
-    let changed = true;
-    while (changed && normalized.startsWith("(") && normalized.endsWith(")")) {
-      changed = false;
-      let depth = 0;
-      let quote;
-      let escaped = false;
-      for (let index = 0; index < normalized.length; index += 1) {
-        const character = normalized[index];
-        if (escaped) { escaped = false; continue; }
-        if (character === "\\") { escaped = true; continue; }
-        if (quote) { if (character === quote) quote = undefined; continue; }
-        if (character === '"' || character === "'") { quote = character; continue; }
-        if (character === "(") depth += 1;
-        else if (character === ")") depth -= 1;
-        if (depth === 0 && index < normalized.length - 1) break;
-        if (index === normalized.length - 1 && depth === 0) {
-          normalized = normalized.slice(1, -1).trim();
-          changed = true;
-        }
-      }
-    }
+    const normalized = stripPythonOuterParentheses(expression);
     const member = /^(.*?)\s*\.\s*import_module$/u.exec(normalized);
     if (member) {
       const receiver = normalizeLoaderExpression(member[1]);
       if (/^[A-Za-z_]\w*$/u.test(receiver)) return `${receiver}.import_module`;
     }
-    const getattr = /^getattr\s*\(\s*(.+?)\s*,\s*(.+)\s*\)$/u.exec(normalized);
-    if (getattr) {
-      const receiver = normalizeLoaderExpression(getattr[1]);
-      const attributes = pythonStrings(getattr[2].split(",", 1)[0], state.constants);
+    const subscript = /^(.*?)\[\s*(.+)\s*\]$/u.exec(normalized);
+    if (subscript) {
+      const receiver = normalizeLoaderExpression(subscript[1]);
+      const attributes = pythonStrings(subscript[2], state.constants);
+      const dictionary = /^(.*?)\s*\.\s*__dict__$/u.exec(receiver);
+      if (dictionary && /^[A-Za-z_]\w*$/u.test(dictionary[1]) &&
+        (attributes.has("import_module") || attributes.has("__import__"))) {
+        return `${dictionary[1]}.${[...attributes][0]}`;
+      }
+    }
+    const dictionaryGet = /^(.*?)\s*\.\s*__dict__\s*\.get\s*\((.*)\)$/u.exec(normalized);
+    if (dictionaryGet) {
+      const receiver = normalizeLoaderExpression(dictionaryGet[1]);
+      const attributes = pythonStrings(pythonTopLevelParts(dictionaryGet[2])[0], state.constants);
       if (/^[A-Za-z_]\w*$/u.test(receiver) && (attributes.has("import_module") || attributes.has("__import__"))) {
         return `${receiver}.${[...attributes][0]}`;
       }
     }
-    const dictionary = /^(.*?)\s*\.\s*__dict__\s*(?:\[\s*(.+)\s*\]|\.get\s*\(\s*(.+)\s*\))$/u.exec(normalized);
-    if (dictionary) {
-      const receiver = normalizeLoaderExpression(dictionary[1]);
-      const attributes = pythonStrings(dictionary[2] ?? dictionary[3], state.constants);
+    const getattr = /^getattr\s*\((.*)\)$/u.exec(normalized);
+    if (getattr) {
+      const arguments_ = pythonTopLevelParts(getattr[1]);
+      const receiver = normalizeLoaderExpression(arguments_[0] ?? "");
+      const attributes = pythonStrings(arguments_[1] ?? "", state.constants);
+      if (/^[A-Za-z_]\w*$/u.test(receiver) && attributes.has("__dict__")) return `${receiver}.__dict__`;
       if (/^[A-Za-z_]\w*$/u.test(receiver) && (attributes.has("import_module") || attributes.has("__import__"))) {
         return `${receiver}.${[...attributes][0]}`;
       }
@@ -747,24 +792,34 @@ function pythonDeclaresInfrastructure(text) {
     const returned = /^\s*return\s+(.+?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
     const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");
     if (returned && activeFunction && returned[2] === activeFunction.parameter && isLoaderExpression(returned[1])) activeFunction.wrapper = true;
-    const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`), ...[...state.importlibAliases].map((alias) => `${alias}.__dict__['import_module']`)]
-      .map((loader) => loader.replace(".", "\\."))
-      .join("|");
+    const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const loaderPatterns = [
+      ...[...state.loaderAliases, ...state.importModuleAliases,
+        ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)].map(escapePattern),
+      ...[...state.importlibAliases].map((alias) =>
+        `${escapePattern(alias)}\\s*\\.\\s*__dict__\\s*\\[\\s*["']import_module["']\\s*\\]`),
+    ];
     const directBuiltin = /(?:builtins\.__dict__\s*\[\s*["']__import__["']\s*\]|getattr\s*\(\s*builtins\s*,\s*["']__import__["']\s*\))\s*\((.*)\)/u.exec(line);
     if (directBuiltin) {
       const values = pythonStrings(directBuiltin[1].split(",", 1)[0], state.constants);
       if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
     }
-    const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
-    for (const match of line.matchAll(calls)) {
-      const rawArgs = match[1];
-      // Accept structurally equivalent starred/keyword module arguments while
-      // remaining bounded and conservative (only literal/constant strings).
-      const first = rawArgs.split(",", 1)[0];
-      const starred = /^\s*\*\s*(?:\[\s*)?(.+?)(?:\s*\])?\s*$/u.exec(first);
-      const keyword = /(?:^|,)\s*(?:name|module)\s*=\s*([^,]+)/u.exec(rawArgs);
-      const values = pythonStrings(starred?.[1] ?? keyword?.[1] ?? first, state.constants);
-      if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+    if (loaderPatterns.length > 0) {
+      const calls = new RegExp(`(?<![A-Za-z0-9_])(?:${loaderPatterns.join("|")})\\s*\\(`, "gu");
+      for (const match of line.matchAll(calls)) {
+        const opening = match.index + match[0].lastIndexOf("(");
+        const closing = pythonDelimiterEnd(line, opening);
+        if (closing === undefined) continue;
+        const rawArgs = line.slice(opening + 1, closing);
+        // Accept structurally equivalent starred/keyword module arguments while
+        // remaining bounded and conservative (only literal/constant strings).
+        const arguments_ = pythonTopLevelParts(rawArgs);
+        const first = arguments_[0] ?? "";
+        const starred = /^\s*\*\s*(?:\[\s*)?(.+?)(?:\s*\])?\s*$/u.exec(first);
+        const keyword = arguments_.map((argument) => /^\s*(?:name|module)\s*=\s*(.+)\s*$/u.exec(argument)).find(Boolean);
+        const values = pythonStrings(starred?.[1] ?? keyword?.[1] ?? first, state.constants);
+        if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
+      }
     }
   }
   while (contexts.length > 0) closeContext();
