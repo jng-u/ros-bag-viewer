@@ -36,7 +36,23 @@ function jsonContainsKubernetesResource(value) {
 }
 
 function stripYamlBlockScalars(text) {
-  const lines = text.split(/\r?\n/u);
+  // Join only physically continued Python expressions; indentation is retained
+  // on statement starts so scope analysis remains conservative.
+  const physicalLines = text.split(/\r?\n/u);
+  const lines = [];
+  let logical = "";
+  let depth = 0;
+  for (const physical of physicalLines) {
+    const trimmed = physical.trim();
+    if (!logical) logical = physical;
+    else logical += ` ${trimmed}`;
+    for (const ch of trimmed) {
+      if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+      else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    }
+    if (depth === 0 && !/\\\\\s*$/u.test(physical)) { lines.push(logical); logical = ""; }
+  }
+  if (logical) lines.push(logical);
   const kept = [];
   let payloadIndent;
   let scalarHeaderIndent;
