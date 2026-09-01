@@ -409,7 +409,6 @@ describe("serialized hosted admission", () => {
     expect(service.auditEvents().filter((event) => event.kind === "access-denied")).toHaveLength(eventsBefore + 1);
   });
 
-
   it("rejects hostile Proxy inputs before any trap", async () => {
     const service = new HostedSharingService();
     const traps = { get: vi.fn(), getPrototypeOf: vi.fn(), ownKeys: vi.fn(), toJSON: vi.fn() };

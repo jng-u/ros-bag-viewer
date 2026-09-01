@@ -689,7 +689,10 @@ export class HostedSharingService {
 
   #issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
     try {
-      if (this.#grants.size >= this.#limits.maxActiveGrants) { this.#deny(); throw new HostedAccessError(); }
+      if (this.#grants.size >= this.#limits.maxActiveGrants) {
+        this.#deny();
+        throw new HostedAccessError();
+      }
       const session = this.#activeSession(sessionCapability);
       const entry = session.entries.get(request.entryId);
       if (
@@ -702,11 +705,15 @@ export class HostedSharingService {
         || request.length > BigInt(this.#limits.maxRangeBytes)
         || request.offset + request.length > entry.object.sizeBytes
       ) {
-        this.#deny(); throw new HostedAccessError();
+        this.#deny();
+        throw new HostedAccessError();
       }
       const now = this.#now();
       const expiresAtMs = Math.min(now + this.#limits.grantTtlMs, session.expiresAtMs);
-      if (expiresAtMs <= now) { this.#deny(); throw new HostedAccessError(); }
+      if (expiresAtMs <= now) {
+        this.#deny();
+        throw new HostedAccessError();
+      }
       const grantToken = token();
       const tokenDigest = digestToken(grantToken);
       this.#grants.set(Buffer.from(tokenDigest).toString("hex"), Object.freeze({
