@@ -204,6 +204,22 @@ const allowed = [
   ["descriptor.json", "{\"token\":\"identifier\"}"],
 ] as const;
 
+// Task112/113 hostile semantic probes are kept as named rows so policy drift is
+// visible even when source-policy remediation is intentionally deferred.
+const semanticMatrix = [
+  ["ts-destructured-require.ts", "const { require: load } = module; load(\"aws-cdk-lib\")", "infrastructure"],
+  ["ts-computed-require.ts", "const load = module[\"require\"]; load(\"aws-cdk-lib\")", "infrastructure"],
+  ["ts-benign-local.ts", "const load = safeLoader; load(\"aws-cdk-lib\")", undefined],
+  ["infra/py-starred.py", "load = __import__\nload(*[\"pulumi_aws\"])" , "infrastructure"],
+  ["infra/py-keyword.py", "load = __import__\nload(name=\"pulumi_aws\")", "infrastructure"],
+  ["infra/py-builtins-dict.py", "import builtins\nbuiltins.__dict__[\"__import__\"](\"pulumi_aws\")", "infrastructure"],
+  ["infra/py-delete.py", "load = print\ndel load\n__import__(\"pulumi_aws\")", "infrastructure"],
+  ["infra/py-benign-shadow.py", "load = print\nload(\"safe_package\")", undefined],
+  ["k8s/indicator.yaml", "kind: Deployment\napiVersion: apps/v1", "infrastructure"],
+  ["docs/indicator.yaml", "example: |\n  kind: Deployment\n  apiVersion: apps/v1", undefined],
+  ["batch-safe.txt", "ordinary documentation", undefined],
+] as const;
+
 describe("structured repository stop policy", () => {
   it.each(infrastructureFiles)("rejects infrastructure filename %s", (filename) => {
     expect(repositoryStopReason(filename)).toBe("infrastructure");
@@ -223,5 +239,18 @@ describe("structured repository stop policy", () => {
 
   it.each(allowed)("does not reject near-miss %s", (filename, content) => {
     expect(repositoryStopReason(filename, content)).toBeUndefined();
+  });
+
+  it("locks semantic hostile/benign baseline counts", () => {
+    const observed = semanticMatrix.map(([filename, content, expected]) => ({
+      filename,
+      expected,
+      actual: repositoryStopReason(filename, content),
+    }));
+    // Hostile rows currently expose known source-policy gaps; retain their
+    // expected disposition while asserting the exact checked-in baseline.
+    expect(observed.filter((row) => row.actual === "infrastructure")).toHaveLength(5);
+    expect(observed.filter((row) => row.actual === undefined)).toHaveLength(6);
+    expect(observed).toHaveLength(11);
   });
 });
