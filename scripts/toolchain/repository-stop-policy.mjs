@@ -570,6 +570,7 @@ function decodeQuotedText(value) {
 function pythonStrings(expression, constants, depth = 0) {
   const trimmed = expression.trim();
   if (depth > 16) return new Set();
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) return pythonStrings(trimmed.slice(1, -1), constants, depth + 1);
   if (/^[A-Za-z_]\w*$/u.test(trimmed)) return new Set(constants.get(trimmed) ?? []);
   const direct = decodeQuotedText(trimmed);
   if (direct !== undefined) return new Set([direct]);
@@ -746,7 +747,7 @@ function pythonDeclaresInfrastructure(text) {
     const returned = /^\s*return\s+(.+?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/u.exec(line);
     const activeFunction = [...contexts].reverse().find(({ type }) => type === "function");
     if (returned && activeFunction && returned[2] === activeFunction.parameter && isLoaderExpression(returned[1])) activeFunction.wrapper = true;
-    const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`)]
+    const loaders = [...state.loaderAliases, ...state.importModuleAliases, ...[...state.importlibAliases].map((alias) => `${alias}.import_module`), ...[...state.importlibAliases].map((alias) => `${alias}.__dict__['import_module']`)]
       .map((loader) => loader.replace(".", "\\."))
       .join("|");
     const directBuiltin = /(?:builtins\.__dict__\s*\[\s*["']__import__["']\s*\]|getattr\s*\(\s*builtins\s*,\s*["']__import__["']\s*\))\s*\((.*)\)/u.exec(line);
