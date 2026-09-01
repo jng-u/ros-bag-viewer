@@ -46,6 +46,8 @@ const credentialFiles = [
 ] as const;
 
 const infrastructureContents = [
+  ["tools/bound-loader.ts", "const load = require.bind({}, 'aws-cdk-lib'); load()"],
+  ["tools/reflect-computed.ts", "Reflect['apply'](require, null, ['pulumi'])"],
   ["src/side-effect.ts", "import \"aws-" + "cdk-lib\";"],
   ["src/concatenated.ts", "require(\"aws-\" + \"cdk-lib\")"],
   ["src/template.ts", "await import(`@pulumi/" + "aws`)"],
@@ -134,6 +136,7 @@ const credentialContents = [
 ] as const;
 
 const allowed = [
+  ["tools/shadow-reflect.ts", "const Reflect = safe; Reflect['apply'](require, null, ['pulumi'])"],
   ["LICENSES.md", ""],
   ["environment.md", ""],
   [".env-example", ""],

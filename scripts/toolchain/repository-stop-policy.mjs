@@ -400,13 +400,19 @@ function typescriptDeclaresInfrastructure(text, filename) {
     const callee = transparentTypeScriptExpression(node.expression);
     if (callee.kind === ts.SyntaxKind.ImportKeyword) return node.arguments[0];
     if (isLoaderAlias(callee, environment)) return node.arguments[0];
-    if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Reflect" &&
-      callee.name.text === "apply" && isLoaderAlias(node.arguments[0], environment)) {
+    if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+      ts.isIdentifier(callee.expression) && callee.expression.text === "Reflect" &&
+      propertyName(callee, environment) === "apply" && isUnshadowed(callee.expression, "Reflect") && isLoaderAlias(node.arguments[0], environment)) {
       const args = transparentTypeScriptExpression(node.arguments[2]);
       return args && ts.isArrayLiteralExpression(args) ? args.elements[0] : undefined;
     }
     if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) return undefined;
     const method = propertyName(callee, environment);
+    // A bound loader carries its pre-bound arguments into the eventual call.
+    // Preserve the first bound module name instead of discarding it.
+    if (method === "bind" && loaderReference(callee.expression, environment)) {
+      return node.arguments[1] ?? undefined;
+    }
     const memberLoader = method === "require" && ts.isIdentifier(callee.expression) && callee.expression.text === "module" &&
       isUnshadowed(callee.expression, "module");
     if (memberLoader) return node.arguments[0];
