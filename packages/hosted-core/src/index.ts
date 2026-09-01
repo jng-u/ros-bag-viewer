@@ -553,10 +553,12 @@ export class HostedSharingService {
     const parsed = parseSerializedRecord(serialized, "hosted session", Math.max(HOSTED_SERIALIZED_MAX_BYTES, this.#limits.maxSessionBytes * 2 + 64 * 1024));
     const rawEntries = parsed.entries;
     if (!Array.isArray(rawEntries)) throw new Error("hosted session entries must be an array");
+    if (rawEntries.length === 0 || rawEntries.length > this.#limits.maxEntriesPerSession) throw new HostedAccessError();
     const entries = rawEntries.map((entry) => {
       const record = parseSerializedRecord(JSON.stringify(entry), "hosted upload entry", Math.max(HOSTED_SERIALIZED_MAX_BYTES, this.#limits.maxSessionBytes * 2 + 64 * 1024));
       if (typeof record.bytes !== "string") throw new Error("hosted upload bytes must be base64 text");
-      return { entryId: String(record.entryId), relativePath: String(record.relativePath), bytes: decodeBoundedBase64(record.bytes, this.#limits.maxSessionBytes, "hosted upload bytes") };
+      if (typeof record.entryId !== "string" || typeof record.relativePath !== "string") throw new HostedAccessError();
+      return { entryId: record.entryId, relativePath: record.relativePath, bytes: decodeBoundedBase64(record.bytes, this.#limits.maxSessionBytes, "hosted upload bytes") };
     });
     return this.#createHostedSession({ entries, relations: Array.isArray(parsed.relations) ? parsed.relations as HostedUploadRelation[] : undefined, sessionTtlMs: typeof parsed.sessionTtlMs === "number" ? parsed.sessionTtlMs : undefined, retentionMs: typeof parsed.retentionMs === "number" ? parsed.retentionMs : undefined });
   }
@@ -678,7 +680,11 @@ export class HostedSharingService {
 
   issueRangeGrantSerialized(sessionCapability: string, serialized: string): IssuedRangeGrant {
     const parsed = parseSerializedRecord(serialized, "range grant request");
-    return this.#issueRangeGrant(sessionCapability, { sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) });
+    try {
+      for (const key of ["sessionId", "entryId", "objectId", "immutableVersion"]) if (typeof parsed[key] !== "string") throw new HostedAccessError();
+      if (typeof parsed.offset !== "string" || typeof parsed.length !== "string" || !/^\d+$/u.test(parsed.offset) || !/^\d+$/u.test(parsed.length)) throw new HostedAccessError();
+      return this.#issueRangeGrant(sessionCapability, { sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) });
+    } catch (error) { this.#deny(); throw error instanceof HostedAccessError ? error : new HostedAccessError(); }
   }
 
   #issueRangeGrant(sessionCapability: string, request: RangeGrantRequest): IssuedRangeGrant {
@@ -723,11 +729,11 @@ export class HostedSharingService {
 
   async readGrantedRangeSerialized(serialized: string, signal: AbortSignal): Promise<Uint8Array> {
     const parsed = parseSerializedRecord(serialized, "granted range read");
-    if (typeof parsed.sessionCapability !== "string" || typeof parsed.grantToken !== "string") {
-      this.#deny();
-      throw new HostedAccessError();
-    }
-    return this.#readGrantedRange({ sessionCapability: parsed.sessionCapability, grantToken: parsed.grantToken, sessionId: String(parsed.sessionId), entryId: String(parsed.entryId), objectId: String(parsed.objectId), immutableVersion: String(parsed.immutableVersion), offset: BigInt(String(parsed.offset)), length: BigInt(String(parsed.length)) }, signal);
+    try {
+      for (const key of ["sessionCapability", "grantToken", "sessionId", "entryId", "objectId", "immutableVersion"]) if (typeof parsed[key] !== "string") throw new HostedAccessError();
+      if (typeof parsed.offset !== "string" || typeof parsed.length !== "string" || !/^\d+$/u.test(parsed.offset) || !/^\d+$/u.test(parsed.length)) throw new HostedAccessError();
+      return this.#readGrantedRange({ sessionCapability: parsed.sessionCapability as string, grantToken: parsed.grantToken as string, sessionId: parsed.sessionId as string, entryId: parsed.entryId as string, objectId: parsed.objectId as string, immutableVersion: parsed.immutableVersion as string, offset: BigInt(parsed.offset as string), length: BigInt(parsed.length as string) }, signal);
+    } catch (error) { this.#deny(); throw error instanceof HostedAccessError ? error : new HostedAccessError(); }
   }
 
   async #readGrantedRange(request: GrantedRangeRead, signal: AbortSignal): Promise<Uint8Array> {
