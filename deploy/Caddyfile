@@ -1,0 +1,25 @@
+:8080 {
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https: wss: ws:; worker-src 'self' blob:"
+  }
+
+  handle /healthz {
+    respond "ok" 200
+  }
+
+  handle {
+    root * /srv
+    encode zstd gzip
+
+    @assets path /assets/*
+    header @assets Cache-Control "public, max-age=31536000, immutable"
+
+    try_files {path} /index.html
+    file_server
+  }
+}

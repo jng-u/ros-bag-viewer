@@ -1,0 +1,11 @@
+.git
+.omx
+.impeccable
+**/node_modules
+**/dist
+**/dist-web
+**/*.tsbuildinfo
+artifacts
+benchmarks/results
+npm-debug.log*
+pnpm-debug.log*

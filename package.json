@@ -4,6 +4,8 @@
   "type": "module",
   "packageManager": "pnpm@9.15.5",
   "scripts": {
+    "dev": "corepack pnpm --filter @ros-web-viewer/web dev",
+    "build:web": "corepack pnpm build && corepack pnpm --filter @ros-web-viewer/web build:web",
     "lint": "eslint .",
     "typecheck": "tsc -b && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run --passWithNoTests",

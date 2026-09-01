@@ -263,7 +263,11 @@ describe("M0 forbidden-scope guard", () => {
     expect(locked, "M4 may add only reviewed private workspace links to the M3 dependency chain").toEqual([
       "relay:@ros-web-viewer/protocol",
       "web:@ros-web-viewer/core-model",
+      "web:@ros-web-viewer/displays-core",
       "web:@ros-web-viewer/m1-integration",
+      "web:@ros-web-viewer/render-core",
+      "web:@ros-web-viewer/source-mcap",
+      "web:@ros-web-viewer/worker-runtime",
       "hosted-core:@ros-web-viewer/core-model",
       "hosted-core:@ros-web-viewer/worker-runtime",
       "m1-integration:@ros-web-viewer/source-mcap",

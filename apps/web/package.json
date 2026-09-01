@@ -3,10 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/generate-demo-mcap.mjs",
+    "dev": "vite --host 0.0.0.0",
+    "prebuild:web": "node scripts/generate-demo-mcap.mjs",
+    "build:web": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
     "evidence:semantic": "tsc -b && node scripts/generate-semantic-evidence.mjs"
   },
   "dependencies": {
     "@ros-web-viewer/core-model": "workspace:*",
-    "@ros-web-viewer/m1-integration": "workspace:*"
+    "@ros-web-viewer/displays-core": "workspace:*",
+    "@ros-web-viewer/m1-integration": "workspace:*",
+    "@ros-web-viewer/render-core": "workspace:*",
+    "@ros-web-viewer/source-mcap": "workspace:*",
+    "@ros-web-viewer/worker-runtime": "workspace:*"
   }
 }

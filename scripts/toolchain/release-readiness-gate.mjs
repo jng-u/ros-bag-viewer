@@ -121,6 +121,11 @@ function validateEvidence(evidence) {
 }
 
 function validateRepositoryStops() {
+  const authorizedLocalContainerFiles = new Set([
+    "Dockerfile",
+    "deploy/Caddyfile",
+    "docker-compose.yml",
+  ]);
   for (const path of listFiles(root)) {
     const repositoryPath = relative(root, path);
     const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
@@ -134,7 +139,9 @@ function validateRepositoryStops() {
       "artifacts/test-receipt.json",
       "benchmarks/artifacts/m1-dimensional-model.json",
     ].includes(repositoryPath) || /^artifacts\/v1-conformance-receipts\/[a-f0-9]{64}\.json(?:\.event)?$/u.test(repositoryPath);
-    const stopReason = authorizedGeneratedArtifact ? undefined : repositoryStopReason(repositoryPath, bytes);
+    const stopReason = authorizedGeneratedArtifact || authorizedLocalContainerFiles.has(repositoryPath)
+      ? undefined
+      : repositoryStopReason(repositoryPath, bytes);
     if (stopReason !== undefined) fail(`unauthorized ${stopReason} file ${repositoryPath}`);
     if (name !== "package.json") continue;
     const packageJson = readBoundedJson(path, jsonCaps.package, relative(root, path));

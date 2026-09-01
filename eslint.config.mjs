@@ -9,12 +9,22 @@ const nodeGlobals = {
 };
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "artifacts/**", "node_modules/**"] },
+  { ignores: ["**/dist/**", "**/dist-web/**", "artifacts/**", "node_modules/**"] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ["**/*.{js,mjs,ts}"],
     languageOptions: { globals: nodeGlobals },
     rules: { "no-console": "off" },
+  },
+  {
+    files: ["apps/web/src/main.ts"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        window: "readonly",
+        ResizeObserver: "readonly",
+      },
+    },
   },
 );

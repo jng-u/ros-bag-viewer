@@ -44,9 +44,21 @@ importers:
       '@ros-web-viewer/core-model':
         specifier: workspace:*
         version: link:../../packages/core-model
+      '@ros-web-viewer/displays-core':
+        specifier: workspace:*
+        version: link:../../packages/displays-core
       '@ros-web-viewer/m1-integration':
         specifier: workspace:*
         version: link:../../packages/m1-integration
+      '@ros-web-viewer/render-core':
+        specifier: workspace:*
+        version: link:../../packages/render-core
+      '@ros-web-viewer/source-mcap':
+        specifier: workspace:*
+        version: link:../../packages/source-mcap
+      '@ros-web-viewer/worker-runtime':
+        specifier: workspace:*
+        version: link:../../packages/worker-runtime
 
   examples/range-summary-extension:
     dependencies:
