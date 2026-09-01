@@ -46,6 +46,8 @@ const credentialFiles = [
 ] as const;
 
 const infrastructureContents = [
+  ["tools/starred-loader.py", "__import__(*['pulumi_aws'])"],
+  ["tools/keyword-loader.py", "__import__(name='pulumi_aws')"],
   ["tools/bound-loader.ts", "const load = require.bind({}, 'aws-cdk-lib'); load()"],
   ["tools/reflect-computed.ts", "Reflect['apply'](require, null, ['pulumi'])"],
   ["src/side-effect.ts", "import \"aws-" + "cdk-lib\";"],

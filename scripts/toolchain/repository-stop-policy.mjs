@@ -690,7 +690,13 @@ function pythonDeclaresInfrastructure(text) {
       .join("|");
     const calls = new RegExp(`(?:${loaders})\\s*\\(([^)]*)\\)`, "gu");
     for (const match of line.matchAll(calls)) {
-      const values = pythonStrings(match[1].split(",", 1)[0], state.constants);
+      const rawArgs = match[1];
+      // Accept structurally equivalent starred/keyword module arguments while
+      // remaining bounded and conservative (only literal/constant strings).
+      const first = rawArgs.split(",", 1)[0];
+      const starred = /^\s*\*\s*(?:\[\s*)?(.+?)(?:\s*\])?\s*$/u.exec(first);
+      const keyword = /(?:^|,)\s*(?:name|module)\s*=\s*([^,]+)/u.exec(rawArgs);
+      const values = pythonStrings(starred?.[1] ?? keyword?.[1] ?? first, state.constants);
       if ([...values].some((value) => /^(?:aws_cdk|cdktf|pulumi)(?:[._]|$)/u.test(value))) return true;
     }
   }
