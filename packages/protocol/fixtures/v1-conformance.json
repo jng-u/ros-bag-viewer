@@ -110,8 +110,8 @@
       "id": "ros1-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:e5cddbc135ed89bedaeac3848cc0a1a5101299aeaf68f14f524844ad8747c483",
-      "evidenceDigest": "sha256:bb7a1b1bc52ab91892604822c6ccfb2f2072897d94faf7ecc24923cb3dee797a",
+      "resultDigest": "sha256:c4ddf1f9a80ccfc299245a88e9f1237a1cdf00ac25a9d1ae906683954ca43af6",
+      "evidenceDigest": "sha256:8f4456298cdd11d2ac91e805f372d479cdc31dc17be221e16747b9c96eac7ad6",
       "testName": "M3 deterministic synthetic load evidence keeps ros1 point-cloud/image-like load bounded and reconnects by epoch",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -130,8 +130,8 @@
       "id": "ros2-live",
       "result": "pass",
       "evidence": "tests/m3-live/security-gate.test.ts",
-      "resultDigest": "sha256:8ee83baa4df703d6fe0e06c23e5e4d36c7efb3fd0728602b75f8e5ec00a0b88c",
-      "evidenceDigest": "sha256:bb7a1b1bc52ab91892604822c6ccfb2f2072897d94faf7ecc24923cb3dee797a",
+      "resultDigest": "sha256:2e2da069e69958fe79c1e001220abaff13e3cb3858bbe685982ccf28f55cc012",
+      "evidenceDigest": "sha256:8f4456298cdd11d2ac91e805f372d479cdc31dc17be221e16747b9c96eac7ad6",
       "testName": "M3 deterministic synthetic load evidence keeps ros2 point-cloud/image-like load bounded and reconnects by epoch",
       "semanticEvent": {
         "schemaVersion": 1,
@@ -285,8 +285,8 @@
       "id": "source-epoch-invalidation",
       "result": "pass",
       "evidence": "packages/core-model/test/index.test.ts",
-      "resultDigest": "sha256:74a9ee4a98038df3ffa36d7d82832df0b16e1605aa3e44b776d2c0782162ae1f",
-      "evidenceDigest": "sha256:0fd15d8280f79d139c36aa4e0f03d30bffcc563216cd995043dff6707cc0a9f2",
+      "resultDigest": "sha256:424bf49d191e39a75940cb69768fef244b7e3f026d15863627760afdcb6f5029",
+      "evidenceDigest": "sha256:757dd8ab8eb31bc2f40ae5172b076061dd9db13a44395d6269bbc55c1fa5ce94",
       "testName": "payload lease contract rejects stale epochs and invalidation",
       "semanticEvent": {
         "schemaVersion": 1,
