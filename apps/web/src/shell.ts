@@ -117,6 +117,7 @@ export interface LivePollResult {
   readonly telemetry: LiveTelemetrySummary;
   readonly displayDeliveries?: number;
   readonly displayErrors?: number;
+  readonly staleMessageCount?: number;
 }
 
 export interface DesktopShellPorts {
@@ -393,16 +394,24 @@ export class DesktopShellController {
       throw new Error("connect secure live mode before polling");
     }
     const result = this.ports.pollLive();
+    const deliveries = result.displayDeliveries ?? 0;
+    const errors = result.displayErrors ?? 0;
+    const stale = result.staleMessageCount ?? 0;
+    const routedNotice = errors > 0
+      ? `${deliveries} live display update${deliveries === 1 ? "" : "s"} rendered; ${errors} failed.`
+      : deliveries > 0
+        ? `${deliveries} live display update${deliveries === 1 ? "" : "s"} rendered from ${result.messageCount} message${result.messageCount === 1 ? "" : "s"}.`
+        : `${result.messageCount} live message${result.messageCount === 1 ? "" : "s"} drained; no active display rendered.`;
+    const staleNotice = stale > 0 ? ` ${stale} stale-epoch message${stale === 1 ? "" : "s"} ignored.` : "";
+    const notice = `${result.telemetry.diagnostic === undefined ? "" : `${result.telemetry.diagnostic} `}${routedNotice}${staleNotice}`;
     this.#state = {
       ...this.#state,
-      phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
+      phase: result.telemetry.state === "degraded" || errors > 0 ? "degraded" : "ready",
       epoch: result.epoch,
       currentTimeNanos: result.latestSourceTimeNanos ?? this.#state.currentTimeNanos,
       liveState: result.telemetry.state,
       liveTelemetry: result.telemetry,
-      notice:
-        result.telemetry.diagnostic ??
-        `${result.messageCount} live message${result.messageCount === 1 ? "" : "s"} delivered to displays.`,
+      notice,
     };
     return result;
   }
