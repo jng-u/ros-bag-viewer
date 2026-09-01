@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-// @ts-expect-error Executable ESM audit seam has no declaration facade.
 import { auditSourceBatch } from "../../../scripts/toolchain/audit-extension-examples.mjs";
 
 vi.mock("@ros-web-viewer/extension-api", async () => import("../src/index.js"));

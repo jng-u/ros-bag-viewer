@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-expect-error The repository stop policy is an executable ESM tool without a declaration facade.
 import { repositoryStopReason } from "../../scripts/toolchain/repository-stop-policy.mjs";
 
 const infrastructureFiles = [
@@ -204,51 +203,51 @@ const allowed = [
   ["descriptor.json", "{\"token\":\"identifier\"}"],
 ] as const;
 
-// Task112/113 hostile semantic probes: explicit, stable, unique rows.
+// Durable semantic invariant probes: explicit, stable, unique rows.
 const semanticMatrix = [
-  { name: "ts-destructured-require", filename: "ts-destructured-require.ts", content: "const { require: load } = module; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: false },
-  { name: "ts-computed-require", filename: "ts-computed-require.ts", content: "const load = module[\"require\"]; load(\"aws-cdk-lib\")", expected: "infrastructure", knownGap: false },
-  { name: "ts-benign-shadow", filename: "ts-benign-shadow.ts", content: "const load = safeLoader; { const load = require; load(\"safe_package\") }", expected: undefined, knownGap: false },
-  { name: "ts-predeclared-shadow", filename: "ts-predeclared-shadow.ts", content: "load(\"aws-cdk-lib\"); const load = safeLoader", expected: undefined, knownGap: false },
-  { name: "ts-computed-safe", filename: "ts-computed-safe.ts", content: "const key = \"require\"; const load = module[key]; load(\"safe_package\")", expected: undefined, knownGap: false },
-  { name: "py-multiline-call", filename: "py-multiline-call.py", content: "load = __import__\nload(\n  \"pulumi_aws\"\n)", expected: "infrastructure", knownGap: false },
-  { name: "py-parenthesized-call", filename: "py-parenthesized-call.py", content: "load = (__import__)\nload((\"pulumi_aws\"))", expected: "infrastructure", knownGap: false },
-  { name: "py-getattr-default", filename: "py-getattr-default.py", content: "import builtins\nload = getattr(builtins, \"__import__\", print)\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-getattr-dunder", filename: "py-getattr-dunder.py", content: "import builtins\nload = getattr(builtins, \"__dict__\")[\"__import__\"]\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-importlib-dict", filename: "py-importlib-dict.py", content: "import importlib\nload = importlib.__dict__[\"import_module\"]\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-builtins-dict", filename: "py-builtins-dict.py", content: "import builtins\nbuiltins.__dict__[\"__import__\"](\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-positional", filename: "py-positional.py", content: "load = __import__\nload(\"pulumi_aws\", 0)", expected: "infrastructure", knownGap: false },
-  { name: "py-starred", filename: "py-starred.py", content: "load = __import__\nload(*[\"pulumi_aws\"])", expected: "infrastructure", knownGap: false },
-  { name: "py-keyword", filename: "py-keyword.py", content: "load = __import__\nload(name=\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-nested-function", filename: "py-nested-function.py", content: "load = print\ndef f():\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-class-scope", filename: "py-class-scope.py", content: "load = print\nclass C:\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined, knownGap: false },
-  { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-alternate-import", filename: "py-alternate-import.py", content: "from importlib import import_module as im\nim(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-delete", filename: "py-delete.py", content: "load = __import__\ndel load\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-rebinding", filename: "py-rebinding.py", content: "load = __import__\nload = print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-benign-shadow", filename: "py-benign-shadow.py", content: "load = print\nload(\"safe_package\")", expected: undefined, knownGap: false },
-  { name: "yaml-indicator", filename: "k8s/indicator.yaml", content: "kind: Deployment\napiVersion: apps/v1", expected: "infrastructure", knownGap: false },
-  { name: "yaml-block-example", filename: "docs/block.yaml", content: "example: |\n  kind: Deployment\n  apiVersion: apps/v1", expected: undefined, knownGap: false },
-  { name: "yaml-sequence", filename: "k8s/sequence.yaml", content: "items:\n  - apiVersion: v1\n    kind: Deployment", expected: "infrastructure", knownGap: false },
-  { name: "yaml-flow", filename: "k8s/flow.yaml", content: "root: {apiVersion: v1, kind: Deployment}", expected: "infrastructure", knownGap: false },
-  { name: "yaml-sibling", filename: "docs/sibling.yaml", content: "example: >-\n  kind: Deployment\nnext: value", expected: undefined, knownGap: false },
-  { name: "py-safe-doc", filename: "docs/example.py", content: "load = print\nload(\"safe_package\")", expected: undefined, knownGap: false },
-  { name: "ts-safe-import", filename: "src/safe.ts", content: "import x from \"safe-package\"", expected: undefined, knownGap: false },
-  { name: "py-importlib-dict-direct", filename: "py-importlib-dict.py", content: "import importlib\nimportlib.__dict__[\"import_module\"](\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-starred-keyword", filename: "py-starred-keyword.py", content: "load = __import__\nload(*[\"pulumi_aws\"], level=0)", expected: "infrastructure", knownGap: false },
-  { name: "py-annotated-safe", filename: "py-annotated-safe.py", content: "load: object = print\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-augmented-unrelated", filename: "py-augmented-unrelated.py", content: "load = __import__\nother += print\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-destructured-position-safe", filename: "py-destructured-position-safe.py", content: "[load, other] = [print, __import__]\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-delete-unrelated", filename: "py-delete-unrelated.py", content: "load = __import__\ndel other\nload(\"pulumi_aws\")", expected: "infrastructure", knownGap: false },
-  { name: "py-comprehension-outer-iterable", filename: "py-comprehension-outer-iterable.py", content: "load = __import__\n[item for item in [load(\"pulumi_aws\")]]", expected: "infrastructure", knownGap: false },
-  { name: "py-global-unrelated-safe", filename: "py-global-unrelated-safe.py", content: "load = print\ndef f():\n  global other\n  other = __import__\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-nonlocal-unrelated-safe", filename: "py-nonlocal-unrelated-safe.py", content: "def outer():\n  load = print\n  other = print\n  def inner():\n    nonlocal other\n    other = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: undefined, knownGap: false },
-  { name: "py-class-local-non-leak", filename: "py-class-local-non-leak.py", content: "load = print\nclass C:\n  load = __import__\nload(\"pulumi_aws\")", expected: undefined, knownGap: false },
+  { name: "ts-destructured-require", filename: "ts-destructured-require.ts", content: "const { require: load } = module; load(\"aws-cdk-lib\")", expected: "infrastructure" },
+  { name: "ts-computed-require", filename: "ts-computed-require.ts", content: "const load = module[\"require\"]; load(\"aws-cdk-lib\")", expected: "infrastructure" },
+  { name: "ts-benign-shadow", filename: "ts-benign-shadow.ts", content: "const load = safeLoader; { const load = require; load(\"safe_package\") }", expected: undefined },
+  { name: "ts-predeclared-shadow", filename: "ts-predeclared-shadow.ts", content: "load(\"aws-cdk-lib\"); const load = safeLoader", expected: undefined },
+  { name: "ts-computed-safe", filename: "ts-computed-safe.ts", content: "const key = \"require\"; const load = module[key]; load(\"safe_package\")", expected: undefined },
+  { name: "py-multiline-call", filename: "py-multiline-call.py", content: "load = __import__\nload(\n  \"pulumi_aws\"\n)", expected: "infrastructure" },
+  { name: "py-parenthesized-call", filename: "py-parenthesized-call.py", content: "load = (__import__)\nload((\"pulumi_aws\"))", expected: "infrastructure" },
+  { name: "py-getattr-default", filename: "py-getattr-default.py", content: "import builtins\nload = getattr(builtins, \"__import__\", print)\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-getattr-dunder", filename: "py-getattr-dunder.py", content: "import builtins\nload = getattr(builtins, \"__dict__\")[\"__import__\"]\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-importlib-dict", filename: "py-importlib-dict.py", content: "import importlib\nload = importlib.__dict__[\"import_module\"]\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-builtins-dict", filename: "py-builtins-dict.py", content: "import builtins\nbuiltins.__dict__[\"__import__\"](\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-positional", filename: "py-positional.py", content: "load = __import__\nload(\"pulumi_aws\", 0)", expected: "infrastructure" },
+  { name: "py-starred", filename: "py-starred.py", content: "load = __import__\nload(*[\"pulumi_aws\"])", expected: "infrastructure" },
+  { name: "py-keyword", filename: "py-keyword.py", content: "load = __import__\nload(name=\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-nested-function", filename: "py-nested-function.py", content: "load = print\ndef f():\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-class-scope", filename: "py-class-scope.py", content: "load = print\nclass C:\n  load = __import__\n  load(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-comprehension", filename: "py-comprehension.py", content: "load = __import__\n[load(\"pulumi_aws\") for load in [print]]", expected: undefined },
+  { name: "py-global", filename: "py-global.py", content: "load = print\ndef f():\n  global load\n  load = __import__\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-nonlocal", filename: "py-nonlocal.py", content: "def outer():\n  load = print\n  def inner():\n    nonlocal load\n    load = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-annotated", filename: "py-annotated.py", content: "load: object = __import__\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-augmented", filename: "py-augmented.py", content: "load = __import__\nload += print\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-destructured", filename: "py-destructured.py", content: "load, other = __import__, print\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-alternate-import", filename: "py-alternate-import.py", content: "from importlib import import_module as im\nim(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-delete", filename: "py-delete.py", content: "load = __import__\ndel load\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-rebinding", filename: "py-rebinding.py", content: "load = __import__\nload = print\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-benign-shadow", filename: "py-benign-shadow.py", content: "load = print\nload(\"safe_package\")", expected: undefined },
+  { name: "yaml-indicator", filename: "k8s/indicator.yaml", content: "kind: Deployment\napiVersion: apps/v1", expected: "infrastructure" },
+  { name: "yaml-block-example", filename: "docs/block.yaml", content: "example: |\n  kind: Deployment\n  apiVersion: apps/v1", expected: undefined },
+  { name: "yaml-sequence", filename: "k8s/sequence.yaml", content: "items:\n  - apiVersion: v1\n    kind: Deployment", expected: "infrastructure" },
+  { name: "yaml-flow", filename: "k8s/flow.yaml", content: "root: {apiVersion: v1, kind: Deployment}", expected: "infrastructure" },
+  { name: "yaml-sibling", filename: "docs/sibling.yaml", content: "example: >-\n  kind: Deployment\nnext: value", expected: undefined },
+  { name: "py-safe-doc", filename: "docs/example.py", content: "load = print\nload(\"safe_package\")", expected: undefined },
+  { name: "ts-safe-import", filename: "src/safe.ts", content: "import x from \"safe-package\"", expected: undefined },
+  { name: "py-importlib-dict-direct", filename: "py-importlib-dict.py", content: "import importlib\nimportlib.__dict__[\"import_module\"](\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-starred-keyword", filename: "py-starred-keyword.py", content: "load = __import__\nload(*[\"pulumi_aws\"], level=0)", expected: "infrastructure" },
+  { name: "py-annotated-safe", filename: "py-annotated-safe.py", content: "load: object = print\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-augmented-unrelated", filename: "py-augmented-unrelated.py", content: "load = __import__\nother += print\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-destructured-position-safe", filename: "py-destructured-position-safe.py", content: "[load, other] = [print, __import__]\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-delete-unrelated", filename: "py-delete-unrelated.py", content: "load = __import__\ndel other\nload(\"pulumi_aws\")", expected: "infrastructure" },
+  { name: "py-comprehension-outer-iterable", filename: "py-comprehension-outer-iterable.py", content: "load = __import__\n[item for item in [load(\"pulumi_aws\")]]", expected: "infrastructure" },
+  { name: "py-global-unrelated-safe", filename: "py-global-unrelated-safe.py", content: "load = print\ndef f():\n  global other\n  other = __import__\nload(\"pulumi_aws\")", expected: undefined },
+  { name: "py-nonlocal-unrelated-safe", filename: "py-nonlocal-unrelated-safe.py", content: "def outer():\n  load = print\n  other = print\n  def inner():\n    nonlocal other\n    other = __import__\n  inner()\n  load(\"pulumi_aws\")", expected: undefined },
+  { name: "py-class-local-non-leak", filename: "py-class-local-non-leak.py", content: "load = print\nclass C:\n  load = __import__\nload(\"pulumi_aws\")", expected: undefined },
 ] as const;
 
 describe("structured repository stop policy", () => {
@@ -275,7 +274,7 @@ describe("structured repository stop policy", () => {
   const keys = semanticMatrix.map((row) => `${row.filename}\0${row.content}`);
   it("keeps semantic probe rows unique", () => expect(new Set(keys).size).toBe(semanticMatrix.length));
   semanticMatrix.forEach((row) => {
-    const test = row.knownGap ? it.fails : it;
+    const test = it;
     test(`semantic disposition ${row.name}`, () => {
       const actual = repositoryStopReason(row.filename, row.content);
       expect(actual).toBe(row.expected);
