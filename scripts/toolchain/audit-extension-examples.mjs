@@ -255,13 +255,20 @@ export function auditSourceText(source, filename = "probe.ts", resolveRelative) 
 // Bounded in-process batch seam for callers that need per-case diagnostics without
 // paying a fresh Node/TypeScript startup for every source probe.
 export function auditSourceBatch(probes) {
+  const maxBytes = 1024 * 1024;
   if (!Array.isArray(probes) || probes.length > 256) fail("source probe batch exceeds bounded case limit");
-  return probes.map(({ source, filename = "probe.ts" }) => {
+  let aggregateBytes = 0;
+  return probes.map(({ source, filename = "probe.ts" }, index) => {
+    const label = String(filename);
+    const bytes = typeof source === "string" ? Buffer.byteLength(source, "utf8") : Number.POSITIVE_INFINITY;
+    aggregateBytes += bytes;
+    if (bytes > maxBytes) return { filename: label, ok: false, error: `source probe ${index} exceeds 1 MiB limit` };
+    if (aggregateBytes > maxBytes) return { filename: label, ok: false, error: `source probe batch exceeds 1 MiB aggregate limit` };
     try {
-      auditSourceText(source, filename);
-      return { filename, ok: true, error: "" };
+      auditSourceText(source, label);
+      return { filename: label, ok: true, error: "" };
     } catch (error) {
-      return { filename, ok: false, error: error instanceof Error ? error.message : String(error) };
+      return { filename: label, ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 }
