@@ -229,8 +229,9 @@ let dockRoot: DockNode = { kind: "pane", key: "scene" };
 let nextDockSplitId = 1;
 let dockPaneRects = new Map<string, DockRect>();
 let dockSplitRects = new Map<string, DockRect & { readonly axis: "x" | "y" }>();
-let dockSplitParents = new Map<string, { readonly axis: "x" | "y"; readonly length: number }>();
-let dockDropTarget: { readonly paneKey: string; readonly edge: DockEdge; readonly rect: DockRect } | undefined;
+let dockSplitParents = new Map<string, { readonly axis: "x" | "y"; readonly length: number; readonly first: DockRect; readonly second: DockRect; readonly ratio: number }>();
+let dockDropTarget: { readonly paneKey: string; readonly edge: DockEdge; readonly incoming: DockRect; readonly remaining: DockRect } | undefined;
+let activeDockSplitId: string | undefined;
 let plotFieldPicker: {
   readonly topicId: string;
   readonly targetPlotGroupId?: string;
@@ -554,6 +555,7 @@ function clearLayerRuntimes(): void {
   auxiliarySignature = "";
   dockRoot = { kind: "pane", key: "scene" };
   dockDropTarget = undefined;
+  activeDockSplitId = undefined;
   plotFieldPicker = undefined;
 }
 
@@ -880,10 +882,14 @@ function plotFieldRows(fields: readonly { readonly path: string; readonly value:
 
 function plotFieldPickerMarkup(topic: TopicSummary): string {
   if (plotFieldPicker?.topicId !== topic.id) return "";
-  if (plotFieldPicker.status === "loading") return '<section class="plot-field-picker" data-plot-picker><p class="plot-field-empty">Reading the current message schema…</p></section>';
-  if (plotFieldPicker.status === "error") return `<section class="plot-field-picker" data-plot-picker><p class="plot-field-error">${escapeHtml(plotFieldPicker.error ?? "Numeric fields could not be decoded.")}</p></section>`;
-  return `<section class="plot-field-picker" data-plot-picker>
-    <header><strong>${plotFieldPicker.targetPlotGroupId ? "ADD SERIES TO PLOT" : "NEW PLOT"}</strong><button type="button" data-close-plot-picker aria-label="Close plot field picker">${icon("close")}</button></header>
+  const target = escapeHtml(plotFieldPicker.targetPlotGroupId ?? "new");
+  if (plotFieldPicker.status === "loading") return `<section class="plot-field-picker" data-plot-picker data-plot-target="${target}"><p class="plot-field-empty">Reading fields for the selected plot…</p></section>`;
+  if (plotFieldPicker.status === "error") return `<section class="plot-field-picker" data-plot-picker data-plot-target="${target}"><p class="plot-field-error">${escapeHtml(plotFieldPicker.error ?? "Numeric fields could not be decoded.")}</p></section>`;
+  const targetFields = plotFieldPicker.targetPlotGroupId
+    ? layers.layers.filter((layer) => layer.plotGroupId === plotFieldPicker?.targetPlotGroupId).map((layer) => layer.fieldPath ?? "data").join(" + ")
+    : "";
+  return `<section class="plot-field-picker" data-plot-picker data-plot-target="${target}">
+    <header><strong>${plotFieldPicker.targetPlotGroupId ? `ADD TO · ${escapeHtml(targetFields)}` : "NEW PLOT"}</strong><button type="button" data-close-plot-picker aria-label="Close plot field picker">${icon("close")}</button></header>
     <label><span class="sr-only">Filter numeric fields</span><input type="search" data-plot-field-filter placeholder="orientation, velocity, covariance…" autocomplete="off" /></label>
     <div class="plot-field-list">${plotFieldRows(plotFieldPicker.fields)}</div>
   </section>`;
@@ -1055,24 +1061,47 @@ function calculateDockLayout(node: DockNode, rect: DockRect): void {
     return;
   }
   const divider = 5;
-  dockSplitParents.set(node.id, { axis: node.axis, length: node.axis === "x" ? rect.width : rect.height });
   if (node.axis === "x") {
     const firstWidth = Math.max(1, Math.round((rect.width - divider) * node.ratio));
-    calculateDockLayout(node.first, { ...rect, width: firstWidth });
-    calculateDockLayout(node.second, { x: rect.x + firstWidth + divider, y: rect.y, width: Math.max(1, rect.width - firstWidth - divider), height: rect.height });
+    const first = { ...rect, width: firstWidth };
+    const second = { x: rect.x + firstWidth + divider, y: rect.y, width: Math.max(1, rect.width - firstWidth - divider), height: rect.height };
+    dockSplitParents.set(node.id, { axis: node.axis, length: rect.width, first, second, ratio: node.ratio });
+    calculateDockLayout(node.first, first);
+    calculateDockLayout(node.second, second);
     dockSplitRects.set(node.id, { x: rect.x + firstWidth, y: rect.y, width: divider, height: rect.height, axis: "x" });
     return;
   }
   const firstHeight = Math.max(1, Math.round((rect.height - divider) * node.ratio));
-  calculateDockLayout(node.first, { ...rect, height: firstHeight });
-  calculateDockLayout(node.second, { x: rect.x, y: rect.y + firstHeight + divider, width: rect.width, height: Math.max(1, rect.height - firstHeight - divider) });
+  const first = { ...rect, height: firstHeight };
+  const second = { x: rect.x, y: rect.y + firstHeight + divider, width: rect.width, height: Math.max(1, rect.height - firstHeight - divider) };
+  dockSplitParents.set(node.id, { axis: node.axis, length: rect.height, first, second, ratio: node.ratio });
+  calculateDockLayout(node.first, first);
+  calculateDockLayout(node.second, second);
   dockSplitRects.set(node.id, { x: rect.x, y: rect.y + firstHeight, width: rect.width, height: divider, axis: "y" });
 }
 
 function dockOverlayMarkup(): string {
   const splitters = [...dockSplitRects].map(([id, rect]) => `<span class="dock-splitter" data-dock-split="${id}" data-axis="${rect.axis}" role="separator" aria-orientation="${rect.axis === "x" ? "vertical" : "horizontal"}" aria-label="Resize docked panes" tabindex="0" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></span>`).join("");
-  const indicator = dockDropTarget ? `<span class="dock-drop-indicator" style="left:${dockDropTarget.rect.x}px;top:${dockDropTarget.rect.y}px;width:${dockDropTarget.rect.width}px;height:${dockDropTarget.rect.height}px"></span>` : "";
-  return `${splitters}${indicator}`;
+  const preview = (rect: DockRect, label: string, className: string) => `<span class="dock-pane-preview ${className}" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"><b>${label}</b></span>`;
+  let previews = "";
+  if (dockDropTarget) {
+    const axis = dockDropTarget.edge === "left" || dockDropTarget.edge === "right" ? "x" : "y";
+    const incomingPixels = Math.round(axis === "x" ? dockDropTarget.incoming.width : dockDropTarget.incoming.height);
+    const remainingPixels = Math.round(axis === "x" ? dockDropTarget.remaining.width : dockDropTarget.remaining.height);
+    const total = Math.max(1, incomingPixels + remainingPixels);
+    previews = preview(dockDropTarget.incoming, `NEW ${Math.round(incomingPixels / total * 100)}% · ${incomingPixels}px`, "is-incoming")
+      + preview(dockDropTarget.remaining, `CURRENT ${Math.round(remainingPixels / total * 100)}% · ${remainingPixels}px`, "is-remaining");
+  } else if (activeDockSplitId) {
+    const active = dockSplitParents.get(activeDockSplitId);
+    if (active) {
+      const firstPixels = Math.round(active.axis === "x" ? active.first.width : active.first.height);
+      const secondPixels = Math.round(active.axis === "x" ? active.second.width : active.second.height);
+      const total = Math.max(1, firstPixels + secondPixels);
+      previews = preview(active.first, `${Math.round(firstPixels / total * 100)}% · ${firstPixels}px`, "is-resizing")
+        + preview(active.second, `${Math.round(secondPixels / total * 100)}% · ${secondPixels}px`, "is-resizing");
+    }
+  }
+  return `${splitters}${previews}`;
 }
 
 function layoutAuxiliaryWindows(): void {
@@ -1573,10 +1602,10 @@ async function openPlotFieldPicker(topic: TopicSummary, targetPlotGroupId?: stri
     } catch {
       fields = collectNumericFields((await plotFieldDecoder.semantic(sample)).message);
     }
-    if (plotFieldPicker?.topicId !== topic.id) return;
+    if (plotFieldPicker?.topicId !== topic.id || plotFieldPicker.targetPlotGroupId !== targetPlotGroupId) return;
     plotFieldPicker = { topicId: topic.id, ...(targetPlotGroupId ? { targetPlotGroupId } : {}), fields, status: "ready" };
   } catch (error) {
-    if (plotFieldPicker?.topicId !== topic.id) return;
+    if (plotFieldPicker?.topicId !== topic.id || plotFieldPicker.targetPlotGroupId !== targetPlotGroupId) return;
     plotFieldPicker = { topicId: topic.id, ...(targetPlotGroupId ? { targetPlotGroupId } : {}), fields: [], status: "error", error: error instanceof Error ? error.message : String(error) };
   }
   renderTopics();
@@ -2014,11 +2043,17 @@ function dockTargetAt(clientX: number, clientY: number, excludedKey: string): ty
     const [edge, edgeDistance] = [...distances].sort((left, right) => left[1] - right[1])[0]!;
     const edgeSpan = edge === "left" || edge === "right" ? rect.width : rect.height;
     if (edgeDistance > Math.min(64, edgeSpan * 0.18)) return undefined;
-    const targetRect: DockRect = edge === "left" ? { ...rect, width: rect.width / 2 }
-      : edge === "right" ? { x: rect.x + rect.width / 2, y: rect.y, width: rect.width / 2, height: rect.height }
-        : edge === "top" ? { ...rect, height: rect.height / 2 }
-          : { x: rect.x, y: rect.y + rect.height / 2, width: rect.width, height: rect.height / 2 };
-    return { paneKey, edge, rect: targetRect };
+    const divider = 5;
+    if (edge === "left" || edge === "right") {
+      const firstWidth = Math.max(1, Math.round((rect.width - divider) / 2));
+      const left = { ...rect, width: firstWidth };
+      const right = { x: rect.x + firstWidth + divider, y: rect.y, width: Math.max(1, rect.width - firstWidth - divider), height: rect.height };
+      return { paneKey, edge, incoming: edge === "left" ? left : right, remaining: edge === "left" ? right : left };
+    }
+    const firstHeight = Math.max(1, Math.round((rect.height - divider) / 2));
+    const top = { ...rect, height: firstHeight };
+    const bottom = { x: rect.x, y: rect.y + firstHeight + divider, width: rect.width, height: Math.max(1, rect.height - firstHeight - divider) };
+    return { paneKey, edge, incoming: edge === "top" ? top : bottom, remaining: edge === "top" ? bottom : top };
   }
   return undefined;
 }
@@ -2255,6 +2290,7 @@ byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
 byId<HTMLButtonElement>("reset-window-layout").addEventListener("click", () => {
   dockRoot = { kind: "pane", key: "scene" };
   dockDropTarget = undefined;
+  activeDockSplitId = undefined;
   renderAuxiliary();
   drawScene();
 });
@@ -2274,8 +2310,10 @@ dockLayoutOverlay.addEventListener("pointerdown", (event) => {
   const ratio = id ? dockSplitRatio(dockRoot, id) : undefined;
   if (!splitter || !id || !parent || ratio === undefined || event.button !== 0) return;
   dockSplitterDrag = { id, axis: parent.axis, pointerId: event.pointerId, startClient: parent.axis === "x" ? event.clientX : event.clientY, startRatio: ratio, length: parent.length };
+  activeDockSplitId = id;
   try { dockLayoutOverlay.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
   event.preventDefault();
+  drawScene();
 });
 dockLayoutOverlay.addEventListener("pointermove", (event) => {
   if (!dockSplitterDrag || dockSplitterDrag.pointerId !== event.pointerId) return;
@@ -2284,7 +2322,10 @@ dockLayoutOverlay.addEventListener("pointermove", (event) => {
   drawScene();
 });
 const finishDockSplitterDrag = (event: PointerEvent): void => {
-  if (dockSplitterDrag?.pointerId === event.pointerId) dockSplitterDrag = undefined;
+  if (dockSplitterDrag?.pointerId !== event.pointerId) return;
+  dockSplitterDrag = undefined;
+  activeDockSplitId = undefined;
+  drawScene();
 };
 dockLayoutOverlay.addEventListener("pointerup", finishDockSplitterDrag);
 dockLayoutOverlay.addEventListener("pointercancel", finishDockSplitterDrag);
