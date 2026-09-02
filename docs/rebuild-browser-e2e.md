@@ -4,7 +4,7 @@ Date: 2026-09-02 (Asia/Seoul)
 
 Environment:
 
-- Viewer image: `sha256:7af2ce86f6ea695a3fcd992846f063402b24541737f2bb7c7a34c0d30fac9c0c`
+- Viewer image: `sha256:5c609254a3e10dfed083201a7f7a7a366df4f937206f44003547a7f1d74b5930`
 - Share image: `sha256:8ea5961caeb0beeef805a7905be7bba1a1a6dda2d5cc20f3f9ae885e4011c920`
 - ROS1 bridge image: `sha256:43559d627df58828cbd2d7c3349d66ef477252e32e3f6103dd188c8997dcaf1b`
 - ROS2 bridge image: `sha256:acbd689ba77ada0562700a6d2eb5058ccb6f12a7ca2318a370e5871bd740db62`
