@@ -72,6 +72,16 @@ export class ViewerLayerRegistry {
     this.#replace(id, (layer) => ({ ...layer, visible: !layer.visible }));
   }
 
+  move(id: string, direction: -1 | 1): void {
+    const index = this.#layers.findIndex((layer) => layer.id === id);
+    if (index < 0) throw new Error(`unknown viewer layer ${id}`);
+    const target = index + direction;
+    if (target < 0 || target >= this.#layers.length) return;
+    const next = [...this.#layers];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    this.#layers = next;
+  }
+
   setColor(id: string, color: readonly [number, number, number, number]): void {
     if (color.some((component) => !Number.isFinite(component) || component < 0 || component > 1)) throw new Error("layer color is invalid");
     this.#replace(id, (layer) => ({ ...layer, color }));

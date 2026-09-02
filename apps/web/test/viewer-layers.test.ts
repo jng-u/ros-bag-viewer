@@ -49,4 +49,15 @@ describe("viewer layer registry", () => {
     expect(registry.layers).toEqual([expect.objectContaining({ id: layer.id, color: [0.1, 0.2, 0.3, 1] })]);
     expect(() => registry.setColor(layer.id, [2, 0, 0, 1])).toThrow(/color/);
   });
+
+  it("reorders layers without changing selection or visibility", () => {
+    const registry = new ViewerLayerRegistry();
+    const first = registry.add(points, "point-cloud");
+    const second = registry.add(points, "raw");
+    registry.move(second.id, -1);
+    expect(registry.layers.map(({ id }) => id)).toEqual([second.id, first.id]);
+    expect(registry.selected?.id).toBe(second.id);
+    registry.move(second.id, -1);
+    expect(registry.layers.map(({ id }) => id)).toEqual([second.id, first.id]);
+  });
 });

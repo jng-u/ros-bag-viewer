@@ -281,6 +281,31 @@ try {
     return value.pointSize === "7" && value.colorMode === "axis" && value.colorAxis === "x" && value.pointReady && value.errors === 0 ? value : undefined;
   });
 
+  const playbackStart = await execute("window.__stableLayerRow=document.querySelector('.layer-row'); document.querySelector('#play-button').click(); return document.querySelector('#current-time')?.textContent ?? '';");
+  await waitFor("playback advances without rebuilding layer DOM", async () => {
+    const value = await execute(`return {
+      time: document.querySelector('#current-time')?.textContent ?? '',
+      stable: window.__stableLayerRow === document.querySelector('.layer-row'),
+      playing: document.querySelector('#play-button')?.getAttribute('aria-label') === 'Pause recording',
+    };`);
+    return value.time !== playbackStart && value.stable && value.playing ? value : undefined;
+  });
+  await execute("const row=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points')); row?.querySelector('[data-layer-action=\"toggle\"]')?.click();");
+  await waitFor("playback toggle off", async () => (await execute("return ![...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points'))?.querySelector('[data-layer-action=\"toggle\"]')?.classList.contains('is-visible')")) || undefined);
+  await execute("const row=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points')); row?.querySelector('[data-layer-action=\"toggle\"]')?.click(); const path=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/path')); path?.querySelector('[data-layer-action=\"select\"]')?.click();");
+  const playbackInteraction = await waitFor("playback toggle and selection", async () => {
+    const value = await execute(`return {
+      pointVisible: [...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points'))?.querySelector('[data-layer-action="toggle"]')?.classList.contains('is-visible') === true,
+      pathSelected: [...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/path'))?.classList.contains('is-selected') === true,
+      playing: document.querySelector('#play-button')?.getAttribute('aria-label') === 'Pause recording',
+    };`);
+    return value.pointVisible && value.pathSelected && value.playing ? value : undefined;
+  });
+  await execute("document.querySelector('#play-button').click();");
+
+  const layerOrder = await execute(`const before=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); document.querySelector('.layer-row [data-layer-action="down"]')?.click(); const after=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); return {before,after};`);
+  if (layerOrder.before[0] === layerOrder.after[0]) throw new Error(`Layer reorder did not change draw order: ${JSON.stringify(layerOrder)}`);
+
   const seekStarted = Date.now();
   const seekEpoch = Number(await execute("return document.querySelector('#epoch-value')?.textContent ?? '0'"));
   await execute("const t=document.querySelector('#timeline-input'); t.value='5000'; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true}));");
@@ -319,7 +344,7 @@ try {
       layers: Number(document.querySelector('#layer-count')?.textContent),
       rawReady: [...document.querySelectorAll('.layer-row')].some((row)=>row.textContent.includes('/demo/custom_status') && row.textContent.includes('RAW') && row.textContent.includes('READY')),
     };`);
-    return value.text.includes("score") && value.text.includes("inliers") && value.text.includes("residuals") && value.rawReady ? value : undefined;
+    return value.text.includes("TOPIC /demo/custom_status") && value.text.includes("TYPE demo_msgs") && value.text.includes("score") && value.text.includes("inliers") && value.text.includes("residuals") && value.rawReady ? value : undefined;
   });
   await execute(`const button=[...document.querySelectorAll('[data-plot-field]')].find((candidate)=>candidate.textContent.includes('score')); button?.click();`);
   const customPlot = await waitFor("custom numeric field plot", async () => {
@@ -327,9 +352,17 @@ try {
       plots: document.querySelectorAll('.plot-window canvas').length,
       layers: Number(document.querySelector('#layer-count')?.textContent),
       customReady: [...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('/demo/custom_status') && row.textContent.includes('READY')).length,
+      samples: Number([...document.querySelectorAll('.plot-window')].find((plot)=>plot.textContent.includes('/demo/custom_status'))?.dataset.sampleCount ?? '0'),
     };`);
-    return value.plots >= 2 && value.customReady >= 2 ? value : undefined;
+    return value.plots >= 2 && value.customReady >= 2 && value.samples > 1 ? value : undefined;
   });
+
+  const auxiliaryLayout = await execute(`const canvas=document.querySelector('#scene-canvas'); const full=canvas.clientWidth; const select=document.querySelector('#aux-layout'); select.value='split-right'; select.dispatchEvent(new Event('change',{bubbles:true})); const right=canvas.clientWidth; select.value='split-bottom'; select.dispatchEvent(new Event('change',{bubbles:true})); const bottomHeight=canvas.clientHeight; select.value='overlay'; select.dispatchEvent(new Event('change',{bubbles:true})); return {full,right,bottomHeight,restored:canvas.clientWidth,layout:document.querySelector('.scene-panel')?.dataset.auxLayout};`);
+  if (!(auxiliaryLayout.right < auxiliaryLayout.full && auxiliaryLayout.bottomHeight > 0 && auxiliaryLayout.restored === auxiliaryLayout.full && auxiliaryLayout.layout === "overlay")) throw new Error(`Auxiliary split layout failed: ${JSON.stringify(auxiliaryLayout)}`);
+  const auxiliaryOrder = await execute(`const before=[...document.querySelectorAll('[data-aux-layer]')].map((item)=>item.dataset.auxLayer); const source=document.querySelector('[data-aux-layer] header'); const target=document.querySelectorAll('[data-aux-layer]')[2]; const transfer=new DataTransfer(); source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer})); const after=[...document.querySelectorAll('[data-aux-layer]')].map((item)=>item.dataset.auxLayer); return {before,after};`);
+  if (auxiliaryOrder.before[0] === auxiliaryOrder.after[0]) throw new Error(`Auxiliary drag reorder failed: ${JSON.stringify(auxiliaryOrder)}`);
+  const rawScreenshotPath = resolve("/tmp/ros-web-viewer-browser-e2e-raw.png");
+  await writeFile(rawScreenshotPath, Buffer.from(await command(`/session/${sessionId}/screenshot`), "base64"));
 
   await execute("const s=document.querySelector('#demo-kind'); s.value='mcap'; s.dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#demo-button').click();");
   await waitFor("shareable local MCAP", async () => await execute("return document.querySelector('.viewer-shell')?.dataset.phase==='ready' && document.querySelector('#source-name')?.textContent.includes('DEMO.MCAP') && !document.querySelector('#share-button')?.disabled"));
@@ -407,7 +440,7 @@ try {
   await mkdir(dirname(screenshotPath), { recursive: true });
   await writeFile(screenshotPath, Buffer.from(sceneScreenshot, "base64"));
   await writeFile(liveScreenshotPath, Buffer.from(liveScreenshot, "base64"));
-  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryOrder, rawScreenshotPath, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n${driverLog}\n`);
   process.exitCode = 1;

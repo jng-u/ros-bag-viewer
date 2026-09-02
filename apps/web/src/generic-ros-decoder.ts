@@ -264,7 +264,7 @@ function readPrimitive(reader: RosReader, type: string, maxStringLength?: number
   }
 }
 
-function collectNumericFields(value: unknown, path = "", output: { path: string; value: number }[] = []): readonly { path: string; value: number }[] {
+export function collectNumericFields(value: unknown, path = "", output: { path: string; value: number }[] = []): readonly { path: string; value: number }[] {
   if (output.length >= MAX_FIELDS) return output;
   if (typeof value === "number" && Number.isFinite(value)) {
     output.push({ path, value });

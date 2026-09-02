@@ -31,7 +31,7 @@ import { BrowserDisplayLifecycle } from "./browser-display-lifecycle.js";
 import { BrowserMessageDecoder } from "./browser-message-decoder.js";
 import { normalizeBrowserSample } from "./browser-envelope.js";
 import { BrowserRecordingWorker } from "./browser-recording-worker.js";
-import { numericValueAtPath, type GenericRosDecodeResult } from "./generic-ros-decoder.js";
+import { collectNumericFields, numericValueAtPath, type GenericRosDecodeResult } from "./generic-ros-decoder.js";
 import { HistoricalFrameResolver, IDENTITY_TRANSFORM, transformBounds, type FrameTransformResolver } from "./frame-resolver.js";
 import { formatRawPreview, type RawPreview } from "./raw-preview.js";
 import { OrbitCamera, type CameraPreset } from "./scene-camera.js";
@@ -43,7 +43,7 @@ import "./style.css";
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing");
 
-const icon = (name: "close" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus") => {
+const icon = (name: "close" | "down" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus" | "up") => {
   const paths = {
     close: '<path d="m6 6 8 8m0-8-8 8"/>',
     eye: '<path d="M2 10s3.2-5 8-5 8 5 8 5-3.2 5-8 5-8-5-8-5Z"/><circle cx="10" cy="10" r="2.2"/>',
@@ -53,6 +53,8 @@ const icon = (name: "close" | "eye" | "fit" | "folder" | "minus" | "pause" | "pl
     pause: '<path d="M6.5 5v10m7-10v10"/>',
     play: '<path d="m7 5 7 5-7 5Z"/>',
     plus: '<path d="M10 5v10m-5-5h10"/>',
+    up: '<path d="m6 12 4-4 4 4"/>',
+    down: '<path d="m6 8 4 4 4-4"/>',
   } as const;
   return `<svg viewBox="0 0 20 20" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -91,6 +93,7 @@ app.innerHTML = `
         <button data-camera="front" type="button">FRONT</button>
         <label class="fixed-frame-control">REFERENCE <input id="fixed-frame-input" value="" placeholder="ALL FRAMES" aria-label="TF reference frame; blank shows all native frames" spellcheck="false" /></label>
         <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
+        <label class="aux-layout-control">WINDOWS <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">SPLIT RIGHT</option><option value="split-bottom">SPLIT BOTTOM</option></select></label>
       </div>
       <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span>0 VERTICES</span><span>FULL DATA</span></div>
       <div class="drop-prompt" id="drop-prompt">
@@ -155,9 +158,10 @@ const byId = <T extends HTMLElement>(id: string): T => {
 };
 
 const runtime = new BrowserRecordingWorker();
-window.addEventListener("pagehide", () => { void runtime.close(); }, { once: true });
 const messageDecoder = new BrowserMessageDecoder();
 const liveTfDecoder = new BrowserMessageDecoder();
+const plotHistoryDecoder = new BrowserMessageDecoder();
+window.addEventListener("pagehide", () => { void runtime.close(); messageDecoder.close(); liveTfDecoder.close(); plotHistoryDecoder.close(); }, { once: true });
 const liveSamples = new Map<string, BrowserSample>();
 let liveTfBuffer: TfBuffer | undefined;
 let liveTfEpoch = -1;
@@ -173,7 +177,7 @@ function scheduleLivePoll(): void {
     livePollScheduled = false;
     if (controller.state.sourceMode !== "live") return;
     controller.pollLive();
-    renderChrome();
+    renderChrome(false);
   }, 0);
 }
 const liveRelay = new BrowserLiveRelay(async (topicId, sample) => {
@@ -212,6 +216,10 @@ const layers = new ViewerLayerRegistry();
 const camera = new OrbitCamera();
 let fixedFrame = "";
 let pivotVisible = true;
+type AuxiliaryLayout = "overlay" | "split-bottom" | "split-right";
+let auxiliaryLayout: AuxiliaryLayout = "overlay";
+let auxiliarySignature = "";
+let auxiliaryOrder: string[] = [];
 let liveSubscriptionUpdate: Promise<void> = Promise.resolve();
 // Recorded acquisition is already bounded by message count and log-time range. Do not
 // prune that bounded set by header time: bags may use a different header/log clock.
@@ -309,6 +317,8 @@ interface LayerRuntime {
   raw?: RawPreview;
   rawStructured?: string;
   generic?: GenericRosDecodeResult;
+  numericFields?: readonly { readonly path: string; readonly value: number }[];
+  rawMetadata?: string;
   numericHistory?: { readonly timeNanos: bigint; readonly value: number }[];
   payloadBytes?: number;
   schemaName?: string;
@@ -631,6 +641,16 @@ async function updateLayer(
       const data = baseEnvelope.payload.readBytes(baseEnvelope.epoch);
       const decoderInput: BrowserSample = { channel: sample.channel, data, logTimeNanos: baseEnvelope.schedulingTime.valueNanos, sourceSequence: baseEnvelope.sourceSequence };
       try {
+        if (layer.kind === "numeric-plot" && layer.fieldPath) {
+          generic = await messageDecoder.generic({
+            typeName: sample.channel.schema.name,
+            messageEncoding: sample.channel.messageEncoding,
+            schemaEncoding: sample.channel.schema.encoding,
+            schemaDefinition: sample.channel.schema.definition,
+            schemaData: sample.channel.schema.data,
+            data,
+          });
+        } else {
         const prepared = await messageDecoder.semanticPrepared(decoderInput, {
           maxPoints: 1_000_000,
           maxInputBytes: 16 * 1024 * 1024,
@@ -642,16 +662,10 @@ async function updateLayer(
         decoded = prepared.decoded;
         preparedPointCloud = prepared.pointCloud;
         rawImageRgba = prepared.rawImageRgba;
+        }
       } catch (semanticError) {
         if (layer.kind !== "numeric-plot" || !layer.fieldPath) throw semanticError;
-        generic = await messageDecoder.generic({
-          typeName: sample.channel.schema.name,
-          messageEncoding: sample.channel.messageEncoding,
-          schemaEncoding: sample.channel.schema.encoding,
-          schemaDefinition: sample.channel.schema.definition,
-          schemaData: sample.channel.schema.data,
-          data,
-        });
+        decoded = await messageDecoder.semantic(decoderInput);
       }
     }
     const tfQueryTimeNanos = decoded && "stampNanos" in decoded.message ? decoded.message.stampNanos : undefined;
@@ -690,11 +704,14 @@ async function updateNormalizedLayer(
   if (layer.kind === "raw" || layer.kind === "raw-inspector") {
     runtimeState.raw = formatRawPreview(data);
     runtimeState.generic = undefined;
+    runtimeState.numericFields = undefined;
+    runtimeState.rawMetadata = `TOPIC ${layer.topic.name}\nTYPE ${channel.schema.name}\nMESSAGE ENCODING ${channel.messageEncoding}\nSCHEMA ${channel.schema.capability.toLocaleUpperCase()}${channel.schema.encoding ? ` · ${channel.schema.encoding}` : ""}\nTIME ${envelope.schedulingTime.valueNanos} ns\nPAYLOAD ${data.byteLength} bytes`;
     let rawValue: unknown;
     try {
       const decoded = await messageDecoder.semantic(decoderInput);
       rawValue = decoded.message;
       runtimeState.rawStructured = structuredPreview(decoded.message);
+      runtimeState.numericFields = collectNumericFields(decoded.message);
     } catch (semanticError) {
       try {
         const generic = await messageDecoder.generic({
@@ -706,6 +723,7 @@ async function updateNormalizedLayer(
           data,
         });
         runtimeState.generic = generic;
+        runtimeState.numericFields = generic.numericFields;
         rawValue = generic.value;
         runtimeState.rawStructured = structuredPreview(generic.value);
       } catch (genericError) {
@@ -731,6 +749,16 @@ async function updateNormalizedLayer(
   let summary: SemanticSceneSummary;
   if (generic && runtimeState.display instanceof NumericPlotDisplay && layer.fieldPath) {
     const value = numericValueAtPath(generic.value, layer.fieldPath);
+    summary = runtimeState.display.update({ timestampNanos: envelope.schedulingTime.valueNanos, value: { selected: value } }, epoch);
+    if (value !== undefined) {
+      const history = runtimeState.numericHistory ?? [];
+      if (history.at(-1)?.timeNanos !== envelope.schedulingTime.valueNanos) history.push({ timeNanos: envelope.schedulingTime.valueNanos, value });
+      if (history.length > 2048) history.splice(0, history.length - 2048);
+      runtimeState.numericHistory = history;
+    }
+    runtimeState.lifecycle?.render();
+  } else if (decoded && runtimeState.display instanceof NumericPlotDisplay && layer.fieldPath) {
+    const value = numericValueAtPath(decoded.message, layer.fieldPath);
     summary = runtimeState.display.update({ timestampNanos: envelope.schedulingTime.valueNanos, value: { selected: value } }, epoch);
     if (value !== undefined) {
       const history = runtimeState.numericHistory ?? [];
@@ -821,7 +849,8 @@ function renderLayers(): void {
   layerList.innerHTML = layers.layers.length === 0 ? '<p class="empty-copy">Add displays from Topics. Multiple drawables share one synchronized scene.</p>' : layers.layers.map((layer) => `
     <article class="layer-row ${layers.selected?.id === layer.id ? "is-selected" : ""}" data-layer="${layer.id}" style="--layer-color:${layerColor(layer)}">
       <button class="visibility-button ${layer.visible ? "is-visible" : ""}" data-layer-action="toggle" type="button" aria-label="${layer.visible ? "Hide" : "Show"} ${escapeHtml(layer.topic.name)}">${icon("eye")}</button>
-      <button class="layer-select" data-layer-action="select" type="button"><strong>${escapeHtml(layer.topic.name)}</strong><span>${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}</span></button>
+      <button class="layer-select" data-layer-action="select" type="button"><strong>${escapeHtml(layer.topic.name)}</strong><span data-layer-status>${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}</span></button>
+      <span class="layer-order"><button data-layer-action="up" type="button" aria-label="Move ${escapeHtml(layer.topic.name)} up">${icon("up")}</button><button data-layer-action="down" type="button" aria-label="Move ${escapeHtml(layer.topic.name)} down">${icon("down")}</button></span>
       <button class="remove-button" data-layer-action="remove" type="button" aria-label="Remove ${escapeHtml(layer.topic.name)}">${icon("minus")}</button>
     </article>`).join("");
 }
@@ -844,38 +873,81 @@ function renderInspector(): void {
     ${colorMode === "intensity" ? `<div class="color-ramp" aria-label="Blue to red intensity color scale"></div>` : ""}
   </div>` : "";
   const uniformColor = isGeometryDisplay(runtimeState?.display) && (!pointCloud || colorMode === "uniform") ? `<label class="display-config">COLOR <input type="color" data-layer-color="${layer.id}" value="${layerColorHex(layer)}" aria-label="${escapeHtml(layer.topic.name)} display color" /></label>` : "";
-  inspector.innerHTML = `<div class="section-label">SELECTION</div><h2>${escapeHtml(layer.topic.name)}</h2><p class="schema-name">${escapeHtml(layer.topic.typeName)}</p>${layer.error ? `<p class="layer-error">${escapeHtml(layer.error)}</p>` : ""}${pointControls}${uniformColor}<dl>
+  inspector.innerHTML = `<div class="section-label">SELECTION</div><h2>${escapeHtml(layer.topic.name)}</h2><p class="schema-name">${escapeHtml(layer.topic.typeName)}</p><p class="${layer.error ? "layer-error" : ""}" data-inspector-error ${layer.error ? "" : "hidden"}>${escapeHtml(layer.error ?? "")}</p>${pointControls}${uniformColor}<dl>
     <div><dt>DISPLAY</dt><dd>${displayLabel(layer.kind)}</dd></div>
     ${layer.fieldPath ? `<div><dt>FIELD</dt><dd>${escapeHtml(layer.fieldPath)}</dd></div>` : ""}
-    <div><dt>STATUS</dt><dd>${layer.status.toLocaleUpperCase()}</dd></div>
-    <div><dt>MESSAGE TIME</dt><dd>${layer.messageTimeNanos?.toString() ?? "—"} ns</dd></div>
-    <div><dt>FRAME</dt><dd>${escapeHtml(summary?.frameId || "—")}</dd></div>
-    <div><dt>PAYLOAD</dt><dd>${runtimeState?.payloadBytes === undefined ? "—" : formatBytes(runtimeState.payloadBytes)}</dd></div>
-    <div><dt>INPUT</dt><dd>${summary?.inputVertices.toLocaleString() ?? "—"}</dd></div>
-    <div><dt>RENDERED</dt><dd>${summary?.renderedVertices.toLocaleString() ?? "—"}</dd></div>
-    <div><dt>QUALITY</dt><dd class="${summary?.droppedVertices ? "quality-loss" : "quality-full"}">${quality.toLocaleUpperCase()}</dd></div>
+    <div><dt>STATUS</dt><dd data-inspector-value="status">${layer.status.toLocaleUpperCase()}</dd></div>
+    <div><dt>MESSAGE TIME</dt><dd data-inspector-value="time">${layer.messageTimeNanos?.toString() ?? "—"} ns</dd></div>
+    <div><dt>FRAME</dt><dd data-inspector-value="frame">${escapeHtml(summary?.frameId || "—")}</dd></div>
+    <div><dt>PAYLOAD</dt><dd data-inspector-value="payload">${runtimeState?.payloadBytes === undefined ? "—" : formatBytes(runtimeState.payloadBytes)}</dd></div>
+    <div><dt>INPUT</dt><dd data-inspector-value="input">${summary?.inputVertices.toLocaleString() ?? "—"}</dd></div>
+    <div><dt>RENDERED</dt><dd data-inspector-value="rendered">${summary?.renderedVertices.toLocaleString() ?? "—"}</dd></div>
+    <div><dt>QUALITY</dt><dd data-inspector-value="quality" class="${summary?.droppedVertices ? "quality-loss" : "quality-full"}">${quality.toLocaleUpperCase()}</dd></div>
   </dl>`;
 }
 
-function renderAuxiliary(): void {
-  const auxiliary = layers.visibleLayers.filter(({ kind }) => kind === "image" || kind === "raw" || kind === "raw-inspector" || kind === "numeric-plot" || kind === "camera-info");
-  auxDock.innerHTML = auxiliary.map((layer) => {
+function orderedAuxiliaryLayers(): readonly ViewerLayer[] {
+  const visible = layers.visibleLayers.filter(({ kind }) => kind === "image" || kind === "raw" || kind === "raw-inspector" || kind === "numeric-plot" || kind === "camera-info");
+  const visibleIds = new Set(visible.map(({ id }) => id));
+  auxiliaryOrder = auxiliaryOrder.filter((id) => visibleIds.has(id));
+  for (const layer of visible) if (!auxiliaryOrder.includes(layer.id)) auxiliaryOrder.push(layer.id);
+  const byIdMap = new Map(visible.map((layer) => [layer.id, layer]));
+  return auxiliaryOrder.flatMap((id) => byIdMap.get(id) ? [byIdMap.get(id)!] : []);
+}
+
+function auxiliaryMarkup(layer: ViewerLayer): string {
+  const common = `draggable="true" data-aux-layer="${layer.id}"`;
+  if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
+  if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span data-aux-status>—</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
+  if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl></section>`;
+  return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre><details class="raw-bytes"><summary>BYTE VIEW</summary><pre data-raw-bytes></pre></details></section>`;
+}
+
+function renderAuxiliary(forceStructure = false): void {
+  const auxiliary = orderedAuxiliaryLayers();
+  const signature = auxiliary.map(({ id, kind }) => `${id}:${kind}`).join("|");
+  scenePanel.dataset.auxLayout = auxiliaryLayout;
+  if (forceStructure || signature !== auxiliarySignature) {
+    auxiliarySignature = signature;
+    auxDock.innerHTML = auxiliary.map(auxiliaryMarkup).join("");
+  }
+  for (const layer of auxiliary) {
+    const windowElement = auxDock.querySelector<HTMLElement>(`[data-aux-layer="${layer.id}"]`);
+    if (!windowElement) continue;
     const runtimeState = layerRuntime.get(layer.id);
-    if (layer.kind === "image") return `<section class="aux-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>${runtimeState?.raster ? `${runtimeState.raster.width}×${runtimeState.raster.height}` : layer.status}</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
-    if (layer.kind === "numeric-plot") {
-      const history = runtimeState?.numericHistory ?? [];
-      const latest = history.at(-1)?.value;
-      return `<section class="aux-window plot-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span>${latest === undefined ? "—" : latest.toPrecision(5)}</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
+    if (layer.kind === "numeric-plot") windowElement.dataset.sampleCount = String(runtimeState?.numericHistory?.length ?? 0);
+    const status = windowElement.querySelector<HTMLElement>("[data-aux-status]");
+    if (status) status.textContent = layer.kind === "image" && runtimeState?.raster
+      ? `${runtimeState.raster.width}×${runtimeState.raster.height}`
+      : layer.kind === "numeric-plot"
+        ? runtimeState?.numericHistory?.at(-1)?.value.toPrecision(5) ?? "—"
+        : runtimeState?.raw ? `${runtimeState.raw.shownBytes} B decoded` : layer.status.toLocaleUpperCase();
+    if (layer.kind === "raw" || layer.kind === "raw-inspector") {
+      const metadata = windowElement.querySelector<HTMLElement>("[data-raw-metadata]");
+      const structured = windowElement.querySelector<HTMLElement>("[data-raw-structured]");
+      const bytes = windowElement.querySelector<HTMLElement>("[data-raw-bytes]");
+      if (metadata) metadata.textContent = runtimeState?.rawMetadata ?? "Waiting for message metadata…";
+      if (structured) structured.textContent = runtimeState?.rawStructured ?? "Structured decoding is unavailable for this opaque schema. Byte view remains available below.";
+      if (bytes) bytes.textContent = runtimeState?.raw?.text ?? "Waiting for bytes…";
+      const fields = runtimeState?.numericFields?.slice(0, 64) ?? [];
+      const actions = windowElement.querySelector<HTMLElement>("[data-raw-actions]");
+      const fieldSignature = fields.map(({ path }) => path).join("|");
+      if (actions && actions.dataset.fields !== fieldSignature) {
+        actions.dataset.fields = fieldSignature;
+        actions.innerHTML = fields.length
+          ? fields.map(({ path }) => `<button type="button" data-plot-field="${escapeHtml(path)}">PLOT ${escapeHtml(path)}</button>`).join("")
+          : '<span>No finite numeric fields in this message.</span>';
+      }
+      continue;
     }
     if (layer.kind === "camera-info") {
       const details = layer.summary?.details;
-      return `<section class="aux-window info-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd>${details ? `${details.width} × ${details.height}` : "—"}</dd></div><div><dt>MODEL</dt><dd>${escapeHtml(String(details?.distortionModel ?? "—"))}</dd></div><div><dt>CALIBRATED</dt><dd>${details?.calibrated === true ? "YES" : "NO"}</dd></div></dl></section>`;
+      const set = (key: string, value: string) => { const target = windowElement.querySelector<HTMLElement>(`[data-camera-value="${key}"]`); if (target) target.textContent = value; };
+      set("size", details ? `${details.width} × ${details.height}` : "—");
+      set("model", String(details?.distortionModel ?? "—"));
+      set("calibrated", details?.calibrated === true ? "YES" : "NO");
+      continue;
     }
-    const preview = runtimeState?.rawStructured ? `${runtimeState.rawStructured}\n\nBYTE PREVIEW\n${runtimeState.raw?.text ?? ""}` : runtimeState?.raw?.text ?? "Waiting for message…";
-    const numericActions = runtimeState?.generic?.numericFields.slice(0, 32).map(({ path }) => `<button type="button" data-plot-field="${escapeHtml(path)}">PLOT ${escapeHtml(path)}</button>`).join("") ?? "";
-    return `<section class="aux-window raw-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>${runtimeState?.raw ? `${runtimeState.raw.shownBytes} B shown` : layer.status}</span></header><div class="raw-field-actions">${numericActions}</div><pre>${escapeHtml(preview)}</pre></section>`;
-  }).join("");
-  for (const layer of auxiliary) {
     const target = auxDock.querySelector<HTMLCanvasElement>(`[data-aux-layer="${layer.id}"] canvas`);
     if (!target) continue;
     const scale = Math.min(window.devicePixelRatio || 1, 2);
@@ -943,7 +1015,40 @@ function renderAuxiliary(): void {
   }
 }
 
-function renderChrome(): void {
+function updateLayerChrome(): void {
+  for (const layer of layers.layers) {
+    const row = layerList.querySelector<HTMLElement>(`[data-layer="${layer.id}"]`);
+    const status = row?.querySelector<HTMLElement>("[data-layer-status]");
+    if (status) status.textContent = `${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}`;
+  }
+}
+
+function updateInspectorChrome(): void {
+  const layer = layers.selected;
+  if (!layer) return;
+  const runtimeState = layerRuntime.get(layer.id);
+  const summary = layer.summary;
+  const values: Readonly<Record<string, string>> = {
+    status: layer.status.toLocaleUpperCase(),
+    time: `${layer.messageTimeNanos?.toString() ?? "—"} ns`,
+    frame: summary?.frameId || "—",
+    payload: runtimeState?.payloadBytes === undefined ? "—" : formatBytes(runtimeState.payloadBytes),
+    input: summary?.inputVertices.toLocaleString() ?? "—",
+    rendered: summary?.renderedVertices.toLocaleString() ?? "—",
+    quality: summary && summary.droppedVertices > 0 ? `${summary.droppedVertices.toLocaleString()} DROPPED` : "FULL DATA",
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const target = inspector.querySelector<HTMLElement>(`[data-inspector-value="${key}"]`);
+    if (target) target.textContent = value;
+  }
+  const quality = inspector.querySelector<HTMLElement>('[data-inspector-value="quality"]');
+  quality?.classList.toggle("quality-loss", Boolean(summary?.droppedVertices));
+  quality?.classList.toggle("quality-full", !summary?.droppedVertices);
+  const error = inspector.querySelector<HTMLElement>("[data-inspector-error]");
+  if (error) { error.hidden = !layer.error; error.classList.toggle("layer-error", Boolean(layer.error)); error.textContent = layer.error ?? ""; }
+}
+
+function renderChrome(rebuildStructure = true): void {
   const state = controller.state;
   shell.dataset.phase = state.phase;
   byId("source-name").textContent = (state.sourceLabel ?? "NO SOURCE").toLocaleUpperCase();
@@ -966,10 +1071,15 @@ function renderChrome(): void {
     : "";
   statusLine.textContent = `${state.blockingError ?? state.notice ?? "Ready."}${liveHealth}`;
   statusLine.dataset.tone = state.blockingError ? "error" : state.phase === "degraded" ? "warning" : "normal";
-  renderTopics();
-  renderLayers();
-  renderInspector();
-  renderAuxiliary();
+  if (rebuildStructure) {
+    renderTopics();
+    renderLayers();
+    renderInspector();
+  } else {
+    updateLayerChrome();
+    updateInspectorChrome();
+  }
+  renderAuxiliary(rebuildStructure);
 }
 
 async function historicalFrameResolver(
@@ -1138,7 +1248,7 @@ async function renderSceneAtCurrentTime(frameVisible = false): Promise<void> {
         const bounds = combinedBounds();
         if (bounds) camera.frame(bounds);
       }
-      renderChrome();
+      renderChrome(false);
       drawScene();
       const failures = visible.filter(({ id }) => layers.layers.find((layer) => layer.id === id)?.status === "error").length;
       const tfDiagnosticText = tfDiagnostics.length ? ` ${tfDiagnostics.join(" · ")}.` : "";
@@ -1153,13 +1263,57 @@ async function renderSceneAtCurrentTime(frameVisible = false): Promise<void> {
   return renderCompletion;
 }
 
+async function hydrateNumericPlotHistory(layer: ViewerLayer): Promise<void> {
+  if (controller.state.sourceMode === "live" || layer.kind !== "numeric-plot" || !layer.fieldPath) return;
+  const epoch = controller.state.epoch;
+  const windowResult = await runtime.messagesAround(layer.topic.name, controller.state.currentTimeNanos);
+  if (epoch !== controller.state.epoch || !layers.layers.some(({ id }) => id === layer.id)) return;
+  const ordered = [...windowResult.samples].sort((left, right) => left.logTimeNanos < right.logTimeNanos ? -1 : left.logTimeNanos > right.logTimeNanos ? 1 : 0);
+  const reference = await runtime.messageAt(layer.topic.name, controller.state.currentTimeNanos);
+  const pivot = Math.max(0, ordered.findIndex(({ logTimeNanos }) => logTimeNanos >= reference.logTimeNanos));
+  const start = Math.max(0, Math.min(ordered.length - 2_048, pivot - 1_024));
+  const contiguous = ordered.slice(start, start + 2_048);
+  const history: { readonly timeNanos: bigint; readonly value: number }[] = [];
+  for (let offset = 0; offset < contiguous.length; offset += 64) {
+    const batch = contiguous.slice(offset, offset + 64);
+    const decoded = await Promise.all(batch.map(async (sample) => {
+      let value: number | undefined;
+      try {
+        const generic = await plotHistoryDecoder.generic({
+          typeName: sample.channel.schema.name,
+          messageEncoding: sample.channel.messageEncoding,
+          schemaEncoding: sample.channel.schema.encoding,
+          schemaDefinition: sample.channel.schema.definition,
+          schemaData: sample.channel.schema.data,
+          data: sample.data,
+        });
+        value = numericValueAtPath(generic.value, layer.fieldPath!);
+      } catch {
+        const semantic = await plotHistoryDecoder.semantic(sample);
+        value = numericValueAtPath(semantic.message, layer.fieldPath!);
+      }
+      return value === undefined ? undefined : { timeNanos: sample.logTimeNanos, value };
+    }));
+    history.push(...decoded.filter((entry): entry is { readonly timeNanos: bigint; readonly value: number } => entry !== undefined));
+    if (epoch !== controller.state.epoch || !layers.layers.some(({ id }) => id === layer.id)) return;
+  }
+  const runtimeState = layerRuntime.get(layer.id);
+  if (runtimeState) runtimeState.numericHistory = history;
+  renderAuxiliary(false);
+}
+
 function addLayer(topic: TopicSummary, kind: DisplayKind, fieldPath?: string): ViewerLayer {
   const layer = layers.add(topic, kind, fieldPath);
   ensureLayerDisplay(layer);
   renderChrome();
+  let initialRender = Promise.resolve();
   if (controller.state.sourceMode === "live") {
     void syncLiveSubscriptions();
-  } else void renderSceneAtCurrentTime(true);
+  } else initialRender = renderSceneAtCurrentTime(true);
+  if (kind === "numeric-plot" && fieldPath) void initialRender.then(() => hydrateNumericPlotHistory(layer)).catch((error) => {
+    if (layers.layers.some(({ id }) => id === layer.id)) layers.update(layer.id, { status: "error", error: `Plot history could not be decoded: ${error instanceof Error ? error.message : String(error)}` });
+    renderChrome(false);
+  });
   return layer;
 }
 
@@ -1470,12 +1624,44 @@ auxDock.addEventListener("click", (event) => {
   if (rawLayer && fieldPath) addLayer(rawLayer.topic, "numeric-plot", fieldPath);
 });
 
+auxDock.addEventListener("dragstart", (event) => {
+  const windowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-layer]");
+  if (!windowElement || !(event.target as HTMLElement).closest("header")) { event.preventDefault(); return; }
+  event.dataTransfer?.setData("text/x-ros-viewer-aux", windowElement.dataset.auxLayer ?? "");
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  windowElement.classList.add("is-dragging");
+});
+auxDock.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer?.types.includes("text/x-ros-viewer-aux")) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+});
+auxDock.addEventListener("drop", (event) => {
+  const movedId = event.dataTransfer?.getData("text/x-ros-viewer-aux");
+  const targetId = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-layer]")?.dataset.auxLayer;
+  if (!movedId || !targetId || movedId === targetId) return;
+  event.preventDefault();
+  auxiliaryOrder = auxiliaryOrder.filter((id) => id !== movedId);
+  auxiliaryOrder.splice(Math.max(0, auxiliaryOrder.indexOf(targetId)), 0, movedId);
+  auxiliarySignature = "";
+  renderAuxiliary(true);
+});
+auxDock.addEventListener("dragend", () => auxDock.querySelector(".is-dragging")?.classList.remove("is-dragging"));
+
 layerList.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-layer-action]");
   const row = button?.closest<HTMLElement>("[data-layer]");
   if (!button || !row) return;
   const id = row.dataset.layer!;
   if (button.dataset.layerAction === "select") layers.select(id);
+  if (button.dataset.layerAction === "up") layers.move(id, -1);
+  if (button.dataset.layerAction === "down") layers.move(id, 1);
+  if (["select", "up", "down"].includes(button.dataset.layerAction ?? "")) {
+    renderLayers();
+    renderInspector();
+    drawScene();
+    return;
+  }
   if (button.dataset.layerAction === "toggle") {
     renderGeneration += 1;
     layers.toggle(id);
@@ -1589,6 +1775,12 @@ byId<HTMLInputElement>("fixed-frame-input").addEventListener("change", (event) =
 byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
   pivotVisible = !pivotVisible;
   (event.currentTarget as HTMLButtonElement).setAttribute("aria-pressed", String(pivotVisible));
+  drawScene();
+});
+
+byId<HTMLSelectElement>("aux-layout").addEventListener("change", (event) => {
+  auxiliaryLayout = (event.currentTarget as HTMLSelectElement).value as AuxiliaryLayout;
+  renderAuxiliary(true);
   drawScene();
 });
 
