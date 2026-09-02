@@ -92,7 +92,7 @@ app.innerHTML = `
         <button data-camera="front" type="button">FRONT</button>
         <label class="fixed-frame-control">REFERENCE <input id="fixed-frame-input" value="" placeholder="ALL FRAMES" aria-label="TF reference frame; blank shows all native frames" spellcheck="false" /></label>
         <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
-        <label class="aux-layout-control">WINDOWS <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">VERTICAL SPLIT</option><option value="split-bottom">HORIZONTAL SPLIT</option></select></label>
+        <label class="aux-layout-control" title="Choose a right or bottom split, then drag the visible divider to resize it.">WINDOW LAYOUT <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">SPLIT RIGHT</option><option value="split-bottom">SPLIT BOTTOM</option></select><span class="aux-layout-help">DRAG DIVIDER</span></label>
       </div>
       <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span data-scene-stat="vertices">0 VERTICES</span><span data-scene-stat="quality" class="quality-full">FULL DATA</span><span data-scene-stat="gpu">0 B GPU</span></div>
       <div class="drop-prompt" id="drop-prompt">
@@ -902,7 +902,7 @@ function renderLayers(): void {
     <article class="layer-row ${layers.selected?.id === layer.id ? "is-selected" : ""}" data-layer="${layer.id}" style="--layer-color:${layerColor(layer)}">
       <span class="layer-drag-handle" role="button" tabindex="0" draggable="true" aria-label="Drag ${escapeHtml(layer.topic.name)} to change draw order">${icon("drag")}</span>
       <button class="visibility-button ${layer.visible ? "is-visible" : ""}" data-layer-action="toggle" type="button" aria-label="${layer.visible ? "Hide" : "Show"} ${escapeHtml(layer.topic.name)}">${icon("eye")}</button>
-      <button class="layer-select" data-layer-action="select" type="button"><strong>${escapeHtml(layer.topic.name)}</strong><span data-layer-status>${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}</span></button>
+      <button class="layer-select" data-layer-action="select" type="button"><strong>${escapeHtml(layer.topic.name)}</strong>${layer.kind === "numeric-plot" ? `<em>${escapeHtml(layer.fieldPath ?? "data")}</em>` : ""}<span data-layer-status>${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}</span></button>
       <button class="remove-button" data-layer-action="remove" type="button" aria-label="Remove ${escapeHtml(layer.topic.name)}">${icon("minus")}</button>
     </article>`).join("");
 }
@@ -938,13 +938,32 @@ function renderInspector(): void {
   </dl>`;
 }
 
+function numericPlotSeries(anchor: ViewerLayer): readonly ViewerLayer[] {
+  if (anchor.kind !== "numeric-plot") return [];
+  return layers.visibleLayers.filter((candidate) => candidate.kind === "numeric-plot" && candidate.topic.id === anchor.topic.id);
+}
+
 function orderedAuxiliaryLayers(): readonly ViewerLayer[] {
-  const visible = layers.visibleLayers.filter(({ kind }) => kind === "image" || kind === "raw" || kind === "raw-inspector" || kind === "numeric-plot" || kind === "camera-info");
+  const seenPlotTopics = new Set<string>();
+  const visible = layers.visibleLayers.filter(({ kind, topic }) => {
+    if (kind === "numeric-plot") {
+      if (seenPlotTopics.has(topic.id)) return false;
+      seenPlotTopics.add(topic.id);
+      return true;
+    }
+    return kind === "image" || kind === "raw" || kind === "raw-inspector" || kind === "camera-info";
+  });
   const visibleIds = new Set(visible.map(({ id }) => id));
   auxiliaryOrder = auxiliaryOrder.filter((id) => visibleIds.has(id));
   for (const layer of visible) if (!auxiliaryOrder.includes(layer.id)) auxiliaryOrder.push(layer.id);
   const byIdMap = new Map(visible.map((layer) => [layer.id, layer]));
   return auxiliaryOrder.flatMap((id) => byIdMap.get(id) ? [byIdMap.get(id)!] : []);
+}
+
+function auxiliaryStructureSignature(auxiliary: readonly ViewerLayer[]): string {
+  return auxiliary.map((layer) => layer.kind === "numeric-plot"
+    ? `${layer.id}:${layer.kind}:${numericPlotSeries(layer).map((series) => `${series.id}:${series.fieldPath ?? "data"}`).join(",")}`
+    : `${layer.id}:${layer.kind}`).join("|");
 }
 
 function auxiliaryPosition(layerId: string, index: number, element: HTMLElement): { x: number; y: number } {
@@ -989,14 +1008,18 @@ function auxiliaryMarkup(layer: ViewerLayer): string {
   const common = `data-aux-layer="${layer.id}"`;
   const resize = '<span class="aux-resize-handle" data-aux-resize aria-hidden="true"></span>';
   if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
-  if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span data-aux-status>—</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
+  if (layer.kind === "numeric-plot") {
+    const series = numericPlotSeries(layer);
+    const legend = series.map((item) => `<span data-plot-series="${item.id}" title="${escapeHtml(item.fieldPath ?? "data")}"><i style="background:${layerColor(item)}"></i>${escapeHtml(item.fieldPath ?? "data")}</span>`).join("");
+    return `<section class="aux-window plot-window" ${common} data-series-count="${series.length}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>${series.length} SERIES</span><button type="button" data-clear-plot title="Clear plot history">CLEAR</button></header><div class="plot-series-legend">${legend}</div><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
+  }
   if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl>${resize}</section>`;
   return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre>${resize}</section>`;
 }
 
 function renderAuxiliary(): void {
   const auxiliary = orderedAuxiliaryLayers();
-  const signature = auxiliary.map(({ id, kind }) => `${id}:${kind}`).join("|");
+  const signature = auxiliaryStructureSignature(auxiliary);
   scenePanel.dataset.auxLayout = auxiliaryLayout;
   if (signature !== auxiliarySignature) {
     auxiliarySignature = signature;
@@ -1006,12 +1029,16 @@ function renderAuxiliary(): void {
     const windowElement = auxDock.querySelector<HTMLElement>(`[data-aux-layer="${layer.id}"]`);
     if (!windowElement) continue;
     const runtimeState = layerRuntime.get(layer.id);
-    if (layer.kind === "numeric-plot") windowElement.dataset.sampleCount = String(runtimeState?.numericHistory?.length ?? 0);
+    const plotSeries = layer.kind === "numeric-plot" ? numericPlotSeries(layer) : [];
+    if (layer.kind === "numeric-plot") {
+      windowElement.dataset.sampleCount = String(Math.max(0, ...plotSeries.map((series) => layerRuntime.get(series.id)?.numericHistory?.length ?? 0)));
+      windowElement.dataset.seriesCount = String(plotSeries.length);
+    }
     const status = windowElement.querySelector<HTMLElement>("[data-aux-status]");
     if (status) status.textContent = layer.kind === "image" && runtimeState?.raster
       ? `${runtimeState.raster.width}×${runtimeState.raster.height}`
       : layer.kind === "numeric-plot"
-        ? runtimeState?.numericHistory?.at(-1)?.value.toPrecision(5) ?? "—"
+        ? `${plotSeries.length} SERIES`
         : runtimeState?.payloadBytes === undefined ? layer.status.toLocaleUpperCase() : `${formatBytes(runtimeState.payloadBytes)} decoded`;
     if (layer.kind === "raw" || layer.kind === "raw-inspector") {
       const metadata = windowElement.querySelector<HTMLElement>("[data-raw-metadata]");
@@ -1060,9 +1087,13 @@ function paintAuxiliaryCanvases(): void {
     context.fillStyle = "#08080a";
     context.fillRect(0, 0, target.width, target.height);
     if (layer.kind === "numeric-plot") {
-      const samples = layerRuntime.get(layer.id)?.numericHistory ?? [];
-      if (samples.length < 1) continue;
-      const values = samples.map(({ value }) => value);
+      const series = numericPlotSeries(layer).map((item) => ({
+        layer: item,
+        samples: layerRuntime.get(item.id)?.numericHistory ?? [],
+      })).filter(({ samples }) => samples.length > 0);
+      if (series.length < 1) continue;
+      const allSamples = series.flatMap(({ samples }) => samples);
+      const values = allSamples.map(({ value }) => value);
       const min = Math.min(...values);
       const max = Math.max(...values);
       const span = Math.max(max - min, 1e-9);
@@ -1081,28 +1112,31 @@ function paintAuxiliaryCanvases(): void {
         context.beginPath(); context.moveTo(left, y); context.lineTo(right, y); context.stroke();
         context.fillText((min + span * ratio).toPrecision(4), 5 * scale, y);
       }
-      const firstTime = samples[0]!.timeNanos;
-      const lastTime = samples.at(-1)!.timeNanos;
+      const firstTime = allSamples.reduce((earliest, sample) => sample.timeNanos < earliest ? sample.timeNanos : earliest, allSamples[0]!.timeNanos);
+      const lastTime = allSamples.reduce((latest, sample) => sample.timeNanos > latest ? sample.timeNanos : latest, allSamples[0]!.timeNanos);
       const timeSpan = lastTime > firstTime ? lastTime - firstTime : 1n;
       context.textBaseline = "alphabetic";
       context.fillText("0.000s", left, target.height - 5 * scale);
       context.textAlign = "right";
       context.fillText(`${(Number(timeSpan) / 1e9).toFixed(3)}s`, right, target.height - 5 * scale);
       context.textAlign = "left";
-      context.strokeStyle = layerColor(layer);
       context.lineWidth = Math.max(1, scale);
-      context.beginPath();
-      samples.forEach(({ value, timeNanos }, index) => {
-        const x = samples.length === 1 ? (left + right) / 2 : left + Number(timeNanos - firstTime) / Number(timeSpan) * (right - left);
-        const y = bottom - ((value - min) / span * (bottom - top));
-        if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
-      });
-      context.stroke();
-      if (samples.length === 1) {
-        context.fillStyle = layerColor(layer);
+      for (const item of series) {
+        context.strokeStyle = layerColor(item.layer);
         context.beginPath();
-        context.arc((left + right) / 2, (top + bottom) / 2, 2.5 * scale, 0, Math.PI * 2);
-        context.fill();
+        item.samples.forEach(({ value, timeNanos }, index) => {
+          const x = firstTime === lastTime ? (left + right) / 2 : left + Number(timeNanos - firstTime) / Number(timeSpan) * (right - left);
+          const y = bottom - ((value - min) / span * (bottom - top));
+          if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+        });
+        context.stroke();
+        if (item.samples.length === 1) {
+          const only = item.samples[0]!;
+          context.fillStyle = layerColor(item.layer);
+          context.beginPath();
+          context.arc((left + right) / 2, bottom - ((only.value - min) / span * (bottom - top)), 2.5 * scale, 0, Math.PI * 2);
+          context.fill();
+        }
       }
       continue;
     }
@@ -1558,7 +1592,17 @@ function startPlayback(): void {
   animationFrame = requestAnimationFrame((timestamp) => void tick(timestamp));
 }
 
+function clearNumericPlotHistories(topicId?: string): void {
+  for (const layer of layers.layers) {
+    if (layer.kind !== "numeric-plot" || (topicId && layer.topic.id !== topicId)) continue;
+    const runtimeState = layerRuntime.get(layer.id);
+    if (runtimeState) runtimeState.numericHistory = [];
+  }
+  renderAuxiliary();
+}
+
 async function seekTo(requested: bigint): Promise<void> {
+  clearNumericPlotHistories();
   await controller.seek(requested);
   await renderSceneAtCurrentTime();
 }
@@ -1771,6 +1815,13 @@ topicList.addEventListener("input", (event) => {
 });
 
 auxDock.addEventListener("click", (event) => {
+  const clearButton = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-clear-plot]");
+  const clearWindow = clearButton?.closest<HTMLElement>("[data-aux-layer]");
+  const clearAnchor = layers.layers.find(({ id }) => id === clearWindow?.dataset.auxLayer);
+  if (clearButton && clearAnchor?.kind === "numeric-plot") {
+    clearNumericPlotHistories(clearAnchor.topic.id);
+    return;
+  }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-plot-field]");
   const windowElement = button?.closest<HTMLElement>("[data-aux-layer]");
   if (!button || !windowElement) return;
@@ -1836,11 +1887,11 @@ auxDock.addEventListener("pointerdown", (event) => {
   const header = (event.target as HTMLElement).closest<HTMLElement>(".aux-window > header");
   const element = header?.closest<HTMLElement>("[data-aux-layer]");
   const id = element?.dataset.auxLayer;
-  if (!header || !element || !id || event.button !== 0) return;
+  if (!header || !element || !id || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
   if (auxiliaryLayout === "overlay") {
     auxiliaryOrder = [...auxiliaryOrder.filter((candidate) => candidate !== id), id];
     auxDock.append(element);
-    auxiliarySignature = orderedAuxiliaryLayers().map(({ id: layerId, kind }) => `${layerId}:${kind}`).join("|");
+    auxiliarySignature = auxiliaryStructureSignature(orderedAuxiliaryLayers());
   }
   const position = auxiliaryPosition(id, orderedAuxiliaryLayers().findIndex((layer) => layer.id === id), element);
   auxiliaryDrag = { element, id, offsetX: event.clientX - position.x, offsetY: event.clientY - position.y, pointerId: event.pointerId };
@@ -1867,7 +1918,7 @@ auxDock.addEventListener("pointermove", (event) => {
   const targetIndex = auxiliaryOrder.indexOf(targetId) + (after ? 1 : 0);
   auxiliaryOrder.splice(Math.max(0, targetIndex), 0, auxiliaryDrag.id);
   auxDock.insertBefore(auxiliaryDrag.element, after ? target.nextSibling : target);
-  auxiliarySignature = orderedAuxiliaryLayers().map(({ id, kind }) => `${id}:${kind}`).join("|");
+  auxiliarySignature = auxiliaryStructureSignature(orderedAuxiliaryLayers());
 });
 
 const finishAuxiliaryDrag = (event: PointerEvent): void => {
