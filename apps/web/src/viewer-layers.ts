@@ -17,6 +17,7 @@ export interface ViewerLayer {
   readonly pointCloudColorMode?: PointCloudColorMode;
   readonly pointCloudColorAxis?: "x" | "y" | "z";
   readonly fieldPath?: string;
+  readonly plotGroupId?: string;
   readonly messageTimeNanos?: bigint;
   readonly summary?: SemanticSceneSummary;
   readonly error?: string;
@@ -26,13 +27,19 @@ export class ViewerLayerRegistry {
   #layers: ViewerLayer[] = [];
   #selectedId?: string;
   #nextId = 1;
+  #nextPlotGroupId = 1;
 
   get layers(): readonly ViewerLayer[] { return this.#layers; }
   get visibleLayers(): readonly ViewerLayer[] { return this.#layers.filter(({ visible }) => visible); }
   get selected(): ViewerLayer | undefined { return this.#layers.find(({ id }) => id === this.#selectedId); }
 
-  add(topic: TopicSummary, kind: DisplayKind, fieldPath?: string): ViewerLayer {
-    const existing = this.#layers.find((layer) => layer.topic.id === topic.id && layer.kind === kind && layer.fieldPath === fieldPath);
+  createPlotGroupId(): string { return `plot-group-${this.#nextPlotGroupId++}`; }
+
+  add(topic: TopicSummary, kind: DisplayKind, fieldPath?: string, plotGroupId?: string): ViewerLayer {
+    const resolvedPlotGroupId = kind === "numeric-plot"
+      ? plotGroupId ?? this.#layers.find((layer) => layer.topic.id === topic.id && layer.kind === kind && layer.fieldPath === fieldPath)?.plotGroupId ?? this.createPlotGroupId()
+      : undefined;
+    const existing = this.#layers.find((layer) => layer.topic.id === topic.id && layer.kind === kind && layer.fieldPath === fieldPath && layer.plotGroupId === resolvedPlotGroupId);
     if (existing) {
       this.#selectedId = existing.id;
       return existing;
@@ -45,6 +52,7 @@ export class ViewerLayerRegistry {
       status: "waiting",
       colorIndex: this.#layers.length,
       ...(fieldPath ? { fieldPath } : {}),
+      ...(resolvedPlotGroupId ? { plotGroupId: resolvedPlotGroupId } : {}),
     };
     this.#layers = [...this.#layers, layer];
     this.#selectedId = layer.id;
@@ -55,6 +63,7 @@ export class ViewerLayerRegistry {
     this.#layers = [];
     this.#selectedId = undefined;
     this.#nextId = 1;
+    this.#nextPlotGroupId = 1;
   }
 
   remove(id: string): void {

@@ -92,7 +92,7 @@ app.innerHTML = `
         <button data-camera="front" type="button">FRONT</button>
         <label class="fixed-frame-control">REFERENCE <input id="fixed-frame-input" value="" placeholder="ALL FRAMES" aria-label="TF reference frame; blank shows all native frames" spellcheck="false" /></label>
         <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
-        <label class="aux-layout-control" title="Choose a right or bottom split, then drag the visible divider to resize it.">WINDOW LAYOUT <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">SPLIT RIGHT</option><option value="split-bottom">SPLIT BOTTOM</option></select><span class="aux-layout-help">DRAG DIVIDER</span></label>
+        <span class="dock-help">DRAG WINDOW TO PANE EDGE TO SPLIT</span><button id="reset-window-layout" type="button" title="Return all auxiliary windows to floating mode">RESET WINDOWS</button>
       </div>
       <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span data-scene-stat="vertices">0 VERTICES</span><span data-scene-stat="quality" class="quality-full">FULL DATA</span><span data-scene-stat="gpu">0 B GPU</span></div>
       <div class="drop-prompt" id="drop-prompt">
@@ -101,7 +101,7 @@ app.innerHTML = `
         <button id="drop-open-button" type="button">SELECT RECORDING</button>
       </div>
       <div class="aux-dock" id="aux-dock" aria-label="Image and raw data views"></div>
-      <div class="workspace-splitter" id="workspace-splitter" role="separator" aria-label="Resize split workspace" tabindex="0"></div>
+      <div class="dock-layout-overlay" id="dock-layout-overlay"></div>
       <div class="scene-message" id="scene-message" role="status" aria-live="polite"></div>
     </main>
 
@@ -217,15 +217,23 @@ const layers = new ViewerLayerRegistry();
 const camera = new OrbitCamera();
 let fixedFrame = "";
 let pivotVisible = true;
-type AuxiliaryLayout = "overlay" | "split-bottom" | "split-right";
-let auxiliaryLayout: AuxiliaryLayout = "overlay";
 let auxiliarySignature = "";
 let auxiliaryOrder: string[] = [];
 const auxiliaryPositions = new Map<string, { x: number; y: number }>();
 const auxiliarySizes = new Map<string, { width: number; height: number }>();
-let auxiliarySplitRatio = 0.34;
+type DockEdge = "bottom" | "left" | "right" | "top";
+type DockNode = { readonly kind: "pane"; readonly key: string }
+  | { readonly kind: "split"; readonly id: string; readonly axis: "x" | "y"; readonly ratio: number; readonly first: DockNode; readonly second: DockNode };
+interface DockRect { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+let dockRoot: DockNode = { kind: "pane", key: "scene" };
+let nextDockSplitId = 1;
+let dockPaneRects = new Map<string, DockRect>();
+let dockSplitRects = new Map<string, DockRect & { readonly axis: "x" | "y" }>();
+let dockSplitParents = new Map<string, { readonly axis: "x" | "y"; readonly length: number }>();
+let dockDropTarget: { readonly paneKey: string; readonly edge: DockEdge; readonly rect: DockRect } | undefined;
 let plotFieldPicker: {
   readonly topicId: string;
+  readonly targetPlotGroupId?: string;
   readonly fields: readonly { readonly path: string; readonly value: number }[];
   readonly status: "error" | "loading" | "ready";
   readonly error?: string;
@@ -301,6 +309,7 @@ const topicList = byId<HTMLElement>("topic-list");
 const layerList = byId<HTMLElement>("layer-list");
 const inspector = byId<HTMLElement>("inspector");
 const auxDock = byId<HTMLElement>("aux-dock");
+const dockLayoutOverlay = byId<HTMLElement>("dock-layout-overlay");
 const timeline = byId<HTMLInputElement>("timeline-input");
 const playButton = byId<HTMLButtonElement>("play-button");
 const statusLine = byId<HTMLElement>("status-line");
@@ -543,6 +552,8 @@ function clearLayerRuntimes(): void {
   auxiliaryPositions.clear();
   auxiliarySizes.clear();
   auxiliarySignature = "";
+  dockRoot = { kind: "pane", key: "scene" };
+  dockDropTarget = undefined;
   plotFieldPicker = undefined;
 }
 
@@ -872,7 +883,7 @@ function plotFieldPickerMarkup(topic: TopicSummary): string {
   if (plotFieldPicker.status === "loading") return '<section class="plot-field-picker" data-plot-picker><p class="plot-field-empty">Reading the current message schema…</p></section>';
   if (plotFieldPicker.status === "error") return `<section class="plot-field-picker" data-plot-picker><p class="plot-field-error">${escapeHtml(plotFieldPicker.error ?? "Numeric fields could not be decoded.")}</p></section>`;
   return `<section class="plot-field-picker" data-plot-picker>
-    <header><strong>PLOT FIELDS</strong><button type="button" data-close-plot-picker aria-label="Close plot field picker">${icon("close")}</button></header>
+    <header><strong>${plotFieldPicker.targetPlotGroupId ? "ADD SERIES TO PLOT" : "NEW PLOT"}</strong><button type="button" data-close-plot-picker aria-label="Close plot field picker">${icon("close")}</button></header>
     <label><span class="sr-only">Filter numeric fields</span><input type="search" data-plot-field-filter placeholder="orientation, velocity, covariance…" autocomplete="off" /></label>
     <div class="plot-field-list">${plotFieldRows(plotFieldPicker.fields)}</div>
   </section>`;
@@ -940,30 +951,39 @@ function renderInspector(): void {
 
 function numericPlotSeries(anchor: ViewerLayer): readonly ViewerLayer[] {
   if (anchor.kind !== "numeric-plot") return [];
-  return layers.visibleLayers.filter((candidate) => candidate.kind === "numeric-plot" && candidate.topic.id === anchor.topic.id);
+  return layers.visibleLayers.filter((candidate) => candidate.kind === "numeric-plot" && candidate.plotGroupId === anchor.plotGroupId);
+}
+
+function auxiliaryViewKey(layer: ViewerLayer): string {
+  return layer.kind === "numeric-plot" ? `plot:${layer.plotGroupId ?? layer.id}` : `layer:${layer.id}`;
 }
 
 function orderedAuxiliaryLayers(): readonly ViewerLayer[] {
-  const seenPlotTopics = new Set<string>();
-  const visible = layers.visibleLayers.filter(({ kind, topic }) => {
+  const seenPlotGroups = new Set<string>();
+  const visible = layers.visibleLayers.filter((layer) => {
+    const { kind } = layer;
     if (kind === "numeric-plot") {
-      if (seenPlotTopics.has(topic.id)) return false;
-      seenPlotTopics.add(topic.id);
+      const group = layer.plotGroupId ?? layer.id;
+      if (seenPlotGroups.has(group)) return false;
+      seenPlotGroups.add(group);
       return true;
     }
     return kind === "image" || kind === "raw" || kind === "raw-inspector" || kind === "camera-info";
   });
-  const visibleIds = new Set(visible.map(({ id }) => id));
-  auxiliaryOrder = auxiliaryOrder.filter((id) => visibleIds.has(id));
-  for (const layer of visible) if (!auxiliaryOrder.includes(layer.id)) auxiliaryOrder.push(layer.id);
-  const byIdMap = new Map(visible.map((layer) => [layer.id, layer]));
-  return auxiliaryOrder.flatMap((id) => byIdMap.get(id) ? [byIdMap.get(id)!] : []);
+  const visibleKeys = new Set(visible.map(auxiliaryViewKey));
+  auxiliaryOrder = auxiliaryOrder.filter((key) => visibleKeys.has(key));
+  for (const layer of visible) {
+    const key = auxiliaryViewKey(layer);
+    if (!auxiliaryOrder.includes(key)) auxiliaryOrder.push(key);
+  }
+  const byKey = new Map(visible.map((layer) => [auxiliaryViewKey(layer), layer]));
+  return auxiliaryOrder.flatMap((key) => byKey.get(key) ? [byKey.get(key)!] : []);
 }
 
 function auxiliaryStructureSignature(auxiliary: readonly ViewerLayer[]): string {
   return auxiliary.map((layer) => layer.kind === "numeric-plot"
-    ? `${layer.id}:${layer.kind}:${numericPlotSeries(layer).map((series) => `${series.id}:${series.fieldPath ?? "data"}`).join(",")}`
-    : `${layer.id}:${layer.kind}`).join("|");
+    ? `${auxiliaryViewKey(layer)}:${layer.kind}:${numericPlotSeries(layer).map((series) => `${series.id}:${series.fieldPath ?? "data"}`).join(",")}`
+    : `${auxiliaryViewKey(layer)}:${layer.kind}`).join("|");
 }
 
 function auxiliaryPosition(layerId: string, index: number, element: HTMLElement): { x: number; y: number } {
@@ -977,41 +997,131 @@ function auxiliaryPosition(layerId: string, index: number, element: HTMLElement)
   return next;
 }
 
+function pruneDockNode(node: DockNode, validKeys: ReadonlySet<string>): DockNode | undefined {
+  if (node.kind === "pane") return node.key === "scene" || validKeys.has(node.key) ? node : undefined;
+  const first = pruneDockNode(node.first, validKeys);
+  const second = pruneDockNode(node.second, validKeys);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, first, second };
+}
+
+function removeDockPane(node: DockNode, key: string): DockNode | undefined {
+  if (node.kind === "pane") return node.key === key ? undefined : node;
+  const first = removeDockPane(node.first, key);
+  const second = removeDockPane(node.second, key);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, first, second };
+}
+
+function replaceDockPane(node: DockNode, targetKey: string, replacement: DockNode): DockNode {
+  if (node.kind === "pane") return node.key === targetKey ? replacement : node;
+  return { ...node, first: replaceDockPane(node.first, targetKey, replacement), second: replaceDockPane(node.second, targetKey, replacement) };
+}
+
+function dockView(viewKey: string, targetKey: string, edge: DockEdge): void {
+  if (viewKey === targetKey) return;
+  const withoutView = removeDockPane(dockRoot, viewKey) ?? { kind: "pane", key: "scene" };
+  const view: DockNode = { kind: "pane", key: viewKey };
+  const target: DockNode = { kind: "pane", key: targetKey };
+  const before = edge === "left" || edge === "top";
+  const split: DockNode = {
+    kind: "split",
+    id: `dock-split-${nextDockSplitId++}`,
+    axis: edge === "left" || edge === "right" ? "x" : "y",
+    ratio: 0.5,
+    first: before ? view : target,
+    second: before ? target : view,
+  };
+  dockRoot = replaceDockPane(withoutView, targetKey, split);
+}
+
+function setDockSplitRatio(node: DockNode, splitId: string, ratio: number): DockNode {
+  if (node.kind === "pane") return node;
+  if (node.id === splitId) return { ...node, ratio: Math.max(0.15, Math.min(0.85, ratio)) };
+  return { ...node, first: setDockSplitRatio(node.first, splitId, ratio), second: setDockSplitRatio(node.second, splitId, ratio) };
+}
+
+function dockSplitRatio(node: DockNode, splitId: string): number | undefined {
+  if (node.kind === "pane") return undefined;
+  if (node.id === splitId) return node.ratio;
+  return dockSplitRatio(node.first, splitId) ?? dockSplitRatio(node.second, splitId);
+}
+
+function calculateDockLayout(node: DockNode, rect: DockRect): void {
+  if (node.kind === "pane") {
+    dockPaneRects.set(node.key, rect);
+    return;
+  }
+  const divider = 5;
+  dockSplitParents.set(node.id, { axis: node.axis, length: node.axis === "x" ? rect.width : rect.height });
+  if (node.axis === "x") {
+    const firstWidth = Math.max(1, Math.round((rect.width - divider) * node.ratio));
+    calculateDockLayout(node.first, { ...rect, width: firstWidth });
+    calculateDockLayout(node.second, { x: rect.x + firstWidth + divider, y: rect.y, width: Math.max(1, rect.width - firstWidth - divider), height: rect.height });
+    dockSplitRects.set(node.id, { x: rect.x + firstWidth, y: rect.y, width: divider, height: rect.height, axis: "x" });
+    return;
+  }
+  const firstHeight = Math.max(1, Math.round((rect.height - divider) * node.ratio));
+  calculateDockLayout(node.first, { ...rect, height: firstHeight });
+  calculateDockLayout(node.second, { x: rect.x, y: rect.y + firstHeight + divider, width: rect.width, height: Math.max(1, rect.height - firstHeight - divider) });
+  dockSplitRects.set(node.id, { x: rect.x, y: rect.y + firstHeight, width: rect.width, height: divider, axis: "y" });
+}
+
+function dockOverlayMarkup(): string {
+  const splitters = [...dockSplitRects].map(([id, rect]) => `<span class="dock-splitter" data-dock-split="${id}" data-axis="${rect.axis}" role="separator" aria-orientation="${rect.axis === "x" ? "vertical" : "horizontal"}" aria-label="Resize docked panes" tabindex="0" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></span>`).join("");
+  const indicator = dockDropTarget ? `<span class="dock-drop-indicator" style="left:${dockDropTarget.rect.x}px;top:${dockDropTarget.rect.y}px;width:${dockDropTarget.rect.width}px;height:${dockDropTarget.rect.height}px"></span>` : "";
+  return `${splitters}${indicator}`;
+}
+
 function layoutAuxiliaryWindows(): void {
-  const splitBasis = auxiliaryLayout === "split-right" ? scenePanel.clientWidth : scenePanel.clientHeight;
-  scenePanel.style.setProperty("--aux-split", `${Math.round(splitBasis * auxiliarySplitRatio)}px`);
-  const windows = [...auxDock.querySelectorAll<HTMLElement>("[data-aux-layer]")];
+  const auxiliary = orderedAuxiliaryLayers();
+  const validKeys = new Set(auxiliary.map(auxiliaryViewKey));
+  dockRoot = pruneDockNode(dockRoot, validKeys) ?? { kind: "pane", key: "scene" };
+  const docked = dockRoot.kind !== "pane";
+  const workspace = docked
+    ? { x: 0, y: 38, width: scenePanel.clientWidth, height: Math.max(1, scenePanel.clientHeight - 60) }
+    : { x: 0, y: 0, width: scenePanel.clientWidth, height: scenePanel.clientHeight };
+  dockPaneRects = new Map();
+  dockSplitRects = new Map();
+  dockSplitParents = new Map();
+  calculateDockLayout(dockRoot, workspace);
+  const sceneRect = dockPaneRects.get("scene") ?? workspace;
+  canvas.style.left = `${sceneRect.x}px`;
+  canvas.style.top = `${sceneRect.y}px`;
+  canvas.style.width = `${sceneRect.width}px`;
+  canvas.style.height = `${sceneRect.height}px`;
+  const windows = [...auxDock.querySelectorAll<HTMLElement>("[data-aux-key]")];
   windows.forEach((element, index) => {
-    const id = element.dataset.auxLayer;
-    if (!id) return;
-    const measured = auxiliarySizes.get(id) ?? { width: element.offsetWidth, height: element.offsetHeight };
-    auxiliarySizes.set(id, measured);
-    if (auxiliaryLayout !== "overlay") {
-      element.style.removeProperty("transform");
-      if (auxiliaryLayout === "split-right") {
-        element.style.width = "100%";
-        element.style.height = `${Math.max(140, measured.height)}px`;
-      } else {
-        element.style.width = `${Math.max(220, measured.width)}px`;
-        element.style.height = "100%";
-      }
+    const key = element.dataset.auxKey;
+    if (!key) return;
+    const measured = auxiliarySizes.get(key) ?? { width: element.offsetWidth, height: element.offsetHeight };
+    auxiliarySizes.set(key, measured);
+    const dockRect = dockPaneRects.get(key);
+    element.classList.toggle("is-docked", Boolean(dockRect));
+    if (dockRect) {
+      element.style.width = `${dockRect.width}px`;
+      element.style.height = `${dockRect.height}px`;
+      element.style.transform = `translate3d(${dockRect.x}px, ${dockRect.y}px, 0)`;
       return;
     }
     element.style.width = `${Math.max(220, measured.width)}px`;
     element.style.height = `${Math.max(120, measured.height)}px`;
-    const { x, y } = auxiliaryPosition(id, index, element);
+    const { x, y } = auxiliaryPosition(key, index, element);
     element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   });
+  dockLayoutOverlay.innerHTML = dockOverlayMarkup();
 }
 
 function auxiliaryMarkup(layer: ViewerLayer): string {
-  const common = `data-aux-layer="${layer.id}"`;
+  const common = `data-aux-key="${escapeHtml(auxiliaryViewKey(layer))}" data-aux-layer="${layer.id}"`;
   const resize = '<span class="aux-resize-handle" data-aux-resize aria-hidden="true"></span>';
   if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
   if (layer.kind === "numeric-plot") {
     const series = numericPlotSeries(layer);
-    const legend = series.map((item) => `<span data-plot-series="${item.id}" title="${escapeHtml(item.fieldPath ?? "data")}"><i style="background:${layerColor(item)}"></i>${escapeHtml(item.fieldPath ?? "data")}</span>`).join("");
-    return `<section class="aux-window plot-window" ${common} data-series-count="${series.length}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>${series.length} SERIES</span><button type="button" data-clear-plot title="Clear plot history">CLEAR</button></header><div class="plot-series-legend">${legend}</div><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
+    const legend = series.map((item) => `<span data-plot-series="${item.id}" title="${escapeHtml(item.fieldPath ?? "data")}"><i style="background:${layerColor(item)}"></i><b>${escapeHtml(item.fieldPath ?? "data")}</b><output data-plot-series-value="${item.id}">—</output></span>`).join("");
+    return `<section class="aux-window plot-window" ${common} data-series-count="${series.length}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>${series.length} SERIES</span><button type="button" data-add-plot-series title="Add another field to this graph">+ FIELD</button><button type="button" data-clear-plot title="Clear plot history">CLEAR</button></header><div class="plot-series-legend">${legend}</div><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
   }
   if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl>${resize}</section>`;
   return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre>${resize}</section>`;
@@ -1020,19 +1130,22 @@ function auxiliaryMarkup(layer: ViewerLayer): string {
 function renderAuxiliary(): void {
   const auxiliary = orderedAuxiliaryLayers();
   const signature = auxiliaryStructureSignature(auxiliary);
-  scenePanel.dataset.auxLayout = auxiliaryLayout;
   if (signature !== auxiliarySignature) {
     auxiliarySignature = signature;
     auxDock.innerHTML = auxiliary.map(auxiliaryMarkup).join("");
   }
   for (const layer of auxiliary) {
-    const windowElement = auxDock.querySelector<HTMLElement>(`[data-aux-layer="${layer.id}"]`);
+    const windowElement = auxDock.querySelector<HTMLElement>(`[data-aux-key="${auxiliaryViewKey(layer)}"]`);
     if (!windowElement) continue;
     const runtimeState = layerRuntime.get(layer.id);
     const plotSeries = layer.kind === "numeric-plot" ? numericPlotSeries(layer) : [];
     if (layer.kind === "numeric-plot") {
       windowElement.dataset.sampleCount = String(Math.max(0, ...plotSeries.map((series) => layerRuntime.get(series.id)?.numericHistory?.length ?? 0)));
       windowElement.dataset.seriesCount = String(plotSeries.length);
+      for (const series of plotSeries) {
+        const value = windowElement.querySelector<HTMLOutputElement>(`[data-plot-series-value="${series.id}"]`);
+        if (value) value.textContent = layerRuntime.get(series.id)?.numericHistory?.at(-1)?.value.toPrecision(5) ?? "—";
+      }
     }
     const status = windowElement.querySelector<HTMLElement>("[data-aux-status]");
     if (status) status.textContent = layer.kind === "image" && runtimeState?.raster
@@ -1078,7 +1191,7 @@ function resizeCanvasBackingStore(target: HTMLCanvasElement, scale: number): voi
 function paintAuxiliaryCanvases(): void {
   for (const layer of orderedAuxiliaryLayers()) {
     if (layer.kind !== "numeric-plot" && layer.kind !== "image") continue;
-    const target = auxDock.querySelector<HTMLCanvasElement>(`[data-aux-layer="${layer.id}"] canvas`);
+    const target = auxDock.querySelector<HTMLCanvasElement>(`[data-aux-key="${auxiliaryViewKey(layer)}"] canvas`);
     if (!target) continue;
     const scale = Math.min(window.devicePixelRatio || 1, 2);
     resizeCanvasBackingStore(target, scale);
@@ -1443,13 +1556,13 @@ async function sampleForTopic(topic: TopicSummary): Promise<BrowserSample> {
   return runtime.messageAt(topic.name, controller.state.currentTimeNanos);
 }
 
-async function openPlotFieldPicker(topic: TopicSummary): Promise<void> {
-  if (plotFieldPicker?.topicId === topic.id) {
+async function openPlotFieldPicker(topic: TopicSummary, targetPlotGroupId?: string): Promise<void> {
+  if (plotFieldPicker?.topicId === topic.id && plotFieldPicker.targetPlotGroupId === targetPlotGroupId) {
     plotFieldPicker = undefined;
     renderTopics();
     return;
   }
-  plotFieldPicker = { topicId: topic.id, fields: [], status: "loading" };
+  plotFieldPicker = { topicId: topic.id, ...(targetPlotGroupId ? { targetPlotGroupId } : {}), fields: [], status: "loading" };
   renderTopics();
   try {
     const sample = await sampleForTopic(topic);
@@ -1461,16 +1574,16 @@ async function openPlotFieldPicker(topic: TopicSummary): Promise<void> {
       fields = collectNumericFields((await plotFieldDecoder.semantic(sample)).message);
     }
     if (plotFieldPicker?.topicId !== topic.id) return;
-    plotFieldPicker = { topicId: topic.id, fields, status: "ready" };
+    plotFieldPicker = { topicId: topic.id, ...(targetPlotGroupId ? { targetPlotGroupId } : {}), fields, status: "ready" };
   } catch (error) {
     if (plotFieldPicker?.topicId !== topic.id) return;
-    plotFieldPicker = { topicId: topic.id, fields: [], status: "error", error: error instanceof Error ? error.message : String(error) };
+    plotFieldPicker = { topicId: topic.id, ...(targetPlotGroupId ? { targetPlotGroupId } : {}), fields: [], status: "error", error: error instanceof Error ? error.message : String(error) };
   }
   renderTopics();
 }
 
-function addLayer(topic: TopicSummary, kind: DisplayKind, fieldPath?: string): ViewerLayer {
-  const layer = layers.add(topic, kind, fieldPath);
+function addLayer(topic: TopicSummary, kind: DisplayKind, fieldPath?: string, plotGroupId?: string): ViewerLayer {
+  const layer = layers.add(topic, kind, fieldPath, kind === "numeric-plot" ? plotGroupId ?? layers.createPlotGroupId() : undefined);
   ensureLayerDisplay(layer);
   renderChrome();
   let initialRender = Promise.resolve();
@@ -1592,9 +1705,9 @@ function startPlayback(): void {
   animationFrame = requestAnimationFrame((timestamp) => void tick(timestamp));
 }
 
-function clearNumericPlotHistories(topicId?: string): void {
+function clearNumericPlotHistories(plotGroupId?: string): void {
   for (const layer of layers.layers) {
-    if (layer.kind !== "numeric-plot" || (topicId && layer.topic.id !== topicId)) continue;
+    if (layer.kind !== "numeric-plot" || (plotGroupId && layer.plotGroupId !== plotGroupId)) continue;
     const runtimeState = layerRuntime.get(layer.id);
     if (runtimeState) runtimeState.numericHistory = [];
   }
@@ -1796,7 +1909,7 @@ topicList.addEventListener("click", (event) => {
   if (fieldButton && plotFieldPicker) {
     const topic = controller.state.topics.find(({ id }) => id === plotFieldPicker?.topicId);
     const fieldPath = fieldButton.dataset.addPlotField;
-    if (topic && fieldPath) addLayer(topic, "numeric-plot", fieldPath);
+    if (topic && fieldPath) addLayer(topic, "numeric-plot", fieldPath, plotFieldPicker.targetPlotGroupId);
     return;
   }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-topic][data-kind]");
@@ -1819,7 +1932,14 @@ auxDock.addEventListener("click", (event) => {
   const clearWindow = clearButton?.closest<HTMLElement>("[data-aux-layer]");
   const clearAnchor = layers.layers.find(({ id }) => id === clearWindow?.dataset.auxLayer);
   if (clearButton && clearAnchor?.kind === "numeric-plot") {
-    clearNumericPlotHistories(clearAnchor.topic.id);
+    clearNumericPlotHistories(clearAnchor.plotGroupId);
+    return;
+  }
+  const addSeriesButton = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-add-plot-series]");
+  const addSeriesWindow = addSeriesButton?.closest<HTMLElement>("[data-aux-layer]");
+  const addSeriesAnchor = layers.layers.find(({ id }) => id === addSeriesWindow?.dataset.auxLayer);
+  if (addSeriesButton && addSeriesAnchor?.kind === "numeric-plot" && addSeriesAnchor.plotGroupId) {
+    void openPlotFieldPicker(addSeriesAnchor.topic, addSeriesAnchor.plotGroupId);
     return;
   }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-plot-field]");
@@ -1832,7 +1952,7 @@ auxDock.addEventListener("click", (event) => {
 
 let auxiliaryResize: {
   readonly element: HTMLElement;
-  readonly id: string;
+  readonly key: string;
   readonly pointerId: number;
   readonly startX: number;
   readonly startY: number;
@@ -1842,12 +1962,12 @@ let auxiliaryResize: {
 
 auxDock.addEventListener("pointerdown", (event) => {
   const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-resize]");
-  const element = handle?.closest<HTMLElement>("[data-aux-layer]");
-  const id = element?.dataset.auxLayer;
-  if (!handle || !element || !id || event.button !== 0) return;
+  const element = handle?.closest<HTMLElement>("[data-aux-key]");
+  const key = element?.dataset.auxKey;
+  if (!handle || !element || !key || event.button !== 0 || element.classList.contains("is-docked")) return;
   const size = { width: element.offsetWidth, height: element.offsetHeight };
-  auxiliarySizes.set(id, size);
-  auxiliaryResize = { element, id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, ...size };
+  auxiliarySizes.set(key, size);
+  auxiliaryResize = { element, key, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, ...size };
   try { handle.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
   element.classList.add("is-resizing");
   event.preventDefault();
@@ -1856,14 +1976,12 @@ auxDock.addEventListener("pointerdown", (event) => {
 
 auxDock.addEventListener("pointermove", (event) => {
   if (!auxiliaryResize || auxiliaryResize.pointerId !== event.pointerId) return;
-  const position = auxiliaryPositions.get(auxiliaryResize.id) ?? { x: 0, y: 38 };
-  const maxWidth = auxiliaryLayout === "overlay" ? scenePanel.clientWidth - position.x : scenePanel.clientWidth;
-  const maxHeight = auxiliaryLayout === "overlay" ? scenePanel.clientHeight - position.y - 22 : scenePanel.clientHeight;
-  const width = auxiliaryLayout === "split-right" ? auxiliaryResize.width : Math.min(maxWidth, Math.max(220, auxiliaryResize.width + event.clientX - auxiliaryResize.startX));
-  const height = auxiliaryLayout === "split-bottom" ? auxiliaryResize.height : Math.min(maxHeight, Math.max(120, auxiliaryResize.height + event.clientY - auxiliaryResize.startY));
-  auxiliarySizes.set(auxiliaryResize.id, { width, height });
-  if (auxiliaryLayout !== "split-right") auxiliaryResize.element.style.width = `${width}px`;
-  if (auxiliaryLayout !== "split-bottom") auxiliaryResize.element.style.height = `${height}px`;
+  const position = auxiliaryPositions.get(auxiliaryResize.key) ?? { x: 0, y: 38 };
+  const width = Math.min(scenePanel.clientWidth - position.x, Math.max(220, auxiliaryResize.width + event.clientX - auxiliaryResize.startX));
+  const height = Math.min(scenePanel.clientHeight - position.y - 22, Math.max(120, auxiliaryResize.height + event.clientY - auxiliaryResize.startY));
+  auxiliarySizes.set(auxiliaryResize.key, { width, height });
+  auxiliaryResize.element.style.width = `${width}px`;
+  auxiliaryResize.element.style.height = `${height}px`;
   drawScene();
 });
 
@@ -1877,24 +1995,51 @@ auxDock.addEventListener("pointercancel", finishAuxiliaryResize);
 
 let auxiliaryDrag: {
   readonly element: HTMLElement;
-  readonly id: string;
+  readonly key: string;
   readonly offsetX: number;
   readonly offsetY: number;
   readonly pointerId: number;
 } | undefined;
 
+function dockTargetAt(clientX: number, clientY: number, excludedKey: string): typeof dockDropTarget {
+  const panel = scenePanel.getBoundingClientRect();
+  const x = clientX - panel.left;
+  const y = clientY - panel.top;
+  for (const [paneKey, rect] of dockPaneRects) {
+    if (paneKey === excludedKey || x < rect.x || x > rect.x + rect.width || y < rect.y || y > rect.y + rect.height) continue;
+    const distances = [
+      ["left", x - rect.x], ["right", rect.x + rect.width - x],
+      ["top", y - rect.y], ["bottom", rect.y + rect.height - y],
+    ] as const;
+    const [edge, edgeDistance] = [...distances].sort((left, right) => left[1] - right[1])[0]!;
+    const edgeSpan = edge === "left" || edge === "right" ? rect.width : rect.height;
+    if (edgeDistance > Math.min(64, edgeSpan * 0.18)) return undefined;
+    const targetRect: DockRect = edge === "left" ? { ...rect, width: rect.width / 2 }
+      : edge === "right" ? { x: rect.x + rect.width / 2, y: rect.y, width: rect.width / 2, height: rect.height }
+        : edge === "top" ? { ...rect, height: rect.height / 2 }
+          : { x: rect.x, y: rect.y + rect.height / 2, width: rect.width, height: rect.height / 2 };
+    return { paneKey, edge, rect: targetRect };
+  }
+  return undefined;
+}
+
 auxDock.addEventListener("pointerdown", (event) => {
   const header = (event.target as HTMLElement).closest<HTMLElement>(".aux-window > header");
-  const element = header?.closest<HTMLElement>("[data-aux-layer]");
-  const id = element?.dataset.auxLayer;
-  if (!header || !element || !id || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
-  if (auxiliaryLayout === "overlay") {
-    auxiliaryOrder = [...auxiliaryOrder.filter((candidate) => candidate !== id), id];
-    auxDock.append(element);
-    auxiliarySignature = auxiliaryStructureSignature(orderedAuxiliaryLayers());
+  const element = header?.closest<HTMLElement>("[data-aux-key]");
+  const key = element?.dataset.auxKey;
+  if (!header || !element || !key || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+  const panel = scenePanel.getBoundingClientRect();
+  const dockRect = dockPaneRects.get(key);
+  if (dockRect) {
+    dockRoot = removeDockPane(dockRoot, key) ?? { kind: "pane", key: "scene" };
+    auxiliaryPositions.set(key, { x: dockRect.x, y: dockRect.y });
+    auxiliarySizes.set(key, { width: dockRect.width, height: dockRect.height });
+    layoutAuxiliaryWindows();
   }
-  const position = auxiliaryPosition(id, orderedAuxiliaryLayers().findIndex((layer) => layer.id === id), element);
-  auxiliaryDrag = { element, id, offsetX: event.clientX - position.x, offsetY: event.clientY - position.y, pointerId: event.pointerId };
+  auxiliaryOrder = [...auxiliaryOrder.filter((candidate) => candidate !== key), key];
+  auxDock.append(element);
+  const position = auxiliaryPosition(key, orderedAuxiliaryLayers().findIndex((layer) => auxiliaryViewKey(layer) === key), element);
+  auxiliaryDrag = { element, key, offsetX: event.clientX - panel.left - position.x, offsetY: event.clientY - panel.top - position.y, pointerId: event.pointerId };
   try { header.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
   element.classList.add("is-dragging");
   event.preventDefault();
@@ -1902,29 +2047,23 @@ auxDock.addEventListener("pointerdown", (event) => {
 
 auxDock.addEventListener("pointermove", (event) => {
   if (!auxiliaryDrag || auxiliaryDrag.pointerId !== event.pointerId) return;
-  if (auxiliaryLayout === "overlay") {
-    const x = Math.max(0, Math.min(event.clientX - auxiliaryDrag.offsetX, scenePanel.clientWidth - auxiliaryDrag.element.offsetWidth));
-    const y = Math.max(38, Math.min(event.clientY - auxiliaryDrag.offsetY, scenePanel.clientHeight - auxiliaryDrag.element.offsetHeight - 22));
-    auxiliaryPositions.set(auxiliaryDrag.id, { x, y });
-    auxiliaryDrag.element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    return;
-  }
-  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-aux-layer]");
-  const targetId = target?.dataset.auxLayer;
-  if (!target || !targetId || targetId === auxiliaryDrag.id) return;
-  const targetRect = target.getBoundingClientRect();
-  const after = auxiliaryLayout === "split-right" ? event.clientY > targetRect.top + targetRect.height / 2 : event.clientX > targetRect.left + targetRect.width / 2;
-  auxiliaryOrder = auxiliaryOrder.filter((id) => id !== auxiliaryDrag!.id);
-  const targetIndex = auxiliaryOrder.indexOf(targetId) + (after ? 1 : 0);
-  auxiliaryOrder.splice(Math.max(0, targetIndex), 0, auxiliaryDrag.id);
-  auxDock.insertBefore(auxiliaryDrag.element, after ? target.nextSibling : target);
-  auxiliarySignature = auxiliaryStructureSignature(orderedAuxiliaryLayers());
+  const panel = scenePanel.getBoundingClientRect();
+  const x = Math.max(0, Math.min(event.clientX - panel.left - auxiliaryDrag.offsetX, scenePanel.clientWidth - auxiliaryDrag.element.offsetWidth));
+  const y = Math.max(38, Math.min(event.clientY - panel.top - auxiliaryDrag.offsetY, scenePanel.clientHeight - auxiliaryDrag.element.offsetHeight - 22));
+  auxiliaryPositions.set(auxiliaryDrag.key, { x, y });
+  auxiliaryDrag.element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  dockDropTarget = dockTargetAt(event.clientX, event.clientY, auxiliaryDrag.key);
+  dockLayoutOverlay.innerHTML = dockOverlayMarkup();
 });
 
 const finishAuxiliaryDrag = (event: PointerEvent): void => {
   if (!auxiliaryDrag || auxiliaryDrag.pointerId !== event.pointerId) return;
+  if (dockDropTarget) dockView(auxiliaryDrag.key, dockDropTarget.paneKey, dockDropTarget.edge);
   auxiliaryDrag.element.classList.remove("is-dragging");
+  dockDropTarget = undefined;
   auxiliaryDrag = undefined;
+  layoutAuxiliaryWindows();
+  drawScene();
 };
 auxDock.addEventListener("pointerup", finishAuxiliaryDrag);
 auxDock.addEventListener("pointercancel", finishAuxiliaryDrag);
@@ -2113,41 +2252,52 @@ byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
   drawScene();
 });
 
-byId<HTMLSelectElement>("aux-layout").addEventListener("change", (event) => {
-  auxiliaryLayout = (event.currentTarget as HTMLSelectElement).value as AuxiliaryLayout;
+byId<HTMLButtonElement>("reset-window-layout").addEventListener("click", () => {
+  dockRoot = { kind: "pane", key: "scene" };
+  dockDropTarget = undefined;
   renderAuxiliary();
   drawScene();
 });
 
-const workspaceSplitter = byId<HTMLElement>("workspace-splitter");
-let splitPointerId: number | undefined;
-workspaceSplitter.addEventListener("pointerdown", (event) => {
-  if (auxiliaryLayout === "overlay" || event.button !== 0) return;
-  splitPointerId = event.pointerId;
-  try { workspaceSplitter.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
-  workspaceSplitter.classList.add("is-dragging");
+let dockSplitterDrag: {
+  readonly id: string;
+  readonly axis: "x" | "y";
+  readonly pointerId: number;
+  readonly startClient: number;
+  readonly startRatio: number;
+  readonly length: number;
+} | undefined;
+dockLayoutOverlay.addEventListener("pointerdown", (event) => {
+  const splitter = (event.target as HTMLElement).closest<HTMLElement>("[data-dock-split]");
+  const id = splitter?.dataset.dockSplit;
+  const parent = id ? dockSplitParents.get(id) : undefined;
+  const ratio = id ? dockSplitRatio(dockRoot, id) : undefined;
+  if (!splitter || !id || !parent || ratio === undefined || event.button !== 0) return;
+  dockSplitterDrag = { id, axis: parent.axis, pointerId: event.pointerId, startClient: parent.axis === "x" ? event.clientX : event.clientY, startRatio: ratio, length: parent.length };
+  try { dockLayoutOverlay.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
   event.preventDefault();
 });
-workspaceSplitter.addEventListener("pointermove", (event) => {
-  if (splitPointerId !== event.pointerId || auxiliaryLayout === "overlay") return;
-  const bounds = scenePanel.getBoundingClientRect();
-  auxiliarySplitRatio = auxiliaryLayout === "split-right"
-    ? (bounds.right - event.clientX) / bounds.width
-    : (bounds.bottom - event.clientY) / bounds.height;
-  auxiliarySplitRatio = Math.max(0.2, Math.min(0.75, auxiliarySplitRatio));
+dockLayoutOverlay.addEventListener("pointermove", (event) => {
+  if (!dockSplitterDrag || dockSplitterDrag.pointerId !== event.pointerId) return;
+  const current = dockSplitterDrag.axis === "x" ? event.clientX : event.clientY;
+  dockRoot = setDockSplitRatio(dockRoot, dockSplitterDrag.id, dockSplitterDrag.startRatio + (current - dockSplitterDrag.startClient) / dockSplitterDrag.length);
   drawScene();
 });
-const finishSplit = (event: PointerEvent): void => {
-  if (splitPointerId !== event.pointerId) return;
-  splitPointerId = undefined;
-  workspaceSplitter.classList.remove("is-dragging");
+const finishDockSplitterDrag = (event: PointerEvent): void => {
+  if (dockSplitterDrag?.pointerId === event.pointerId) dockSplitterDrag = undefined;
 };
-workspaceSplitter.addEventListener("pointerup", finishSplit);
-workspaceSplitter.addEventListener("pointercancel", finishSplit);
-workspaceSplitter.addEventListener("keydown", (event) => {
-  if (auxiliaryLayout === "overlay" || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-  const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? 1 : -1;
-  auxiliarySplitRatio = Math.max(0.2, Math.min(0.75, auxiliarySplitRatio + direction * 0.02));
+dockLayoutOverlay.addEventListener("pointerup", finishDockSplitterDrag);
+dockLayoutOverlay.addEventListener("pointercancel", finishDockSplitterDrag);
+dockLayoutOverlay.addEventListener("keydown", (event) => {
+  const splitter = (event.target as HTMLElement).closest<HTMLElement>("[data-dock-split]");
+  const id = splitter?.dataset.dockSplit;
+  const axis = splitter?.dataset.axis;
+  const relevant = axis === "x" ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
+  if (!id || !relevant.includes(event.key)) return;
+  const ratio = dockSplitRatio(dockRoot, id);
+  if (ratio === undefined) return;
+  const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+  dockRoot = setDockSplitRatio(dockRoot, id, ratio + direction * 0.02);
   event.preventDefault();
   drawScene();
 });

@@ -42,6 +42,20 @@ describe("viewer layer registry", () => {
     expect(registry.layers.map(({ fieldPath }) => fieldPath)).toEqual(["score", "residuals[0]"]);
   });
 
+  it("keeps explicit numeric plot groups separate while allowing multiple series in one group", () => {
+    const registry = new ViewerLayerRegistry();
+    const combined = registry.createPlotGroupId();
+    const separate = registry.createPlotGroupId();
+    const score = registry.add(points, "numeric-plot", "score", combined);
+    const residual = registry.add(points, "numeric-plot", "residuals[0]", combined);
+    const separateScore = registry.add(points, "numeric-plot", "score", separate);
+
+    expect(score.plotGroupId).toBe(combined);
+    expect(residual.plotGroupId).toBe(combined);
+    expect(separateScore.plotGroupId).toBe(separate);
+    expect(separateScore.id).not.toBe(score.id);
+  });
+
   it("stores an explicit per-display color without changing scene membership", () => {
     const registry = new ViewerLayerRegistry();
     const layer = registry.add(points, "point-cloud");
