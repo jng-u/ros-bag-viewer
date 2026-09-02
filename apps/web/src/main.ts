@@ -33,7 +33,6 @@ import { normalizeBrowserSample } from "./browser-envelope.js";
 import { BrowserRecordingWorker } from "./browser-recording-worker.js";
 import { collectNumericFields, numericValueAtPath, type GenericRosDecodeResult } from "./generic-ros-decoder.js";
 import { HistoricalFrameResolver, IDENTITY_TRANSFORM, transformBounds, type FrameTransformResolver } from "./frame-resolver.js";
-import { formatRawPreview, type RawPreview } from "./raw-preview.js";
 import { OrbitCamera, type CameraPreset } from "./scene-camera.js";
 import { poseSourceFrame } from "./pose-source-frame.js";
 import { DesktopShellController, type DisplayKind, type TopicSummary } from "./shell.js";
@@ -43,7 +42,7 @@ import "./style.css";
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing");
 
-const icon = (name: "close" | "down" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus" | "up") => {
+const icon = (name: "close" | "drag" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus") => {
   const paths = {
     close: '<path d="m6 6 8 8m0-8-8 8"/>',
     eye: '<path d="M2 10s3.2-5 8-5 8 5 8 5-3.2 5-8 5-8-5-8-5Z"/><circle cx="10" cy="10" r="2.2"/>',
@@ -53,8 +52,7 @@ const icon = (name: "close" | "down" | "eye" | "fit" | "folder" | "minus" | "pau
     pause: '<path d="M6.5 5v10m7-10v10"/>',
     play: '<path d="m7 5 7 5-7 5Z"/>',
     plus: '<path d="M10 5v10m-5-5h10"/>',
-    up: '<path d="m6 12 4-4 4 4"/>',
-    down: '<path d="m6 8 4 4 4-4"/>',
+    drag: '<path d="M7 6h6M7 10h6M7 14h6"/>',
   } as const;
   return `<svg viewBox="0 0 20 20" aria-hidden="true">${paths[name]}</svg>`;
 };
@@ -95,7 +93,7 @@ app.innerHTML = `
         <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
         <label class="aux-layout-control">WINDOWS <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">SPLIT RIGHT</option><option value="split-bottom">SPLIT BOTTOM</option></select></label>
       </div>
-      <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span>0 VERTICES</span><span>FULL DATA</span></div>
+      <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span data-scene-stat="vertices">0 VERTICES</span><span data-scene-stat="quality" class="quality-full">FULL DATA</span><span data-scene-stat="gpu">0 B GPU</span></div>
       <div class="drop-prompt" id="drop-prompt">
         <strong>DROP ROS RECORDING</strong>
         <span>MCAP · ROS1 BAG · ROS2 BAG DIRECTORY</span>
@@ -161,7 +159,8 @@ const runtime = new BrowserRecordingWorker();
 const messageDecoder = new BrowserMessageDecoder();
 const liveTfDecoder = new BrowserMessageDecoder();
 const plotHistoryDecoder = new BrowserMessageDecoder();
-window.addEventListener("pagehide", () => { void runtime.close(); messageDecoder.close(); liveTfDecoder.close(); plotHistoryDecoder.close(); }, { once: true });
+const plotFieldDecoder = new BrowserMessageDecoder();
+window.addEventListener("pagehide", () => { void runtime.close(); messageDecoder.close(); liveTfDecoder.close(); plotHistoryDecoder.close(); plotFieldDecoder.close(); }, { once: true });
 const liveSamples = new Map<string, BrowserSample>();
 let liveTfBuffer: TfBuffer | undefined;
 let liveTfEpoch = -1;
@@ -220,6 +219,13 @@ type AuxiliaryLayout = "overlay" | "split-bottom" | "split-right";
 let auxiliaryLayout: AuxiliaryLayout = "overlay";
 let auxiliarySignature = "";
 let auxiliaryOrder: string[] = [];
+const auxiliaryPositions = new Map<string, { x: number; y: number }>();
+let plotFieldPicker: {
+  readonly topicId: string;
+  readonly fields: readonly { readonly path: string; readonly value: number }[];
+  readonly status: "error" | "loading" | "ready";
+  readonly error?: string;
+} | undefined;
 let liveSubscriptionUpdate: Promise<void> = Promise.resolve();
 // Recorded acquisition is already bounded by message count and log-time range. Do not
 // prune that bounded set by header time: bags may use a different header/log clock.
@@ -314,7 +320,6 @@ interface LayerRuntime {
   lifecycle?: BrowserDisplayLifecycle<LayerUpdateContext>;
   attachedEpoch?: number;
   raster?: RasterFrame;
-  raw?: RawPreview;
   rawStructured?: string;
   generic?: GenericRosDecodeResult;
   numericFields?: readonly { readonly path: string; readonly value: number }[];
@@ -352,6 +357,7 @@ let fitQueued = false;
 let playing = false;
 let animationFrame = 0;
 let lastFrameMilliseconds = 0;
+let visualFrameQueued = false;
 
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -450,7 +456,7 @@ function combinedBounds(): Bounds3 | undefined {
   };
 }
 
-function drawScene(): void {
+function paintScene(): void {
   const activeRenderer = ensureRenderer();
   resizeScene();
   if (!gl) return;
@@ -462,10 +468,20 @@ function drawScene(): void {
   for (const layer of layers.visibleLayers) {
     const runtimeState = layerRuntime.get(layer.id);
     if (!isGeometryDisplay(runtimeState?.display)) continue;
-    if (layer.status === "ready") runtimeState.lifecycle?.render();
-    else if (layer.status === "error" && runtimeState.display.telemetry().state === "rendering") runtimeState.display.render();
+    if (runtimeState.display.telemetry().state === "rendering" && (layer.status === "ready" || layer.status === "error")) runtimeState.display.render();
   }
   renderSceneStats();
+}
+
+function drawScene(): void {
+  if (visualFrameQueued) return;
+  visualFrameQueued = true;
+  requestAnimationFrame(() => {
+    visualFrameQueued = false;
+    layoutAuxiliaryWindows();
+    paintScene();
+    paintAuxiliaryCanvases();
+  });
 }
 
 function isGeometryDisplay(display: LayerDisplay | undefined): display is GeometryDisplay {
@@ -484,7 +500,13 @@ function renderSceneStats(): void {
   const rendered = summaries.reduce((total, summary) => total + summary.renderedVertices, 0);
   const dropped = summaries.reduce((total, summary) => total + summary.droppedVertices, 0);
   const gpu = renderer?.telemetry().liveGpuBytes ?? 0;
-  byId("scene-stats").innerHTML = `<span>WEBGL2</span><span>${rendered.toLocaleString()} VERTICES</span><span class="${dropped ? "quality-loss" : "quality-full"}">${dropped ? `${dropped.toLocaleString()} DROPPED` : "FULL DATA"}</span><span>${formatBytes(gpu)} GPU</span>`;
+  const stats = byId("scene-stats");
+  stats.querySelector<HTMLElement>('[data-scene-stat="vertices"]')!.textContent = `${rendered.toLocaleString()} VERTICES`;
+  const quality = stats.querySelector<HTMLElement>('[data-scene-stat="quality"]')!;
+  quality.textContent = dropped ? `${dropped.toLocaleString()} DROPPED` : "FULL DATA";
+  quality.classList.toggle("quality-loss", dropped > 0);
+  quality.classList.toggle("quality-full", dropped === 0);
+  stats.querySelector<HTMLElement>('[data-scene-stat="gpu"]')!.textContent = `${formatBytes(gpu)} GPU`;
 }
 
 function clearLayerRuntimes(): void {
@@ -496,6 +518,10 @@ function clearLayerRuntimes(): void {
   }
   layerRuntime.clear();
   layers.clear();
+  auxiliaryOrder = [];
+  auxiliaryPositions.clear();
+  auxiliarySignature = "";
+  plotFieldPicker = undefined;
 }
 
 function rebuildLayerRuntimes(): void {
@@ -702,7 +728,6 @@ async function updateNormalizedLayer(
   runtimeState.payloadBytes = data.byteLength;
   runtimeState.schemaName = channel.schema.name;
   if (layer.kind === "raw" || layer.kind === "raw-inspector") {
-    runtimeState.raw = formatRawPreview(data);
     runtimeState.generic = undefined;
     runtimeState.numericFields = undefined;
     runtimeState.rawMetadata = `TOPIC ${layer.topic.name}\nTYPE ${channel.schema.name}\nMESSAGE ENCODING ${channel.messageEncoding}\nSCHEMA ${channel.schema.capability.toLocaleUpperCase()}${channel.schema.encoding ? ` · ${channel.schema.encoding}` : ""}\nTIME ${envelope.schedulingTime.valueNanos} ns\nPAYLOAD ${data.byteLength} bytes`;
@@ -826,11 +851,30 @@ async function updateNormalizedLayer(
   layers.update(layer.id, { messageTimeNanos: envelope.schedulingTime.valueNanos, status: "ready", summary, error: undefined });
 }
 
+function plotFieldRows(fields: readonly { readonly path: string; readonly value: number }[], query = ""): string {
+  const needle = query.trim().toLocaleLowerCase();
+  const matching = needle ? fields.filter(({ path }) => path.toLocaleLowerCase().includes(needle)) : fields;
+  if (matching.length === 0) return '<p class="plot-field-empty">No matching finite numeric fields.</p>';
+  const visible = matching.slice(0, 256);
+  return `${visible.map(({ path, value }) => `<button type="button" data-add-plot-field="${escapeHtml(path)}"><span>${escapeHtml(path)}</span><output>${escapeHtml(value.toPrecision(6))}</output>${icon("plus")}</button>`).join("")}${matching.length > visible.length ? `<p class="plot-field-empty">${matching.length - visible.length} more fields — filter by name.</p>` : ""}`;
+}
+
+function plotFieldPickerMarkup(topic: TopicSummary): string {
+  if (plotFieldPicker?.topicId !== topic.id) return "";
+  if (plotFieldPicker.status === "loading") return '<section class="plot-field-picker" data-plot-picker><p class="plot-field-empty">Reading the current message schema…</p></section>';
+  if (plotFieldPicker.status === "error") return `<section class="plot-field-picker" data-plot-picker><p class="plot-field-error">${escapeHtml(plotFieldPicker.error ?? "Numeric fields could not be decoded.")}</p></section>`;
+  return `<section class="plot-field-picker" data-plot-picker>
+    <header><strong>PLOT FIELDS</strong><button type="button" data-close-plot-picker aria-label="Close plot field picker">${icon("close")}</button></header>
+    <label><span class="sr-only">Filter numeric fields</span><input type="search" data-plot-field-filter placeholder="orientation, velocity, covariance…" autocomplete="off" /></label>
+    <div class="plot-field-list">${plotFieldRows(plotFieldPicker.fields)}</div>
+  </section>`;
+}
+
 function renderTopics(): void {
   const topics = controller.visibleTopics;
   topicList.innerHTML = topics.length === 0 ? `<p class="empty-copy">${controller.state.phase === "loading" ? "Reading schemas and indexes…" : "No matching topics."}</p>` : topics.map((topic) => {
-    const actions = topic.availableDisplays.map((kind) => `<button type="button" data-topic="${escapeHtml(topic.id)}" data-kind="${kind}" title="Add ${displayLabel(kind)}">${icon("plus")} ${displayLabel(kind)}</button>`).join("");
-    return `<article class="topic-row"><div><strong>${escapeHtml(topic.name)}</strong><span>${escapeHtml(topic.typeName)}</span></div><small>${topic.schemaCapability.replace("schema-", "")}</small><div class="topic-actions">${actions}</div></article>`;
+    const actions = topic.availableDisplays.map((kind) => `<button type="button" data-topic="${escapeHtml(topic.id)}" data-kind="${kind}" title="${kind === "numeric-plot" ? "Choose numeric fields to plot" : `Add ${displayLabel(kind)}`}">${icon("plus")} ${displayLabel(kind)}</button>`).join("");
+    return `<article class="topic-row" data-topic-row="${escapeHtml(topic.id)}"><div><strong>${escapeHtml(topic.name)}</strong><span>${escapeHtml(topic.typeName)}</span></div><small>${topic.schemaCapability.replace("schema-", "")}</small><div class="topic-actions">${actions}</div>${plotFieldPickerMarkup(topic)}</article>`;
   }).join("");
 }
 
@@ -848,9 +892,9 @@ function renderLayers(): void {
   byId("layer-count").textContent = String(layers.layers.length);
   layerList.innerHTML = layers.layers.length === 0 ? '<p class="empty-copy">Add displays from Topics. Multiple drawables share one synchronized scene.</p>' : layers.layers.map((layer) => `
     <article class="layer-row ${layers.selected?.id === layer.id ? "is-selected" : ""}" data-layer="${layer.id}" style="--layer-color:${layerColor(layer)}">
+      <span class="layer-drag-handle" role="button" tabindex="0" draggable="true" aria-label="Drag ${escapeHtml(layer.topic.name)} to change draw order">${icon("drag")}</span>
       <button class="visibility-button ${layer.visible ? "is-visible" : ""}" data-layer-action="toggle" type="button" aria-label="${layer.visible ? "Hide" : "Show"} ${escapeHtml(layer.topic.name)}">${icon("eye")}</button>
       <button class="layer-select" data-layer-action="select" type="button"><strong>${escapeHtml(layer.topic.name)}</strong><span data-layer-status>${displayLabel(layer.kind)} · ${layer.status.toLocaleUpperCase()}</span></button>
-      <span class="layer-order"><button data-layer-action="up" type="button" aria-label="Move ${escapeHtml(layer.topic.name)} up">${icon("up")}</button><button data-layer-action="down" type="button" aria-label="Move ${escapeHtml(layer.topic.name)} down">${icon("down")}</button></span>
       <button class="remove-button" data-layer-action="remove" type="button" aria-label="Remove ${escapeHtml(layer.topic.name)}">${icon("minus")}</button>
     </article>`).join("");
 }
@@ -895,19 +939,44 @@ function orderedAuxiliaryLayers(): readonly ViewerLayer[] {
   return auxiliaryOrder.flatMap((id) => byIdMap.get(id) ? [byIdMap.get(id)!] : []);
 }
 
+function auxiliaryPosition(layerId: string, index: number, element: HTMLElement): { x: number; y: number } {
+  const stored = auxiliaryPositions.get(layerId);
+  const fallbackX = Math.max(8, scenePanel.clientWidth - element.offsetWidth - 12 - (index % 4) * 26);
+  const fallbackY = Math.max(44, scenePanel.clientHeight - element.offsetHeight - 30 - Math.floor(index / 4) * 30);
+  const x = Math.max(0, Math.min(stored?.x ?? fallbackX, scenePanel.clientWidth - element.offsetWidth));
+  const y = Math.max(38, Math.min(stored?.y ?? fallbackY, scenePanel.clientHeight - element.offsetHeight - 22));
+  const next = { x, y };
+  auxiliaryPositions.set(layerId, next);
+  return next;
+}
+
+function layoutAuxiliaryWindows(): void {
+  const windows = [...auxDock.querySelectorAll<HTMLElement>("[data-aux-layer]")];
+  windows.forEach((element, index) => {
+    if (auxiliaryLayout !== "overlay") {
+      element.style.removeProperty("transform");
+      return;
+    }
+    const id = element.dataset.auxLayer;
+    if (!id) return;
+    const { x, y } = auxiliaryPosition(id, index, element);
+    element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  });
+}
+
 function auxiliaryMarkup(layer: ViewerLayer): string {
-  const common = `draggable="true" data-aux-layer="${layer.id}"`;
+  const common = `data-aux-layer="${layer.id}"`;
   if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
   if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span data-aux-status>—</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
   if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl></section>`;
-  return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre><details class="raw-bytes"><summary>BYTE VIEW</summary><pre data-raw-bytes></pre></details></section>`;
+  return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre></section>`;
 }
 
-function renderAuxiliary(forceStructure = false): void {
+function renderAuxiliary(): void {
   const auxiliary = orderedAuxiliaryLayers();
   const signature = auxiliary.map(({ id, kind }) => `${id}:${kind}`).join("|");
   scenePanel.dataset.auxLayout = auxiliaryLayout;
-  if (forceStructure || signature !== auxiliarySignature) {
+  if (signature !== auxiliarySignature) {
     auxiliarySignature = signature;
     auxDock.innerHTML = auxiliary.map(auxiliaryMarkup).join("");
   }
@@ -921,14 +990,12 @@ function renderAuxiliary(forceStructure = false): void {
       ? `${runtimeState.raster.width}×${runtimeState.raster.height}`
       : layer.kind === "numeric-plot"
         ? runtimeState?.numericHistory?.at(-1)?.value.toPrecision(5) ?? "—"
-        : runtimeState?.raw ? `${runtimeState.raw.shownBytes} B decoded` : layer.status.toLocaleUpperCase();
+        : runtimeState?.payloadBytes === undefined ? layer.status.toLocaleUpperCase() : `${formatBytes(runtimeState.payloadBytes)} decoded`;
     if (layer.kind === "raw" || layer.kind === "raw-inspector") {
       const metadata = windowElement.querySelector<HTMLElement>("[data-raw-metadata]");
       const structured = windowElement.querySelector<HTMLElement>("[data-raw-structured]");
-      const bytes = windowElement.querySelector<HTMLElement>("[data-raw-bytes]");
       if (metadata) metadata.textContent = runtimeState?.rawMetadata ?? "Waiting for message metadata…";
-      if (structured) structured.textContent = runtimeState?.rawStructured ?? "Structured decoding is unavailable for this opaque schema. Byte view remains available below.";
-      if (bytes) bytes.textContent = runtimeState?.raw?.text ?? "Waiting for bytes…";
+      if (structured) structured.textContent = runtimeState?.rawStructured ?? "Structured decoding is unavailable because this topic has no usable message schema.";
       const fields = runtimeState?.numericFields?.slice(0, 64) ?? [];
       const actions = windowElement.querySelector<HTMLElement>("[data-raw-actions]");
       const fieldSignature = fields.map(({ path }) => path).join("|");
@@ -948,11 +1015,24 @@ function renderAuxiliary(forceStructure = false): void {
       set("calibrated", details?.calibrated === true ? "YES" : "NO");
       continue;
     }
+  }
+  drawScene();
+}
+
+function resizeCanvasBackingStore(target: HTMLCanvasElement, scale: number): void {
+  const width = Math.max(1, Math.floor(target.clientWidth * scale));
+  const height = Math.max(1, Math.floor(target.clientHeight * scale));
+  if (target.width !== width) target.width = width;
+  if (target.height !== height) target.height = height;
+}
+
+function paintAuxiliaryCanvases(): void {
+  for (const layer of orderedAuxiliaryLayers()) {
+    if (layer.kind !== "numeric-plot" && layer.kind !== "image") continue;
     const target = auxDock.querySelector<HTMLCanvasElement>(`[data-aux-layer="${layer.id}"] canvas`);
     if (!target) continue;
     const scale = Math.min(window.devicePixelRatio || 1, 2);
-    target.width = Math.max(1, Math.floor(target.clientWidth * scale));
-    target.height = Math.max(1, Math.floor(target.clientHeight * scale));
+    resizeCanvasBackingStore(target, scale);
     const context = target.getContext("2d", { alpha: false });
     if (!context) continue;
     context.fillStyle = "#08080a";
@@ -1004,7 +1084,6 @@ function renderAuxiliary(forceStructure = false): void {
       }
       continue;
     }
-    if (layer.kind !== "image") continue;
     const raster = layerRuntime.get(layer.id)?.raster;
     if (!raster) continue;
     const fit = Math.min(target.width / raster.width, target.height / raster.height);
@@ -1079,7 +1158,7 @@ function renderChrome(rebuildStructure = true): void {
     updateLayerChrome();
     updateInspectorChrome();
   }
-  renderAuxiliary(rebuildStructure);
+  renderAuxiliary();
 }
 
 async function historicalFrameResolver(
@@ -1299,7 +1378,49 @@ async function hydrateNumericPlotHistory(layer: ViewerLayer): Promise<void> {
   }
   const runtimeState = layerRuntime.get(layer.id);
   if (runtimeState) runtimeState.numericHistory = history;
-  renderAuxiliary(false);
+  renderAuxiliary();
+}
+
+async function sampleForTopic(topic: TopicSummary): Promise<BrowserSample> {
+  if (controller.state.sourceMode === "live") {
+    const sample = liveSamples.get(topic.id);
+    if (!sample) throw new Error("Waiting for the first live message on this topic.");
+    return sample;
+  }
+  return runtime.messageAt(topic.name, controller.state.currentTimeNanos);
+}
+
+async function openPlotFieldPicker(topic: TopicSummary): Promise<void> {
+  if (plotFieldPicker?.topicId === topic.id) {
+    plotFieldPicker = undefined;
+    renderTopics();
+    return;
+  }
+  plotFieldPicker = { topicId: topic.id, fields: [], status: "loading" };
+  renderTopics();
+  try {
+    const sample = await sampleForTopic(topic);
+    let fields: readonly { readonly path: string; readonly value: number }[];
+    try {
+      const decoded = await plotFieldDecoder.generic({
+        typeName: sample.channel.schema.name,
+        messageEncoding: sample.channel.messageEncoding,
+        schemaEncoding: sample.channel.schema.encoding,
+        schemaDefinition: sample.channel.schema.definition,
+        schemaData: sample.channel.schema.data,
+        data: sample.data,
+      });
+      fields = decoded.numericFields;
+    } catch {
+      fields = collectNumericFields((await plotFieldDecoder.semantic(sample)).message);
+    }
+    if (plotFieldPicker?.topicId !== topic.id) return;
+    plotFieldPicker = { topicId: topic.id, fields, status: "ready" };
+  } catch (error) {
+    if (plotFieldPicker?.topicId !== topic.id) return;
+    plotFieldPicker = { topicId: topic.id, fields: [], status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+  renderTopics();
 }
 
 function addLayer(topic: TopicSummary, kind: DisplayKind, fieldPath?: string): ViewerLayer {
@@ -1352,7 +1473,9 @@ function autoAddLayers(): void {
   const usedKinds = new Set<DisplayKind>();
   for (const kind of preferred) {
     if ((kind === "pointcloud2" && usedKinds.has("point-cloud")) || (kind === "point-cloud" && usedKinds.has("pointcloud2"))) continue;
-    const topic = controller.state.topics.find((candidate) => candidate.messageCount !== 0n && candidate.availableDisplays.includes(kind));
+    const topic = controller.state.topics.find((candidate) => candidate.messageCount !== 0n
+      && candidate.availableDisplays.includes(kind)
+      && (kind !== "numeric-plot" || /^std_msgs\/(?:msg\/)?(?:Float32|Float64|Int32|UInt32)$/u.test(candidate.typeName)));
     if (!topic) continue;
     layers.add(topic, kind);
     usedKinds.add(kind);
@@ -1608,11 +1731,31 @@ byId<HTMLInputElement>("topic-filter").addEventListener("input", (event) => {
 });
 
 topicList.addEventListener("click", (event) => {
+  if ((event.target as HTMLElement).closest("[data-close-plot-picker]")) {
+    plotFieldPicker = undefined;
+    renderTopics();
+    return;
+  }
+  const fieldButton = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-add-plot-field]");
+  if (fieldButton && plotFieldPicker) {
+    const topic = controller.state.topics.find(({ id }) => id === plotFieldPicker?.topicId);
+    const fieldPath = fieldButton.dataset.addPlotField;
+    if (topic && fieldPath) addLayer(topic, "numeric-plot", fieldPath);
+    return;
+  }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-topic][data-kind]");
   if (!button) return;
   const topic = controller.state.topics.find(({ id }) => id === button.dataset.topic);
   const kind = button.dataset.kind as DisplayKind | undefined;
-  if (topic && kind) addLayer(topic, kind);
+  if (!topic || !kind) return;
+  if (kind === "numeric-plot") void openPlotFieldPicker(topic);
+  else addLayer(topic, kind);
+});
+
+topicList.addEventListener("input", (event) => {
+  const filter = (event.target as HTMLElement).closest<HTMLInputElement>("input[data-plot-field-filter]");
+  const list = filter?.closest<HTMLElement>("[data-plot-picker]")?.querySelector<HTMLElement>(".plot-field-list");
+  if (filter && list && plotFieldPicker?.status === "ready") list.innerHTML = plotFieldRows(plotFieldPicker.fields, filter.value);
 });
 
 auxDock.addEventListener("click", (event) => {
@@ -1624,29 +1767,59 @@ auxDock.addEventListener("click", (event) => {
   if (rawLayer && fieldPath) addLayer(rawLayer.topic, "numeric-plot", fieldPath);
 });
 
-auxDock.addEventListener("dragstart", (event) => {
-  const windowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-layer]");
-  if (!windowElement || !(event.target as HTMLElement).closest("header")) { event.preventDefault(); return; }
-  event.dataTransfer?.setData("text/x-ros-viewer-aux", windowElement.dataset.auxLayer ?? "");
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-  windowElement.classList.add("is-dragging");
-});
-auxDock.addEventListener("dragover", (event) => {
-  if (!event.dataTransfer?.types.includes("text/x-ros-viewer-aux")) return;
+let auxiliaryDrag: {
+  readonly element: HTMLElement;
+  readonly id: string;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly pointerId: number;
+} | undefined;
+
+auxDock.addEventListener("pointerdown", (event) => {
+  const header = (event.target as HTMLElement).closest<HTMLElement>(".aux-window > header");
+  const element = header?.closest<HTMLElement>("[data-aux-layer]");
+  const id = element?.dataset.auxLayer;
+  if (!header || !element || !id || event.button !== 0) return;
+  if (auxiliaryLayout === "overlay") {
+    auxiliaryOrder = [...auxiliaryOrder.filter((candidate) => candidate !== id), id];
+    auxDock.append(element);
+    auxiliarySignature = orderedAuxiliaryLayers().map(({ id: layerId, kind }) => `${layerId}:${kind}`).join("|");
+  }
+  const position = auxiliaryPosition(id, orderedAuxiliaryLayers().findIndex((layer) => layer.id === id), element);
+  auxiliaryDrag = { element, id, offsetX: event.clientX - position.x, offsetY: event.clientY - position.y, pointerId: event.pointerId };
+  try { header.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
+  element.classList.add("is-dragging");
   event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
 });
-auxDock.addEventListener("drop", (event) => {
-  const movedId = event.dataTransfer?.getData("text/x-ros-viewer-aux");
-  const targetId = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-layer]")?.dataset.auxLayer;
-  if (!movedId || !targetId || movedId === targetId) return;
-  event.preventDefault();
-  auxiliaryOrder = auxiliaryOrder.filter((id) => id !== movedId);
-  auxiliaryOrder.splice(Math.max(0, auxiliaryOrder.indexOf(targetId)), 0, movedId);
-  auxiliarySignature = "";
-  renderAuxiliary(true);
+
+auxDock.addEventListener("pointermove", (event) => {
+  if (!auxiliaryDrag || auxiliaryDrag.pointerId !== event.pointerId) return;
+  if (auxiliaryLayout === "overlay") {
+    const x = Math.max(0, Math.min(event.clientX - auxiliaryDrag.offsetX, scenePanel.clientWidth - auxiliaryDrag.element.offsetWidth));
+    const y = Math.max(38, Math.min(event.clientY - auxiliaryDrag.offsetY, scenePanel.clientHeight - auxiliaryDrag.element.offsetHeight - 22));
+    auxiliaryPositions.set(auxiliaryDrag.id, { x, y });
+    auxiliaryDrag.element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    return;
+  }
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-aux-layer]");
+  const targetId = target?.dataset.auxLayer;
+  if (!target || !targetId || targetId === auxiliaryDrag.id) return;
+  const targetRect = target.getBoundingClientRect();
+  const after = auxiliaryLayout === "split-right" ? event.clientY > targetRect.top + targetRect.height / 2 : event.clientX > targetRect.left + targetRect.width / 2;
+  auxiliaryOrder = auxiliaryOrder.filter((id) => id !== auxiliaryDrag!.id);
+  const targetIndex = auxiliaryOrder.indexOf(targetId) + (after ? 1 : 0);
+  auxiliaryOrder.splice(Math.max(0, targetIndex), 0, auxiliaryDrag.id);
+  auxDock.insertBefore(auxiliaryDrag.element, after ? target.nextSibling : target);
+  auxiliarySignature = orderedAuxiliaryLayers().map(({ id, kind }) => `${id}:${kind}`).join("|");
 });
-auxDock.addEventListener("dragend", () => auxDock.querySelector(".is-dragging")?.classList.remove("is-dragging"));
+
+const finishAuxiliaryDrag = (event: PointerEvent): void => {
+  if (!auxiliaryDrag || auxiliaryDrag.pointerId !== event.pointerId) return;
+  auxiliaryDrag.element.classList.remove("is-dragging");
+  auxiliaryDrag = undefined;
+};
+auxDock.addEventListener("pointerup", finishAuxiliaryDrag);
+auxDock.addEventListener("pointercancel", finishAuxiliaryDrag);
 
 layerList.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-layer-action]");
@@ -1654,9 +1827,7 @@ layerList.addEventListener("click", (event) => {
   if (!button || !row) return;
   const id = row.dataset.layer!;
   if (button.dataset.layerAction === "select") layers.select(id);
-  if (button.dataset.layerAction === "up") layers.move(id, -1);
-  if (button.dataset.layerAction === "down") layers.move(id, 1);
-  if (["select", "up", "down"].includes(button.dataset.layerAction ?? "")) {
+  if (button.dataset.layerAction === "select") {
     renderLayers();
     renderInspector();
     drawScene();
@@ -1681,6 +1852,53 @@ layerList.addEventListener("click", (event) => {
     drawScene();
   }
   if (controller.state.sourceMode === "live" && button.dataset.layerAction !== "select") void syncLiveSubscriptions();
+});
+
+layerList.addEventListener("dragstart", (event) => {
+  const handle = (event.target as HTMLElement).closest(".layer-drag-handle");
+  const row = handle?.closest<HTMLElement>("[data-layer]");
+  if (!handle || !row?.dataset.layer || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  event.dataTransfer.setData("text/x-ros-viewer-layer", row.dataset.layer);
+  event.dataTransfer.effectAllowed = "move";
+  row.classList.add("is-dragging");
+});
+layerList.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer?.types.includes("text/x-ros-viewer-layer")) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  (event.target as HTMLElement).closest<HTMLElement>("[data-layer]")?.classList.add("is-drop-target");
+});
+layerList.addEventListener("dragleave", (event) => (event.target as HTMLElement).closest<HTMLElement>("[data-layer]")?.classList.remove("is-drop-target"));
+layerList.addEventListener("drop", (event) => {
+  const movedId = event.dataTransfer?.getData("text/x-ros-viewer-layer");
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-layer]");
+  const targetId = target?.dataset.layer;
+  if (!movedId || !target || !targetId || movedId === targetId) return;
+  event.preventDefault();
+  const order = layers.layers.map(({ id }) => id).filter((id) => id !== movedId);
+  const targetRect = target.getBoundingClientRect();
+  const insertAt = order.indexOf(targetId) + (event.clientY > targetRect.top + targetRect.height / 2 ? 1 : 0);
+  layers.moveTo(movedId, insertAt);
+  renderLayers();
+  drawScene();
+});
+layerList.addEventListener("dragend", () => {
+  layerList.querySelectorAll(".is-dragging, .is-drop-target").forEach((element) => element.classList.remove("is-dragging", "is-drop-target"));
+});
+layerList.addEventListener("keydown", (event) => {
+  const handle = (event.target as HTMLElement).closest<HTMLElement>(".layer-drag-handle");
+  const row = handle?.closest<HTMLElement>("[data-layer]");
+  if (!handle || !row?.dataset.layer || !["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const current = layers.layers.findIndex(({ id }) => id === row.dataset.layer);
+  const target = event.key === "Home" ? 0 : event.key === "End" ? layers.layers.length - 1 : current + (event.key === "ArrowUp" ? -1 : 1);
+  layers.moveTo(row.dataset.layer, target);
+  renderLayers();
+  layerList.querySelector<HTMLElement>(`[data-layer="${row.dataset.layer}"] .layer-drag-handle`)?.focus();
+  drawScene();
 });
 
 inspector.addEventListener("change", (event) => {
@@ -1780,7 +1998,7 @@ byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
 
 byId<HTMLSelectElement>("aux-layout").addEventListener("change", (event) => {
   auxiliaryLayout = (event.currentTarget as HTMLSelectElement).value as AuxiliaryLayout;
-  renderAuxiliary(true);
+  renderAuxiliary();
   drawScene();
 });
 
@@ -1803,6 +2021,6 @@ canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("wheel", (event) => { event.preventDefault(); camera.zoom(event.deltaY); drawScene(); }, { passive: false });
 canvas.addEventListener("dblclick", () => { const bounds = combinedBounds(); if (bounds) camera.frame(bounds); drawScene(); });
 
-new ResizeObserver(() => { renderAuxiliary(); drawScene(); }).observe(scenePanel);
+new ResizeObserver(() => drawScene()).observe(scenePanel);
 renderChrome();
 drawScene();

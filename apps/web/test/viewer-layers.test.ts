@@ -60,4 +60,16 @@ describe("viewer layer registry", () => {
     registry.move(second.id, -1);
     expect(registry.layers.map(({ id }) => id)).toEqual([second.id, first.id]);
   });
+
+  it("moves a drawable directly to an arbitrary drop index", () => {
+    const registry = new ViewerLayerRegistry();
+    const first = registry.add(points, "point-cloud");
+    const second = registry.add({ ...points, id: "path", name: "/path" }, "path");
+    const third = registry.add({ ...points, id: "scan", name: "/scan" }, "laser-scan");
+
+    registry.moveTo(first.id, 2);
+
+    expect(registry.layers.map(({ id }) => id)).toEqual([second.id, third.id, first.id]);
+    expect(registry.selected?.id).toBe(third.id);
+  });
 });

@@ -303,9 +303,10 @@ describe("complete M1 MCAP vertical slice", () => {
   });
 
   it("maps only supported schemas into truthful shell display choices and fails bounded", () => {
-    expect(availableDisplaysForSchema("sensor_msgs/msg/PointCloud2")).toEqual(["point-cloud", "raw"]);
-    expect(availableDisplaysForSchema("nav_msgs/msg/Path")).toEqual(["path", "raw"]);
-    expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown")).toEqual(["raw"]);
+    expect(availableDisplaysForSchema("sensor_msgs/msg/PointCloud2")).toEqual(["point-cloud", "numeric-plot", "raw"]);
+    expect(availableDisplaysForSchema("nav_msgs/msg/Path")).toEqual(["path", "numeric-plot", "raw"]);
+    expect(availableDisplaysForSchema("sensor_msgs/msg/Imu")).toEqual(["numeric-plot", "raw"]);
+    expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown")).toEqual(["numeric-plot", "raw"]);
     expect(availableDisplaysForSchema("vendor_msgs/msg/Unknown", "opaque")).toEqual([]);
     const oversized = { channel: { schema: { name: "nav_msgs/msg/Path", capability: "schema-present" as const } }, data: pathCdr() };
     expect(() => decodeSemanticMessage(oversized, {
@@ -411,8 +412,8 @@ describe("complete M1 MCAP vertical slice", () => {
         indexState: indexed ? "indexed" : "sequential",
       });
       expect(controller.state.topics.map(({ name, availableDisplays }) => [name, availableDisplays])).toEqual([
-        ["/points", ["point-cloud", "raw"]],
-        ["/path", ["path", "raw"]],
+        ["/points", ["point-cloud", "numeric-plot", "raw"]],
+        ["/path", ["path", "numeric-plot", "raw"]],
       ]);
       expect(runtime.readTelemetry()?.peakInFlightBytes).toBeLessThan(blob.size);
       await controller.seek(5n);

@@ -76,7 +76,7 @@ describe("browser live relay transport", () => {
     const relay = new BrowserLiveRelay((topicId, sample) => samples.push({ topicId, bytes: [...sample.data] }));
     relay.setEndpoint("ws://127.0.0.1:9999/viewer");
     const opened = await relay.connectLive({ browserOrigin: "http://localhost:8080", sessionToken: "secret" });
-    expect(opened.topics).toEqual([expect.objectContaining({ id: "points", availableDisplays: ["point-cloud", "raw"] })]);
+    expect(opened.topics).toEqual([expect.objectContaining({ id: "points", availableDisplays: ["point-cloud", "numeric-plot", "raw"] })]);
     await relay.subscribeLive(["points"]);
     FakeWebSocket.instance?.emitMessage({
       version: 1,

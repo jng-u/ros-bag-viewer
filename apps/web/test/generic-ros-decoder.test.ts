@@ -17,6 +17,27 @@ function cdrCustom(): Uint8Array {
   return bytes;
 }
 
+function cdrImu(): Uint8Array {
+  const bytes = new Uint8Array(512);
+  const view = new DataView(bytes.buffer);
+  const encoder = new TextEncoder();
+  let offset = 4;
+  bytes[1] = 1;
+  const align = (size: number) => { offset += (size - ((offset - 4) % size)) % size; };
+  const uint32 = (value: number) => { align(4); view.setUint32(offset, value, true); offset += 4; };
+  const int32 = (value: number) => { align(4); view.setInt32(offset, value, true); offset += 4; };
+  const float64 = (value: number) => { align(8); view.setFloat64(offset, value, true); offset += 8; };
+  const string = (value: string) => { const encoded = encoder.encode(value); uint32(encoded.length + 1); bytes.set(encoded, offset); offset += encoded.length; bytes[offset++] = 0; };
+  int32(12); uint32(34); string("imu_link");
+  [0.1, 0.2, 0.3, 0.9].forEach(float64);
+  Array.from({ length: 9 }, (_, index) => index * 0.01).forEach(float64);
+  [1.1, 1.2, 1.3].forEach(float64);
+  Array.from({ length: 9 }, (_, index) => index * 0.02).forEach(float64);
+  [9.7, 0.1, -0.2].forEach(float64);
+  Array.from({ length: 9 }, (_, index) => index * 0.03).forEach(float64);
+  return bytes.slice(0, offset);
+}
+
 describe("generic ROS schema decoder", () => {
   it("decodes a ROS2 custom schema and exposes selectable numeric paths", () => {
     const decoded = decodeGenericRosMessage({
@@ -76,6 +97,48 @@ describe("generic ROS schema decoder", () => {
     });
     expect(decoded.value).toEqual({ pair: { x: 1.5, y: -2 }, iteration: 9 });
     expect(decoded.numericFields.map(({ path }) => path)).toEqual(["pair.x", "pair.y", "iteration"]);
+  });
+
+  it("exposes every scalar IMU vector, quaternion, and covariance field for plotting", () => {
+    const definition = `std_msgs/Header header
+geometry_msgs/Quaternion orientation
+float64[9] orientation_covariance
+geometry_msgs/Vector3 angular_velocity
+float64[9] angular_velocity_covariance
+geometry_msgs/Vector3 linear_acceleration
+float64[9] linear_acceleration_covariance
+================================================================================
+MSG: std_msgs/Header
+builtin_interfaces/Time stamp
+string frame_id
+================================================================================
+MSG: geometry_msgs/Quaternion
+float64 x
+float64 y
+float64 z
+float64 w
+================================================================================
+MSG: geometry_msgs/Vector3
+float64 x
+float64 y
+float64 z
+`;
+    const decoded = decodeGenericRosMessage({
+      typeName: "sensor_msgs/msg/Imu",
+      messageEncoding: "cdr",
+      schemaEncoding: "ros2msg",
+      schemaDefinition: definition,
+      data: cdrImu(),
+    });
+    expect(decoded.numericFields.map(({ path }) => path)).toEqual(expect.arrayContaining([
+      "orientation.x", "orientation.y", "orientation.z", "orientation.w",
+      "orientation_covariance[8]",
+      "angular_velocity.x", "angular_velocity.y", "angular_velocity.z",
+      "angular_velocity_covariance[8]",
+      "linear_acceleration.x", "linear_acceleration.y", "linear_acceleration.z",
+      "linear_acceleration_covariance[8]",
+    ]));
+    expect(decoded.numericFields).toHaveLength(39);
   });
 
   it("refuses schema and payload encodings that are not explicitly supported", () => {

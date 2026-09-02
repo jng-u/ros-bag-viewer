@@ -149,8 +149,8 @@ function currentMarkerArrayCdr(): Uint8Array {
 
 describe("semantic media decoding", () => {
   it("routes both ROS1 and ROS2 TFMessage names to the native frame tree", () => {
-    expect(availableDisplaysForSchema("tf2_msgs/TFMessage")).toEqual(["frame-tree", "raw"]);
-    expect(availableDisplaysForSchema("tf2_msgs/msg/TFMessage")).toEqual(["frame-tree", "raw"]);
+    expect(availableDisplaysForSchema("tf2_msgs/TFMessage")).toEqual(["frame-tree", "numeric-plot", "raw"]);
+    expect(availableDisplaysForSchema("tf2_msgs/msg/TFMessage")).toEqual(["frame-tree", "numeric-plot", "raw"]);
   });
 
   it("accepts up to three transport-alignment octets after a complete CDR PointCloud2", () => {
@@ -169,7 +169,7 @@ describe("semantic media decoding", () => {
   });
 
   it("decodes ROS2 sensor_msgs/Image and exposes image plus raw displays", () => {
-    expect(availableDisplaysForSchema("sensor_msgs/msg/Image")).toEqual(["image", "raw"]);
+    expect(availableDisplaysForSchema("sensor_msgs/msg/Image")).toEqual(["image", "numeric-plot", "raw"]);
     expect(decodeSemanticMessage({
       channel: { schema: { name: "sensor_msgs/msg/Image", capability: "schema-present" }, messageEncoding: "cdr" },
       data: imageCdr(),
@@ -189,7 +189,7 @@ describe("semantic media decoding", () => {
   });
 
   it("decodes the standard ROS2 CompressedImage format without treating the original pixel format as the codec", () => {
-    expect(availableDisplaysForSchema("sensor_msgs/msg/CompressedImage")).toEqual(["image", "raw"]);
+    expect(availableDisplaysForSchema("sensor_msgs/msg/CompressedImage")).toEqual(["image", "numeric-plot", "raw"]);
     expect(decodeSemanticMessage({
       channel: { schema: { name: "sensor_msgs/msg/CompressedImage", capability: "schema-present" }, messageEncoding: "cdr" },
       data: compressedImageCdr(),

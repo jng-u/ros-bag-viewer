@@ -82,6 +82,19 @@ export class ViewerLayerRegistry {
     this.#layers = next;
   }
 
+  moveTo(id: string, targetIndex: number): void {
+    const sourceIndex = this.#layers.findIndex((layer) => layer.id === id);
+    if (sourceIndex < 0) throw new Error(`unknown viewer layer ${id}`);
+    if (!Number.isSafeInteger(targetIndex)) throw new Error("viewer layer target index is invalid");
+    const boundedTarget = Math.max(0, Math.min(this.#layers.length - 1, targetIndex));
+    if (sourceIndex === boundedTarget) return;
+    const next = [...this.#layers];
+    const [moved] = next.splice(sourceIndex, 1);
+    if (!moved) throw new Error(`unknown viewer layer ${id}`);
+    next.splice(boundedTarget, 0, moved);
+    this.#layers = next;
+  }
+
   setColor(id: string, color: readonly [number, number, number, number]): void {
     if (color.some((component) => !Number.isFinite(component) || component < 0 || component > 1)) throw new Error("layer color is invalid");
     this.#replace(id, (layer) => ({ ...layer, color }));

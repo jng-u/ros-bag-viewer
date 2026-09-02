@@ -603,38 +603,39 @@ export function availableDisplaysForSchema(
   | "raw"
 )[] {
   if (capability === "opaque") return [];
+  const inspectable = <T extends Exclude<ReturnType<typeof availableDisplaysForSchema>[number], "numeric-plot" | "raw">>(kind: T) => [kind, "numeric-plot", "raw"] as const;
   switch (normalizedSchemaName(schemaName)) {
     case "sensor_msgs/PointCloud2":
-      return ["point-cloud", "raw"];
+      return inspectable("point-cloud");
     case "sensor_msgs/Image":
     case "sensor_msgs/CompressedImage":
-      return ["image", "raw"];
+      return inspectable("image");
     case "nav_msgs/Path":
-      return ["path", "raw"];
+      return inspectable("path");
     case "sensor_msgs/LaserScan":
-      return ["laser-scan", "raw"];
+      return inspectable("laser-scan");
     case "geometry_msgs/Pose":
     case "geometry_msgs/PoseStamped":
     case "geometry_msgs/PoseWithCovarianceStamped":
-      return ["pose", "raw"];
+      return inspectable("pose");
     case "nav_msgs/Odometry":
-      return ["odometry", "pose", "raw"];
+      return ["odometry", "pose", "numeric-plot", "raw"];
     case "nav_msgs/OccupancyGrid":
-      return ["occupancy-grid", "raw"];
+      return inspectable("occupancy-grid");
     case "tf2_msgs/TFMessage":
-      return ["frame-tree", "raw"];
+      return inspectable("frame-tree");
     case "sensor_msgs/CameraInfo":
-      return ["camera-info", "raw"];
+      return inspectable("camera-info");
     case "visualization_msgs/Marker":
     case "visualization_msgs/MarkerArray":
-      return ["marker", "raw"];
+      return inspectable("marker");
     case "std_msgs/Float32":
     case "std_msgs/Float64":
     case "std_msgs/Int32":
     case "std_msgs/UInt32":
       return ["numeric-plot", "raw"];
     default:
-      return ["raw"];
+      return ["numeric-plot", "raw"];
   }
 }
 

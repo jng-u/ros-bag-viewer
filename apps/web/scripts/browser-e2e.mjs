@@ -5,8 +5,9 @@ import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 
 const viewerUrl = process.env.VIEWER_URL ?? "http://127.0.0.1:8080";
+const viewerOnly = process.env.VIEWER_ONLY_E2E === "1";
 const shareCreateToken = process.env.SHARE_CREATE_TOKEN;
-if (!shareCreateToken) throw new Error("Set SHARE_CREATE_TOKEN to the token configured on the Docker share service.");
+if (!viewerOnly && !shareCreateToken) throw new Error("Set SHARE_CREATE_TOKEN to the token configured on the Docker share service.");
 const driverPort = Number(process.env.GECKODRIVER_PORT ?? 4600 + (process.pid % 300));
 const driver = spawn(process.env.GECKODRIVER ?? "geckodriver", ["--port", String(driverPort)], { stdio: ["ignore", "pipe", "pipe"] });
 let driverLog = "";
@@ -290,6 +291,8 @@ try {
     };`);
     return value.time !== playbackStart && value.stable && value.playing ? value : undefined;
   });
+  const blinkRegression = await executeAsync(`const done=arguments[arguments.length-1]; const canvases=[...document.querySelectorAll('canvas')]; const firstAux=document.querySelector('.aux-window canvas'); let backingStoreResets=0; const observer=new MutationObserver((records)=>{backingStoreResets+=records.filter((record)=>record.attributeName==='width'||record.attributeName==='height').length;}); canvases.forEach((canvas)=>observer.observe(canvas,{attributes:true,attributeFilter:['width','height']})); setTimeout(()=>{observer.disconnect(); done({backingStoreResets,auxCanvasStable:firstAux===document.querySelector('.aux-window canvas'),playing:document.querySelector('#play-button')?.getAttribute('aria-label')==='Pause recording'});},700);`);
+  if (blinkRegression.backingStoreResets !== 0 || !blinkRegression.auxCanvasStable || !blinkRegression.playing) throw new Error(`Playback canvas lifecycle regressed: ${JSON.stringify(blinkRegression)}`);
   await execute("const row=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points')); row?.querySelector('[data-layer-action=\"toggle\"]')?.click();");
   await waitFor("playback toggle off", async () => (await execute("return ![...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points'))?.querySelector('[data-layer-action=\"toggle\"]')?.classList.contains('is-visible')")) || undefined);
   await execute("const row=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points')); row?.querySelector('[data-layer-action=\"toggle\"]')?.click(); const path=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/path')); path?.querySelector('[data-layer-action=\"select\"]')?.click();");
@@ -303,7 +306,7 @@ try {
   });
   await execute("document.querySelector('#play-button').click();");
 
-  const layerOrder = await execute(`const before=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); document.querySelector('.layer-row [data-layer-action="down"]')?.click(); const after=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); return {before,after};`);
+  const layerOrder = await execute(`const before=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); const source=document.querySelector('.layer-row .layer-drag-handle'); const target=document.querySelectorAll('.layer-row')[document.querySelectorAll('.layer-row').length-1]; const transfer=new DataTransfer(); source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer})); const after=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); return {before,after};`);
   if (layerOrder.before[0] === layerOrder.after[0]) throw new Error(`Layer reorder did not change draw order: ${JSON.stringify(layerOrder)}`);
 
   const seekStarted = Date.now();
@@ -344,9 +347,11 @@ try {
       layers: Number(document.querySelector('#layer-count')?.textContent),
       rawReady: [...document.querySelectorAll('.layer-row')].some((row)=>row.textContent.includes('/demo/custom_status') && row.textContent.includes('RAW') && row.textContent.includes('READY')),
     };`);
-    return value.text.includes("TOPIC /demo/custom_status") && value.text.includes("TYPE demo_msgs") && value.text.includes("score") && value.text.includes("inliers") && value.text.includes("residuals") && value.rawReady ? value : undefined;
+    return value.text.includes("TOPIC /demo/custom_status") && value.text.includes("TYPE demo_msgs") && value.text.includes("score") && value.text.includes("inliers") && value.text.includes("residuals") && !value.text.includes("BYTE VIEW") && value.rawReady ? value : undefined;
   });
-  await execute(`const button=[...document.querySelectorAll('[data-plot-field]')].find((candidate)=>candidate.textContent.includes('score')); button?.click();`);
+  await execute(`const row=[...document.querySelectorAll('.topic-row')].find((item)=>item.querySelector('strong')?.textContent==='/demo/custom_status'); row?.querySelector('button[data-kind="numeric-plot"]')?.click();`);
+  await waitFor("topic numeric field picker", async () => (await execute(`return [...document.querySelectorAll('[data-add-plot-field]')].some((button)=>button.dataset.addPlotField==='score') && [...document.querySelectorAll('[data-add-plot-field]')].some((button)=>button.dataset.addPlotField==='residuals[2]')`)) || undefined);
+  await execute(`document.querySelector('[data-add-plot-field="score"]')?.click();`);
   const customPlot = await waitFor("custom numeric field plot", async () => {
     const value = await execute(`return {
       plots: document.querySelectorAll('.plot-window canvas').length,
@@ -359,11 +364,14 @@ try {
 
   const auxiliaryLayout = await execute(`const canvas=document.querySelector('#scene-canvas'); const full=canvas.clientWidth; const select=document.querySelector('#aux-layout'); select.value='split-right'; select.dispatchEvent(new Event('change',{bubbles:true})); const right=canvas.clientWidth; select.value='split-bottom'; select.dispatchEvent(new Event('change',{bubbles:true})); const bottomHeight=canvas.clientHeight; select.value='overlay'; select.dispatchEvent(new Event('change',{bubbles:true})); return {full,right,bottomHeight,restored:canvas.clientWidth,layout:document.querySelector('.scene-panel')?.dataset.auxLayout};`);
   if (!(auxiliaryLayout.right < auxiliaryLayout.full && auxiliaryLayout.bottomHeight > 0 && auxiliaryLayout.restored === auxiliaryLayout.full && auxiliaryLayout.layout === "overlay")) throw new Error(`Auxiliary split layout failed: ${JSON.stringify(auxiliaryLayout)}`);
-  const auxiliaryOrder = await execute(`const before=[...document.querySelectorAll('[data-aux-layer]')].map((item)=>item.dataset.auxLayer); const source=document.querySelector('[data-aux-layer] header'); const target=document.querySelectorAll('[data-aux-layer]')[2]; const transfer=new DataTransfer(); source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer})); const after=[...document.querySelectorAll('[data-aux-layer]')].map((item)=>item.dataset.auxLayer); return {before,after};`);
-  if (auxiliaryOrder.before[0] === auxiliaryOrder.after[0]) throw new Error(`Auxiliary drag reorder failed: ${JSON.stringify(auxiliaryOrder)}`);
+  const auxiliaryMove = await execute(`const element=document.querySelector('[data-aux-layer]'); const header=element.querySelector('header'); const before=getComputedStyle(element).transform; const rect=header.getBoundingClientRect(); const pointerId=91; header.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId,button:0,clientX:rect.left+8,clientY:rect.top+8})); header.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId,buttons:1,clientX:rect.left+88,clientY:rect.top+48})); header.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId,button:0,clientX:rect.left+88,clientY:rect.top+48})); return {before,after:getComputedStyle(element).transform,stable:element.isConnected};`);
+  if (auxiliaryMove.before === auxiliaryMove.after || !auxiliaryMove.stable) throw new Error(`Auxiliary window pointer move failed: ${JSON.stringify(auxiliaryMove)}`);
   const rawScreenshotPath = resolve("/tmp/ros-web-viewer-browser-e2e-raw.png");
   await writeFile(rawScreenshotPath, Buffer.from(await command(`/session/${sessionId}/screenshot`), "base64"));
 
+  if (viewerOnly) {
+    process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryMove, rawScreenshotPath }, null, 2)}\n`);
+  } else {
   await execute("const s=document.querySelector('#demo-kind'); s.value='mcap'; s.dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#demo-button').click();");
   await waitFor("shareable local MCAP", async () => await execute("return document.querySelector('.viewer-shell')?.dataset.phase==='ready' && document.querySelector('#source-name')?.textContent.includes('DEMO.MCAP') && !document.querySelector('#share-button')?.disabled"));
   await execute("document.querySelector('#share-button').click(); document.querySelector('#share-ttl').value='900'; document.querySelector('#share-create-token').value=arguments[0]; document.querySelector('#share-form').requestSubmit();", [shareCreateToken]);
@@ -440,7 +448,8 @@ try {
   await mkdir(dirname(screenshotPath), { recursive: true });
   await writeFile(screenshotPath, Buffer.from(sceneScreenshot, "base64"));
   await writeFile(liveScreenshotPath, Buffer.from(liveScreenshot, "base64"));
-  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryOrder, rawScreenshotPath, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryMove, rawScreenshotPath, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
+  }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n${driverLog}\n`);
   process.exitCode = 1;

@@ -79,18 +79,23 @@ function parseNonnegativeBigInt(value: string | undefined, label: string): bigin
   return BigInt(value);
 }
 
+function hasNativeDisplay(typeName: string, displays = availableDisplaysForSchema(typeName, "schema-present")): boolean {
+  return displays.some((kind) => kind !== "raw" && kind !== "numeric-plot")
+    || /^std_msgs\/(?:msg\/)?(?:Float32|Float64|Int32|UInt32)$/u.test(typeName);
+}
+
 function topicSummary(topic: RelayTopic): TopicSummary {
   if (!topic.id || !topic.name.startsWith("/") || !topic.typeName || !topic.encoding) throw new Error("Live relay returned an invalid topic.");
   if (topic.schemaDefinition && new TextEncoder().encode(topic.schemaDefinition).byteLength > MAX_SCHEMA_BYTES) throw new Error("Live topic schema exceeds the schema budget.");
   const declaredDisplays = availableDisplaysForSchema(topic.typeName, "schema-present");
-  const hasNativeDisplay = declaredDisplays.some((kind) => kind !== "raw");
-  const schemaPresent = hasNativeDisplay || Boolean(topic.schemaDefinition);
+  const nativeDisplay = hasNativeDisplay(topic.typeName, declaredDisplays);
+  const schemaPresent = nativeDisplay || Boolean(topic.schemaDefinition);
   const availableDisplays = schemaPresent ? declaredDisplays : ["raw"] as const;
   return {
     id: topic.id,
     name: topic.name,
     typeName: topic.typeName,
-    compatibility: hasNativeDisplay ? "native-display" : schemaPresent ? "schema-backed-generic" : "opaque-inspectable",
+    compatibility: nativeDisplay ? "native-display" : schemaPresent ? "schema-backed-generic" : "opaque-inspectable",
     schemaCapability: schemaPresent ? "schema-present" : "opaque",
     availableDisplays,
   };
@@ -364,7 +369,7 @@ export class BrowserLiveRelay implements Pick<DesktopShellPorts, "connectLive" |
           channel: {
             schema: topic.schemaDefinition
               ? { name: topic.typeName, capability: "schema-present", definition: topic.schemaDefinition, encoding: topic.schemaEncoding }
-              : { name: topic.typeName, capability: availableDisplaysForSchema(topic.typeName, "schema-present").some((kind) => kind !== "raw") ? "schema-present" : "opaque" },
+              : { name: topic.typeName, capability: hasNativeDisplay(topic.typeName) ? "schema-present" : "opaque" },
             messageEncoding: topic.encoding,
           },
           data: payload,
