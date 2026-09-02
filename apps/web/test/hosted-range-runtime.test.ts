@@ -71,7 +71,7 @@ describe("hosted indexed MCAP range runtime", () => {
       if (!address || typeof address === "string") throw new Error("test range server did not bind TCP");
       const runtime = new BrowserRecordingRuntime();
       const opened = await runtime.openHostedMcap(`http://127.0.0.1:${address.port}/demo.mcap#capability=range-secret`);
-      expect(opened.topics).toHaveLength(11);
+      expect(opened.topics).toHaveLength(12);
       expect(opened.indexState).toBe("indexed");
       const sample = await runtime.messageAt("/demo/points", opened.durationNanos / 2n);
       expect(decodeSemanticMessage({ channel: sample.channel, data: sample.data }).kind).toBe("pointcloud2");

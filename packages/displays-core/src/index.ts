@@ -239,7 +239,6 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
     if (epoch !== this.#epoch) throw new Error("stale source epoch");
     try {
       const converted = convert();
-      this.#resource?.dispose();
       this.#resource = this.renderer.upsert({
         id: this.id,
         topology: converted.summary.primitive,

@@ -57,7 +57,7 @@ describe("browser recording entry", () => {
     const imageSample = await runtime.messageAt("/demo/image", 0n);
     const image = decodeSemanticMessage({ channel: imageSample.channel, data: imageSample.data });
     expect(opened.topics.map(({ name }) => name)).toEqual([
-      "/demo/points", "/demo/path", "/demo/image", "/demo/scan", "/demo/odom", "/demo/map", "/tf", "/demo/camera_info", "/demo/markers", "/demo/value", "/demo/custom_status",
+      "/demo/points", "/demo/path", "/demo/image", "/demo/scan", "/demo/odom", "/demo/map", "/tf", "/demo/camera_info", "/demo/markers", "/demo/imu", "/demo/value", "/demo/custom_status",
     ]);
     expect(decoded.kind).toBe("pointcloud2");
     if (decoded.kind === "pointcloud2") expect(decoded.message.width * decoded.message.height).toBe(200_000);
@@ -85,7 +85,7 @@ describe("browser recording entry", () => {
     const imageSample = await runtime.messageAt("/demo/image", 0n);
     const image = decodeSemanticMessage({ channel: imageSample.channel, data: imageSample.data });
     expect(opened.topics.map(({ name }) => name)).toEqual([
-      "/demo/camera_info", "/demo/custom_status", "/demo/image", "/demo/map", "/demo/markers", "/demo/odom", "/demo/path", "/demo/points", "/demo/scan", "/demo/value", "/tf",
+      "/demo/camera_info", "/demo/custom_status", "/demo/image", "/demo/imu", "/demo/map", "/demo/markers", "/demo/odom", "/demo/path", "/demo/points", "/demo/scan", "/demo/value", "/tf",
     ]);
     expect(decoded.kind).toBe("pointcloud2");
     if (decoded.kind === "pointcloud2") expect(decoded.message.width * decoded.message.height).toBe(200_000);

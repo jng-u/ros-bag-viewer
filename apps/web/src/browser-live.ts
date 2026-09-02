@@ -1,6 +1,7 @@
 import { availableDisplaysForSchema } from "@ros-web-viewer/m1-integration";
 
 import type { BrowserSample } from "./browser-runtime.js";
+import { standardRosSchema } from "./standard-ros-schema.js";
 import type {
   DesktopShellPorts,
   LiveConnectionSelection,
@@ -89,7 +90,7 @@ function topicSummary(topic: RelayTopic): TopicSummary {
   if (topic.schemaDefinition && new TextEncoder().encode(topic.schemaDefinition).byteLength > MAX_SCHEMA_BYTES) throw new Error("Live topic schema exceeds the schema budget.");
   const declaredDisplays = availableDisplaysForSchema(topic.typeName, "schema-present");
   const nativeDisplay = hasNativeDisplay(topic.typeName, declaredDisplays);
-  const schemaPresent = nativeDisplay || Boolean(topic.schemaDefinition);
+  const schemaPresent = nativeDisplay || Boolean(topic.schemaDefinition) || Boolean(standardRosSchema(topic.typeName, topic.encoding));
   const availableDisplays = schemaPresent ? declaredDisplays : ["raw"] as const;
   return {
     id: topic.id,
@@ -367,9 +368,12 @@ export class BrowserLiveRelay implements Pick<DesktopShellPorts, "connectLive" |
         receivedAtMs: performance.now(),
         sample: {
           channel: {
-            schema: topic.schemaDefinition
-              ? { name: topic.typeName, capability: "schema-present", definition: topic.schemaDefinition, encoding: topic.schemaEncoding }
-              : { name: topic.typeName, capability: hasNativeDisplay(topic.typeName) ? "schema-present" : "opaque" },
+            schema: (() => {
+              const fallback = standardRosSchema(topic.typeName, topic.encoding);
+              return topic.schemaDefinition || fallback
+                ? { name: topic.typeName, capability: "schema-present" as const, definition: topic.schemaDefinition ?? fallback?.definition, encoding: topic.schemaEncoding ?? fallback?.encoding }
+                : { name: topic.typeName, capability: hasNativeDisplay(topic.typeName) ? "schema-present" as const : "opaque" as const };
+            })(),
             messageEncoding: topic.encoding,
           },
           data: payload,

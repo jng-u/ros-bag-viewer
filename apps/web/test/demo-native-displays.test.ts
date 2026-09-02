@@ -36,7 +36,7 @@ describe("shipped deterministic demos", () => {
   for (const [name, format] of [["demo.mcap", "mcap"], ["demo-ros1.bag", "ros1-bag"]] as const) {
     it(`decodes every native ${format} demo topic through the browser runtime`, async () => {
       const { result, runtime } = await openDemo(name, format);
-      expect(result.topics.map(({ name: topic }) => topic).sort()).toEqual([...expectedKinds.keys(), "/demo/custom_status"].sort());
+      expect(result.topics.map(({ name: topic }) => topic).sort()).toEqual([...expectedKinds.keys(), "/demo/custom_status", "/demo/imu"].sort());
       for (const [topic, expectedKind] of expectedKinds) {
         const sample = await runtime.messageAt(topic, 0n);
         const decoded = decodeSemanticMessage({ channel: sample.channel, data: sample.data });
@@ -53,6 +53,17 @@ describe("shipped deterministic demos", () => {
       });
       expect(generic.value).toMatchObject({ score: 0.5, inliers: 120, state: "tracking" });
       expect(generic.numericFields.map(({ path }) => path)).toContain("residuals[2]");
+      const imu = await runtime.messageAt("/demo/imu", 0n);
+      const decodedImu = decodeGenericRosMessage({
+        typeName: imu.channel.schema.name,
+        messageEncoding: imu.channel.messageEncoding,
+        schemaEncoding: imu.channel.schema.encoding,
+        schemaDefinition: imu.channel.schema.definition,
+        schemaData: imu.channel.schema.data,
+        data: imu.data,
+      });
+      expect(decodedImu.numericFields.map(({ path }) => path)).toContain("angular_velocity.z");
+      expect(decodedImu.numericFields.map(({ path }) => path)).toContain("linear_acceleration_covariance[8]");
     });
   }
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserLiveRelay } from "../src/browser-live.js";
+import type { BrowserSample } from "../src/browser-runtime.js";
 
 class FakeWebSocket extends EventTarget {
   static readonly CONNECTING = 0;
@@ -160,6 +161,30 @@ describe("browser live relay transport", () => {
     relay.setEndpoint("ws://localhost:9999/viewer");
     const opened = await relay.connectLive({ browserOrigin: "http://localhost:8080", sessionToken: "secret" });
     expect(opened.topics[0]).toMatchObject({ compatibility: "opaque-inspectable", schemaCapability: "opaque", availableDisplays: ["raw"] });
+  });
+
+  it("resolves the standard ROS2 IMU schema for live numeric field plots", async () => {
+    FakeWebSocket.discoveryTopics = [{ id: "imu", name: "/imu", typeName: "sensor_msgs/msg/Imu", encoding: "cdr" }];
+    const samples: BrowserSample[] = [];
+    const relay = new BrowserLiveRelay((_topicId, sample) => samples.push(sample));
+    relay.setEndpoint("ws://localhost:9999/viewer");
+    const opened = await relay.connectLive({ browserOrigin: "http://localhost:8080", sessionToken: "secret" });
+    expect(opened.topics[0]).toMatchObject({ compatibility: "schema-backed-generic", schemaCapability: "schema-present", availableDisplays: ["numeric-plot", "raw"] });
+    await relay.subscribeLive(["imu"]);
+    FakeWebSocket.instance?.emitMessage({
+      version: 1,
+      kind: "message",
+      topicId: "imu",
+      sequence: "1",
+      sourceTimeNanos: "100",
+      receiptTimeNanos: "105",
+      typeName: "sensor_msgs/msg/Imu",
+      encoding: "cdr",
+      payloadBase64: btoa(String.fromCharCode(0, 1, 0, 0)),
+    });
+    await vi.waitFor(() => expect(samples).toHaveLength(1));
+    expect(samples[0]?.channel.schema).toMatchObject({ capability: "schema-present", encoding: "ros2msg" });
+    expect(samples[0]?.channel.schema.definition).toContain("angular_velocity");
   });
 
   it("drops replayed and discovery-mismatched live messages", async () => {

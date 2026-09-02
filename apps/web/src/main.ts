@@ -36,6 +36,7 @@ import { HistoricalFrameResolver, IDENTITY_TRANSFORM, transformBounds, type Fram
 import { OrbitCamera, type CameraPreset } from "./scene-camera.js";
 import { poseSourceFrame } from "./pose-source-frame.js";
 import { DesktopShellController, type DisplayKind, type TopicSummary } from "./shell.js";
+import { standardRosSchema } from "./standard-ros-schema.js";
 import { ViewerLayerRegistry, type ViewerLayer } from "./viewer-layers.js";
 import "./style.css";
 
@@ -91,7 +92,7 @@ app.innerHTML = `
         <button data-camera="front" type="button">FRONT</button>
         <label class="fixed-frame-control">REFERENCE <input id="fixed-frame-input" value="" placeholder="ALL FRAMES" aria-label="TF reference frame; blank shows all native frames" spellcheck="false" /></label>
         <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
-        <label class="aux-layout-control">WINDOWS <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">SPLIT RIGHT</option><option value="split-bottom">SPLIT BOTTOM</option></select></label>
+        <label class="aux-layout-control">WINDOWS <select id="aux-layout" aria-label="Auxiliary window layout"><option value="overlay">OVERLAY</option><option value="split-right">VERTICAL SPLIT</option><option value="split-bottom">HORIZONTAL SPLIT</option></select></label>
       </div>
       <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span data-scene-stat="vertices">0 VERTICES</span><span data-scene-stat="quality" class="quality-full">FULL DATA</span><span data-scene-stat="gpu">0 B GPU</span></div>
       <div class="drop-prompt" id="drop-prompt">
@@ -100,6 +101,7 @@ app.innerHTML = `
         <button id="drop-open-button" type="button">SELECT RECORDING</button>
       </div>
       <div class="aux-dock" id="aux-dock" aria-label="Image and raw data views"></div>
+      <div class="workspace-splitter" id="workspace-splitter" role="separator" aria-label="Resize split workspace" tabindex="0"></div>
       <div class="scene-message" id="scene-message" role="status" aria-live="polite"></div>
     </main>
 
@@ -220,6 +222,8 @@ let auxiliaryLayout: AuxiliaryLayout = "overlay";
 let auxiliarySignature = "";
 let auxiliaryOrder: string[] = [];
 const auxiliaryPositions = new Map<string, { x: number; y: number }>();
+const auxiliarySizes = new Map<string, { width: number; height: number }>();
+let auxiliarySplitRatio = 0.34;
 let plotFieldPicker: {
   readonly topicId: string;
   readonly fields: readonly { readonly path: string; readonly value: number }[];
@@ -358,6 +362,7 @@ let playing = false;
 let animationFrame = 0;
 let lastFrameMilliseconds = 0;
 let visualFrameQueued = false;
+let visualFrameDeferred = false;
 
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -399,6 +404,18 @@ function structuredPreview(value: unknown): string {
 
 function displayLabel(kind: DisplayKind): string {
   return kind.replaceAll("-", " ").toLocaleUpperCase();
+}
+
+function genericDecodeInput(sample: BrowserSample, data = sample.data) {
+  const fallback = standardRosSchema(sample.channel.schema.name, sample.channel.messageEncoding);
+  return {
+    typeName: sample.channel.schema.name,
+    messageEncoding: sample.channel.messageEncoding,
+    schemaEncoding: sample.channel.schema.encoding ?? fallback?.encoding,
+    schemaDefinition: sample.channel.schema.definition ?? fallback?.definition,
+    schemaData: sample.channel.schema.data,
+    data,
+  };
 }
 
 function resizeScene(): void {
@@ -478,6 +495,10 @@ function drawScene(): void {
   visualFrameQueued = true;
   requestAnimationFrame(() => {
     visualFrameQueued = false;
+    if (rendering) {
+      visualFrameDeferred = true;
+      return;
+    }
     layoutAuxiliaryWindows();
     paintScene();
     paintAuxiliaryCanvases();
@@ -520,6 +541,7 @@ function clearLayerRuntimes(): void {
   layers.clear();
   auxiliaryOrder = [];
   auxiliaryPositions.clear();
+  auxiliarySizes.clear();
   auxiliarySignature = "";
   plotFieldPicker = undefined;
 }
@@ -668,14 +690,7 @@ async function updateLayer(
       const decoderInput: BrowserSample = { channel: sample.channel, data, logTimeNanos: baseEnvelope.schedulingTime.valueNanos, sourceSequence: baseEnvelope.sourceSequence };
       try {
         if (layer.kind === "numeric-plot" && layer.fieldPath) {
-          generic = await messageDecoder.generic({
-            typeName: sample.channel.schema.name,
-            messageEncoding: sample.channel.messageEncoding,
-            schemaEncoding: sample.channel.schema.encoding,
-            schemaDefinition: sample.channel.schema.definition,
-            schemaData: sample.channel.schema.data,
-            data,
-          });
+          generic = await messageDecoder.generic(genericDecodeInput(sample, data));
         } else {
         const prepared = await messageDecoder.semanticPrepared(decoderInput, {
           maxPoints: 1_000_000,
@@ -739,14 +754,7 @@ async function updateNormalizedLayer(
       runtimeState.numericFields = collectNumericFields(decoded.message);
     } catch (semanticError) {
       try {
-        const generic = await messageDecoder.generic({
-          typeName: channel.schema.name,
-          messageEncoding: channel.messageEncoding,
-          schemaEncoding: channel.schema.encoding,
-          schemaDefinition: channel.schema.definition,
-          schemaData: channel.schema.data,
-          data,
-        });
+        const generic = await messageDecoder.generic(genericDecodeInput(decoderInput, data));
         runtimeState.generic = generic;
         runtimeState.numericFields = generic.numericFields;
         rawValue = generic.value;
@@ -951,14 +959,27 @@ function auxiliaryPosition(layerId: string, index: number, element: HTMLElement)
 }
 
 function layoutAuxiliaryWindows(): void {
+  const splitBasis = auxiliaryLayout === "split-right" ? scenePanel.clientWidth : scenePanel.clientHeight;
+  scenePanel.style.setProperty("--aux-split", `${Math.round(splitBasis * auxiliarySplitRatio)}px`);
   const windows = [...auxDock.querySelectorAll<HTMLElement>("[data-aux-layer]")];
   windows.forEach((element, index) => {
-    if (auxiliaryLayout !== "overlay") {
-      element.style.removeProperty("transform");
-      return;
-    }
     const id = element.dataset.auxLayer;
     if (!id) return;
+    const measured = auxiliarySizes.get(id) ?? { width: element.offsetWidth, height: element.offsetHeight };
+    auxiliarySizes.set(id, measured);
+    if (auxiliaryLayout !== "overlay") {
+      element.style.removeProperty("transform");
+      if (auxiliaryLayout === "split-right") {
+        element.style.width = "100%";
+        element.style.height = `${Math.max(140, measured.height)}px`;
+      } else {
+        element.style.width = `${Math.max(220, measured.width)}px`;
+        element.style.height = "100%";
+      }
+      return;
+    }
+    element.style.width = `${Math.max(220, measured.width)}px`;
+    element.style.height = `${Math.max(120, measured.height)}px`;
     const { x, y } = auxiliaryPosition(id, index, element);
     element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   });
@@ -966,10 +987,11 @@ function layoutAuxiliaryWindows(): void {
 
 function auxiliaryMarkup(layer: ViewerLayer): string {
   const common = `data-aux-layer="${layer.id}"`;
-  if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
-  if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span data-aux-status>—</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
-  if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl></section>`;
-  return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre></section>`;
+  const resize = '<span class="aux-resize-handle" data-aux-resize aria-hidden="true"></span>';
+  if (layer.kind === "image") return `<section class="aux-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
+  if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span data-aux-status>—</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas>${resize}</section>`;
+  if (layer.kind === "camera-info") return `<section class="aux-window info-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd data-camera-value="size">—</dd></div><div><dt>MODEL</dt><dd data-camera-value="model">—</dd></div><div><dt>CALIBRATED</dt><dd data-camera-value="calibrated">—</dd></div></dl>${resize}</section>`;
+  return `<section class="aux-window raw-window" ${common}><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span data-aux-status>WAITING</span></header><div class="raw-field-actions" data-raw-actions></div><pre class="raw-metadata" data-raw-metadata>Waiting for message metadata…</pre><pre class="raw-structured" data-raw-structured>Waiting for decoded message…</pre>${resize}</section>`;
 }
 
 function renderAuxiliary(): void {
@@ -1338,6 +1360,10 @@ async function renderSceneAtCurrentTime(frameVisible = false): Promise<void> {
     } while (renderQueued);
   } finally {
     rendering = false;
+    if (visualFrameDeferred) {
+      visualFrameDeferred = false;
+      drawScene();
+    }
   } })();
   return renderCompletion;
 }
@@ -1358,14 +1384,7 @@ async function hydrateNumericPlotHistory(layer: ViewerLayer): Promise<void> {
     const decoded = await Promise.all(batch.map(async (sample) => {
       let value: number | undefined;
       try {
-        const generic = await plotHistoryDecoder.generic({
-          typeName: sample.channel.schema.name,
-          messageEncoding: sample.channel.messageEncoding,
-          schemaEncoding: sample.channel.schema.encoding,
-          schemaDefinition: sample.channel.schema.definition,
-          schemaData: sample.channel.schema.data,
-          data: sample.data,
-        });
+        const generic = await plotHistoryDecoder.generic(genericDecodeInput(sample));
         value = numericValueAtPath(generic.value, layer.fieldPath!);
       } catch {
         const semantic = await plotHistoryDecoder.semantic(sample);
@@ -1402,14 +1421,7 @@ async function openPlotFieldPicker(topic: TopicSummary): Promise<void> {
     const sample = await sampleForTopic(topic);
     let fields: readonly { readonly path: string; readonly value: number }[];
     try {
-      const decoded = await plotFieldDecoder.generic({
-        typeName: sample.channel.schema.name,
-        messageEncoding: sample.channel.messageEncoding,
-        schemaEncoding: sample.channel.schema.encoding,
-        schemaDefinition: sample.channel.schema.definition,
-        schemaData: sample.channel.schema.data,
-        data: sample.data,
-      });
+      const decoded = await plotFieldDecoder.generic(genericDecodeInput(sample));
       fields = decoded.numericFields;
     } catch {
       fields = collectNumericFields((await plotFieldDecoder.semantic(sample)).message);
@@ -1767,6 +1779,51 @@ auxDock.addEventListener("click", (event) => {
   if (rawLayer && fieldPath) addLayer(rawLayer.topic, "numeric-plot", fieldPath);
 });
 
+let auxiliaryResize: {
+  readonly element: HTMLElement;
+  readonly id: string;
+  readonly pointerId: number;
+  readonly startX: number;
+  readonly startY: number;
+  readonly width: number;
+  readonly height: number;
+} | undefined;
+
+auxDock.addEventListener("pointerdown", (event) => {
+  const handle = (event.target as HTMLElement).closest<HTMLElement>("[data-aux-resize]");
+  const element = handle?.closest<HTMLElement>("[data-aux-layer]");
+  const id = element?.dataset.auxLayer;
+  if (!handle || !element || !id || event.button !== 0) return;
+  const size = { width: element.offsetWidth, height: element.offsetHeight };
+  auxiliarySizes.set(id, size);
+  auxiliaryResize = { element, id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, ...size };
+  try { handle.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
+  element.classList.add("is-resizing");
+  event.preventDefault();
+  event.stopPropagation();
+});
+
+auxDock.addEventListener("pointermove", (event) => {
+  if (!auxiliaryResize || auxiliaryResize.pointerId !== event.pointerId) return;
+  const position = auxiliaryPositions.get(auxiliaryResize.id) ?? { x: 0, y: 38 };
+  const maxWidth = auxiliaryLayout === "overlay" ? scenePanel.clientWidth - position.x : scenePanel.clientWidth;
+  const maxHeight = auxiliaryLayout === "overlay" ? scenePanel.clientHeight - position.y - 22 : scenePanel.clientHeight;
+  const width = auxiliaryLayout === "split-right" ? auxiliaryResize.width : Math.min(maxWidth, Math.max(220, auxiliaryResize.width + event.clientX - auxiliaryResize.startX));
+  const height = auxiliaryLayout === "split-bottom" ? auxiliaryResize.height : Math.min(maxHeight, Math.max(120, auxiliaryResize.height + event.clientY - auxiliaryResize.startY));
+  auxiliarySizes.set(auxiliaryResize.id, { width, height });
+  if (auxiliaryLayout !== "split-right") auxiliaryResize.element.style.width = `${width}px`;
+  if (auxiliaryLayout !== "split-bottom") auxiliaryResize.element.style.height = `${height}px`;
+  drawScene();
+});
+
+const finishAuxiliaryResize = (event: PointerEvent): void => {
+  if (!auxiliaryResize || auxiliaryResize.pointerId !== event.pointerId) return;
+  auxiliaryResize.element.classList.remove("is-resizing");
+  auxiliaryResize = undefined;
+};
+auxDock.addEventListener("pointerup", finishAuxiliaryResize);
+auxDock.addEventListener("pointercancel", finishAuxiliaryResize);
+
 let auxiliaryDrag: {
   readonly element: HTMLElement;
   readonly id: string;
@@ -1869,9 +1926,11 @@ layerList.addEventListener("dragover", (event) => {
   if (!event.dataTransfer?.types.includes("text/x-ros-viewer-layer")) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = "move";
-  (event.target as HTMLElement).closest<HTMLElement>("[data-layer]")?.classList.add("is-drop-target");
+  layerList.querySelectorAll(".is-drop-before, .is-drop-after").forEach((element) => element.classList.remove("is-drop-before", "is-drop-after"));
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-layer]");
+  if (target) target.classList.add(event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2 ? "is-drop-before" : "is-drop-after");
 });
-layerList.addEventListener("dragleave", (event) => (event.target as HTMLElement).closest<HTMLElement>("[data-layer]")?.classList.remove("is-drop-target"));
+layerList.addEventListener("dragleave", (event) => (event.target as HTMLElement).closest<HTMLElement>("[data-layer]")?.classList.remove("is-drop-before", "is-drop-after"));
 layerList.addEventListener("drop", (event) => {
   const movedId = event.dataTransfer?.getData("text/x-ros-viewer-layer");
   const target = (event.target as HTMLElement).closest<HTMLElement>("[data-layer]");
@@ -1886,7 +1945,7 @@ layerList.addEventListener("drop", (event) => {
   drawScene();
 });
 layerList.addEventListener("dragend", () => {
-  layerList.querySelectorAll(".is-dragging, .is-drop-target").forEach((element) => element.classList.remove("is-dragging", "is-drop-target"));
+  layerList.querySelectorAll(".is-dragging, .is-drop-before, .is-drop-after").forEach((element) => element.classList.remove("is-dragging", "is-drop-before", "is-drop-after"));
 });
 layerList.addEventListener("keydown", (event) => {
   const handle = (event.target as HTMLElement).closest<HTMLElement>(".layer-drag-handle");
@@ -1968,6 +2027,13 @@ async function step(direction: -1 | 1): Promise<void> {
 byId("step-back").addEventListener("click", () => void step(-1));
 byId("step-forward").addEventListener("click", () => void step(1));
 playButton.addEventListener("click", () => playing ? stopPlayback() : startPlayback());
+document.addEventListener("keydown", (event) => {
+  const target = event.target as HTMLElement | null;
+  if (event.code !== "Space" || event.repeat || document.querySelector("dialog[open]")
+    || target?.matches("input, select, textarea, button, [contenteditable='true']")) return;
+  event.preventDefault();
+  if (playing) stopPlayback(); else startPlayback();
+});
 
 document.querySelector<HTMLElement>(".camera-tools")!.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-camera]");
@@ -1999,6 +2065,39 @@ byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
 byId<HTMLSelectElement>("aux-layout").addEventListener("change", (event) => {
   auxiliaryLayout = (event.currentTarget as HTMLSelectElement).value as AuxiliaryLayout;
   renderAuxiliary();
+  drawScene();
+});
+
+const workspaceSplitter = byId<HTMLElement>("workspace-splitter");
+let splitPointerId: number | undefined;
+workspaceSplitter.addEventListener("pointerdown", (event) => {
+  if (auxiliaryLayout === "overlay" || event.button !== 0) return;
+  splitPointerId = event.pointerId;
+  try { workspaceSplitter.setPointerCapture(event.pointerId); } catch { /* Synthetic test events have no active native pointer. */ }
+  workspaceSplitter.classList.add("is-dragging");
+  event.preventDefault();
+});
+workspaceSplitter.addEventListener("pointermove", (event) => {
+  if (splitPointerId !== event.pointerId || auxiliaryLayout === "overlay") return;
+  const bounds = scenePanel.getBoundingClientRect();
+  auxiliarySplitRatio = auxiliaryLayout === "split-right"
+    ? (bounds.right - event.clientX) / bounds.width
+    : (bounds.bottom - event.clientY) / bounds.height;
+  auxiliarySplitRatio = Math.max(0.2, Math.min(0.75, auxiliarySplitRatio));
+  drawScene();
+});
+const finishSplit = (event: PointerEvent): void => {
+  if (splitPointerId !== event.pointerId) return;
+  splitPointerId = undefined;
+  workspaceSplitter.classList.remove("is-dragging");
+};
+workspaceSplitter.addEventListener("pointerup", finishSplit);
+workspaceSplitter.addEventListener("pointercancel", finishSplit);
+workspaceSplitter.addEventListener("keydown", (event) => {
+  if (auxiliaryLayout === "overlay" || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+  const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? 1 : -1;
+  auxiliarySplitRatio = Math.max(0.2, Math.min(0.75, auxiliarySplitRatio + direction * 0.02));
+  event.preventDefault();
   drawScene();
 });
 

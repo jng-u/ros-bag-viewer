@@ -23,6 +23,7 @@ class MockWebGl2 {
   deletedBuffers = 0;
   bufferAllocations: number[] = [];
   bufferUploads: number[] = [];
+  failBufferUpload = false;
   draws: Array<{ mode: number; count: number }> = [];
   matrices: Float32List[] = [];
 
@@ -43,6 +44,7 @@ class MockWebGl2 {
   }
 
   bufferSubData(_target: number, _offset: number, data: ArrayBufferView): void {
+    if (this.failBufferUpload) throw new Error("simulated upload failure");
     this.bufferUploads.push(data.byteLength);
   }
 
@@ -159,6 +161,17 @@ describe("WebGl2Renderer", () => {
     value.setTransform("sensor", transform);
     value.upsert({ id: "sensor", topology: "points", positions: new Float32Array([1, 0, 0]) }).draw();
     expect(gl.matrices.at(-1)).toEqual(Array.from(transform));
+  });
+
+  it("keeps the previously drawable geometry active until its replacement upload succeeds", () => {
+    const { gl, renderer: value } = renderer();
+    const previous = value.upsert({ id: "stable", topology: "points", positions: new Float32Array([0, 0, 0]) });
+    gl.failBufferUpload = true;
+
+    expect(() => value.upsert({ id: "stable", topology: "points", positions: new Float32Array([1, 0, 0]) })).toThrow(/simulated upload failure/u);
+    gl.failBufferUpload = false;
+    expect(() => previous.draw()).not.toThrow();
+    expect(value.telemetry()).toMatchObject({ liveBuffers: 1, liveGpuBytes: 12 });
   });
 
   it("reuses exact-capacity pooled buffers and deletes every buffer on disposal", () => {

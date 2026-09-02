@@ -261,6 +261,18 @@ function numeric(writer, frame) {
   return writer.finish(4);
 }
 
+function imu(writer, frame) {
+  writer.header("imu_link", frame);
+  const yaw = frame * 0.025;
+  writer.float64(0); writer.float64(0); writer.float64(Math.sin(yaw / 2)); writer.float64(Math.cos(yaw / 2));
+  for (let index = 0; index < 9; index += 1) writer.float64(index % 4 === 0 ? 0.002 : 0);
+  writer.float64(0.02 * Math.sin(frame * 0.2)); writer.float64(0.01 * Math.cos(frame * 0.13)); writer.float64(0.25);
+  for (let index = 0; index < 9; index += 1) writer.float64(index % 4 === 0 ? 0.004 : 0);
+  writer.float64(0.3 * Math.sin(frame * 0.18)); writer.float64(0.2 * Math.cos(frame * 0.11)); writer.float64(9.81);
+  for (let index = 0; index < 9; index += 1) writer.float64(index % 4 === 0 ? 0.01 : 0);
+  return writer.finish(4);
+}
+
 function customStatus(writer, frame) {
   writer.float64(0.5 + Math.sin(frame * 0.17) * 0.4);
   writer.int32(120 + frame * 3);
@@ -279,6 +291,7 @@ const demoTopics = [
   { topic: "/tf", type: "tf2_msgs/TFMessage", ros2Type: "tf2_msgs/msg/TFMessage", md5: "94810edda583a504dfda3829e70d7eec", definition: "geometry_msgs/TransformStamped[] transforms\n", cdr: (frame) => tfMessage(new CdrWriter(), frame), ros1: (frame) => tfMessage(new Ros1Writer(), frame) },
   { topic: "/demo/camera_info", type: "sensor_msgs/CameraInfo", ros2Type: "sensor_msgs/msg/CameraInfo", md5: "c9a58c1b0b154e0e6da7578cb991d214", definition: "std_msgs/Header header\nuint32 height\nuint32 width\nstring distortion_model\nfloat64[] D\nfloat64[9] K\nfloat64[9] R\nfloat64[12] P\nuint32 binning_x\nuint32 binning_y\nsensor_msgs/RegionOfInterest roi\n", cdr: (frame) => cameraInfo(new CdrWriter(), frame), ros1: (frame) => cameraInfo(new Ros1Writer(), frame) },
   { topic: "/demo/markers", type: "visualization_msgs/Marker", ros2Type: "visualization_msgs/msg/Marker", md5: "4048c9de2a16f4ae8e0538085ebf1b97", definition: "std_msgs/Header header\nstring ns\nint32 id\nint32 type\nint32 action\ngeometry_msgs/Pose pose\ngeometry_msgs/Vector3 scale\nstd_msgs/ColorRGBA color\nduration lifetime\nbool frame_locked\ngeometry_msgs/Point[] points\nstd_msgs/ColorRGBA[] colors\nstring text\nstring mesh_resource\nbool mesh_use_embedded_materials\n", cdr: (frame) => marker(new CdrWriter(), frame), ros1: (frame) => marker(new Ros1Writer(), frame) },
+  { topic: "/demo/imu", type: "sensor_msgs/Imu", ros2Type: "sensor_msgs/msg/Imu", md5: "6a62c6daae103f4ff57a132d6f95cec2", definition: "std_msgs/Header header\ngeometry_msgs/Quaternion orientation\nfloat64[9] orientation_covariance\ngeometry_msgs/Vector3 angular_velocity\nfloat64[9] angular_velocity_covariance\ngeometry_msgs/Vector3 linear_acceleration\nfloat64[9] linear_acceleration_covariance\n================================================================================\nMSG: std_msgs/Header\nbuiltin_interfaces/Time stamp\nstring frame_id\n================================================================================\nMSG: geometry_msgs/Quaternion\nfloat64 x\nfloat64 y\nfloat64 z\nfloat64 w\n================================================================================\nMSG: geometry_msgs/Vector3\nfloat64 x\nfloat64 y\nfloat64 z\n", ros1Definition: "std_msgs/Header header\ngeometry_msgs/Quaternion orientation\nfloat64[9] orientation_covariance\ngeometry_msgs/Vector3 angular_velocity\nfloat64[9] angular_velocity_covariance\ngeometry_msgs/Vector3 linear_acceleration\nfloat64[9] linear_acceleration_covariance\n================================================================================\nMSG: std_msgs/Header\nuint32 seq\ntime stamp\nstring frame_id\n================================================================================\nMSG: geometry_msgs/Quaternion\nfloat64 x\nfloat64 y\nfloat64 z\nfloat64 w\n================================================================================\nMSG: geometry_msgs/Vector3\nfloat64 x\nfloat64 y\nfloat64 z\n", cdr: (frame) => imu(new CdrWriter(), frame), ros1: (frame) => imu(new Ros1Writer(), frame) },
   { topic: "/demo/value", type: "std_msgs/Float64", ros2Type: "std_msgs/msg/Float64", md5: "fdb28210bfa9d7c91146260178d9a584", definition: "float64 data\n", cdr: (frame) => numeric(new CdrWriter(), frame), ros1: (frame) => numeric(new Ros1Writer(), frame) },
   { topic: "/demo/custom_status", type: "demo_msgs/Status", ros2Type: "demo_msgs/msg/Status", md5: "demo-status-schema-v1", definition: "float64 score\nint32 inliers\nstring state\nfloat32[] residuals\n", cdr: (frame) => customStatus(new CdrWriter(), frame), ros1: (frame) => customStatus(new Ros1Writer(), frame) },
 ];
@@ -316,7 +329,7 @@ function bagConnection(id, topic, type, md5sum, definition) {
 }
 
 async function generateRos1Bag() {
-  const connections = demoTopics.map((topic, index) => bagConnection(index, topic.topic, topic.type, topic.md5, topic.definition));
+  const connections = demoTopics.map((topic, index) => bagConnection(index, topic.topic, topic.type, topic.md5, topic.ros1Definition ?? topic.definition));
   const chunkParts = [...connections];
   const indexes = demoTopics.map(() => []);
   let chunkOffset = connections.reduce((total, bytes) => total + bytes.byteLength, 0);

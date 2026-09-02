@@ -305,9 +305,16 @@ export class WebGl2Renderer {
 
     const previous = this.#resources.get(input.id);
     const previousModel = previous?.modelMatrix.slice();
-    previous?.dispose();
-
-    const buffer = this.#acquireBuffer(byteLength);
+    let previousReleased = false;
+    let buffer: WebGLBuffer;
+    try {
+      buffer = this.#acquireBuffer(byteLength);
+    } catch (error) {
+      if (!previous || !(error instanceof Error) || error.message !== "GPU byte budget exceeded") throw error;
+      previous.dispose();
+      previousReleased = true;
+      buffer = this.#acquireBuffer(byteLength);
+    }
     const gl = this.#gl;
     try {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -331,6 +338,7 @@ export class WebGl2Renderer {
     );
     if (previousModel) resource.modelMatrix = previousModel;
     this.#resources.set(input.id, resource);
+    if (!previousReleased) previous?.dispose();
     return resource;
   }
 

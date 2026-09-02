@@ -212,7 +212,7 @@ try {
         imageWidth: document.querySelector('.aux-window canvas')?.width ?? 0,
       };`);
       const renderedVertices = Number(value.stats.match(/WEBGL2([\d,]+) VERTICES/u)?.[1]?.replaceAll(',', '') ?? 0);
-      if (value.phase === "ready" && value.source.includes(expectedSource) && value.epoch > previousEpoch && value.topics === 11 && value.layers >= 10 && value.ready >= 10 && value.errors === 0 && value.readyPointCloud && value.scene.includes("synchronized") && renderedVertices >= 200_000 && value.stats.includes("FULL DATA") && value.imageWidth > 0) return { ...value, renderedVertices };
+      if (value.phase === "ready" && value.source.includes(expectedSource) && value.epoch > previousEpoch && value.topics === 12 && value.layers >= 10 && value.ready >= 10 && value.errors === 0 && value.readyPointCloud && value.scene.includes("synchronized") && renderedVertices >= 200_000 && value.stats.includes("FULL DATA") && value.imageWidth > 0) return { ...value, renderedVertices };
       throw new Error(JSON.stringify(value));
     });
     results.push({ format, openToSynchronizedMs: Date.now() - openStarted, ...result });
@@ -235,7 +235,7 @@ try {
       ready: [...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('READY')).length,
       errors: document.querySelectorAll('.layer-error').length,
     };`);
-    return value.phase === "ready" && value.source.includes("ROS2 BAG") && value.topics === 11 && value.ready >= 10 && value.errors === 0 ? value : undefined;
+    return value.phase === "ready" && value.source.includes("ROS2 BAG") && value.topics === 12 && value.ready >= 10 && value.errors === 0 ? value : undefined;
   });
   await command(`/session/${sessionId}/window`, "DELETE");
   await command(`/session/${sessionId}/window`, "POST", { handle: originalWindow });
@@ -282,7 +282,7 @@ try {
     return value.pointSize === "7" && value.colorMode === "axis" && value.colorAxis === "x" && value.pointReady && value.errors === 0 ? value : undefined;
   });
 
-  const playbackStart = await execute("window.__stableLayerRow=document.querySelector('.layer-row'); document.querySelector('#play-button').click(); return document.querySelector('#current-time')?.textContent ?? '';");
+  const playbackStart = await execute("window.__stableLayerRow=document.querySelector('.layer-row'); document.body.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,code:'Space',key:' '})); return document.querySelector('#current-time')?.textContent ?? '';");
   await waitFor("playback advances without rebuilding layer DOM", async () => {
     const value = await execute(`return {
       time: document.querySelector('#current-time')?.textContent ?? '',
@@ -304,10 +304,11 @@ try {
     };`);
     return value.pointVisible && value.pathSelected && value.playing ? value : undefined;
   });
-  await execute("document.querySelector('#play-button').click();");
+  const spacePlayback = await execute("document.body.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,code:'Space',key:' '})); return document.querySelector('#play-button')?.getAttribute('aria-label');");
+  if (spacePlayback !== "Play recording") throw new Error(`Space did not pause playback: ${spacePlayback}`);
 
-  const layerOrder = await execute(`const before=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); const source=document.querySelector('.layer-row .layer-drag-handle'); const target=document.querySelectorAll('.layer-row')[document.querySelectorAll('.layer-row').length-1]; const transfer=new DataTransfer(); source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer})); const after=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); return {before,after};`);
-  if (layerOrder.before[0] === layerOrder.after[0]) throw new Error(`Layer reorder did not change draw order: ${JSON.stringify(layerOrder)}`);
+  const layerOrder = await execute(`const before=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); const source=document.querySelector('.layer-row .layer-drag-handle'); const target=document.querySelectorAll('.layer-row')[document.querySelectorAll('.layer-row').length-1]; const transfer=new DataTransfer(); source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer})); target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); const indicator=target.classList.contains('is-drop-before'); target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer,clientY:target.getBoundingClientRect().top+1})); source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer})); const after=[...document.querySelectorAll('.layer-row')].map((row)=>row.dataset.layer); return {before,after,indicator};`);
+  if (layerOrder.before[0] === layerOrder.after[0] || !layerOrder.indicator) throw new Error(`Layer reorder/drop indicator failed: ${JSON.stringify(layerOrder)}`);
 
   const seekStarted = Date.now();
   const seekEpoch = Number(await execute("return document.querySelector('#epoch-value')?.textContent ?? '0'"));
@@ -362,15 +363,28 @@ try {
     return value.plots >= 2 && value.customReady >= 2 && value.samples > 1 ? value : undefined;
   });
 
-  const auxiliaryLayout = await execute(`const canvas=document.querySelector('#scene-canvas'); const full=canvas.clientWidth; const select=document.querySelector('#aux-layout'); select.value='split-right'; select.dispatchEvent(new Event('change',{bubbles:true})); const right=canvas.clientWidth; select.value='split-bottom'; select.dispatchEvent(new Event('change',{bubbles:true})); const bottomHeight=canvas.clientHeight; select.value='overlay'; select.dispatchEvent(new Event('change',{bubbles:true})); return {full,right,bottomHeight,restored:canvas.clientWidth,layout:document.querySelector('.scene-panel')?.dataset.auxLayout};`);
-  if (!(auxiliaryLayout.right < auxiliaryLayout.full && auxiliaryLayout.bottomHeight > 0 && auxiliaryLayout.restored === auxiliaryLayout.full && auxiliaryLayout.layout === "overlay")) throw new Error(`Auxiliary split layout failed: ${JSON.stringify(auxiliaryLayout)}`);
-  const auxiliaryMove = await execute(`const element=document.querySelector('[data-aux-layer]'); const header=element.querySelector('header'); const before=getComputedStyle(element).transform; const rect=header.getBoundingClientRect(); const pointerId=91; header.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId,button:0,clientX:rect.left+8,clientY:rect.top+8})); header.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId,buttons:1,clientX:rect.left+88,clientY:rect.top+48})); header.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId,button:0,clientX:rect.left+88,clientY:rect.top+48})); return {before,after:getComputedStyle(element).transform,stable:element.isConnected};`);
+  await execute(`const row=[...document.querySelectorAll('.topic-row')].find((item)=>item.querySelector('strong')?.textContent==='/demo/imu'); row?.querySelector('button[data-kind="numeric-plot"]')?.click();`);
+  const imuFields = await waitFor("IMU numeric field picker", async () => {
+    const value = await execute(`return [...document.querySelectorAll('[data-add-plot-field]')].map((button)=>button.dataset.addPlotField);`);
+    return value.includes("orientation.w") && value.includes("angular_velocity.z") && value.includes("linear_acceleration_covariance[8]") ? value : undefined;
+  });
+  await execute(`document.querySelector('[data-add-plot-field="angular_velocity.z"]')?.click();`);
+  const imuPlot = await waitFor("IMU time-axis plot", async () => {
+    const value = await execute(`const plot=[...document.querySelectorAll('.plot-window')].find((item)=>item.textContent.includes('/demo/imu')&&item.textContent.includes('angular_velocity.z')); return {ready:[...document.querySelectorAll('.layer-row')].some((row)=>row.textContent.includes('/demo/imu')&&row.textContent.includes('READY')),samples:Number(plot?.dataset.sampleCount??'0')};`);
+    return value.ready && value.samples > 1 ? value : undefined;
+  });
+
+  const auxiliaryLayout = await executeAsync(`const done=arguments[arguments.length-1]; (async()=>{ const canvas=document.querySelector('#scene-canvas'); const panel=document.querySelector('.scene-panel'); const select=document.querySelector('#aux-layout'); const splitter=document.querySelector('#workspace-splitter'); const fullWidth=canvas.clientWidth; const fullHeight=canvas.clientHeight; select.value='split-right'; select.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(requestAnimationFrame); const verticalBefore=canvas.clientWidth; let rect=splitter.getBoundingClientRect(); splitter.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:71,button:0,clientX:rect.left+2,clientY:rect.top+20})); splitter.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:71,buttons:1,clientX:rect.left-80,clientY:rect.top+20})); splitter.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:71,button:0,clientX:rect.left-80,clientY:rect.top+20})); await new Promise(requestAnimationFrame); const verticalAfter=canvas.clientWidth; select.value='split-bottom'; select.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(requestAnimationFrame); const horizontalBefore=canvas.clientHeight; rect=splitter.getBoundingClientRect(); splitter.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:72,button:0,clientX:rect.left+20,clientY:rect.top+2})); splitter.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:72,buttons:1,clientX:rect.left+20,clientY:rect.top-60})); splitter.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:72,button:0,clientX:rect.left+20,clientY:rect.top-60})); await new Promise(requestAnimationFrame); const horizontalAfter=canvas.clientHeight; select.value='overlay'; select.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(requestAnimationFrame); done({fullWidth,fullHeight,verticalBefore,verticalAfter,horizontalBefore,horizontalAfter,restoredWidth:canvas.clientWidth,restoredHeight:canvas.clientHeight,layout:panel.dataset.auxLayout}); })().catch((error)=>done({error:String(error)}));`);
+  if (!(auxiliaryLayout.verticalAfter < auxiliaryLayout.verticalBefore && auxiliaryLayout.horizontalAfter < auxiliaryLayout.horizontalBefore && auxiliaryLayout.restoredWidth === auxiliaryLayout.fullWidth && auxiliaryLayout.restoredHeight === auxiliaryLayout.fullHeight && auxiliaryLayout.layout === "overlay")) throw new Error(`Auxiliary split layout failed: ${JSON.stringify(auxiliaryLayout)}`);
+  const auxiliaryMove = await execute(`const element=document.querySelector('[data-aux-layer]'); const header=element.querySelector('header'); const before=getComputedStyle(element).transform; const rect=header.getBoundingClientRect(); const pointerId=91; header.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId,button:0,clientX:rect.left+8,clientY:rect.top+8})); header.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId,buttons:1,clientX:rect.left-72,clientY:rect.top-42})); header.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId,button:0,clientX:rect.left-72,clientY:rect.top-42})); return {before,after:getComputedStyle(element).transform,stable:element.isConnected};`);
   if (auxiliaryMove.before === auxiliaryMove.after || !auxiliaryMove.stable) throw new Error(`Auxiliary window pointer move failed: ${JSON.stringify(auxiliaryMove)}`);
+  const auxiliaryResize = await execute(`const element=document.querySelector('[data-aux-layer]'); const handle=element.querySelector('[data-aux-resize]'); const before={width:element.offsetWidth,height:element.offsetHeight}; const rect=handle.getBoundingClientRect(); const pointerId=92; handle.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId,button:0,clientX:rect.right-2,clientY:rect.bottom-2})); handle.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId,buttons:1,clientX:rect.right+58,clientY:rect.bottom+38})); handle.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId,button:0,clientX:rect.right+58,clientY:rect.bottom+38})); return {before,after:{width:element.offsetWidth,height:element.offsetHeight}};`);
+  if (!(auxiliaryResize.after.width > auxiliaryResize.before.width && auxiliaryResize.after.height > auxiliaryResize.before.height)) throw new Error(`Auxiliary window resize failed: ${JSON.stringify(auxiliaryResize)}`);
   const rawScreenshotPath = resolve("/tmp/ros-web-viewer-browser-e2e-raw.png");
   await writeFile(rawScreenshotPath, Buffer.from(await command(`/session/${sessionId}/screenshot`), "base64"));
 
   if (viewerOnly) {
-    process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryMove, rawScreenshotPath }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, spacePlayback, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, imuFields: imuFields.length, imuPlot, auxiliaryLayout, auxiliaryMove, auxiliaryResize, rawScreenshotPath }, null, 2)}\n`);
   } else {
   await execute("const s=document.querySelector('#demo-kind'); s.value='mcap'; s.dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#demo-button').click();");
   await waitFor("shareable local MCAP", async () => await execute("return document.querySelector('.viewer-shell')?.dataset.phase==='ready' && document.querySelector('#source-name')?.textContent.includes('DEMO.MCAP') && !document.querySelector('#share-button')?.disabled"));
@@ -402,7 +416,7 @@ try {
       scene: document.querySelector('#scene-message')?.textContent ?? '',
       imageWidth: document.querySelector('.aux-window canvas')?.width ?? 0,
     };`);
-    if (value.phase === "ready" && value.mode.includes("HOSTED") && value.source.includes("RECORDING.MCAP") && value.epoch > hostedEpoch && value.topics === 11 && value.layers >= 10 && value.ready >= 10 && value.errors === 0 && value.scene.includes("synchronized") && value.imageWidth > 0 && /[1-9][0-9]* VERTICES/.test(value.stats)) return value;
+    if (value.phase === "ready" && value.mode.includes("HOSTED") && value.source.includes("RECORDING.MCAP") && value.epoch > hostedEpoch && value.topics === 12 && value.layers >= 10 && value.ready >= 10 && value.errors === 0 && value.scene.includes("synchronized") && value.imageWidth > 0 && /[1-9][0-9]* VERTICES/.test(value.stats)) return value;
     throw new Error(JSON.stringify(value));
   });
   await execute("document.querySelector('#share-button').click(); document.querySelector('#share-revoke').click();");
@@ -448,7 +462,7 @@ try {
   await mkdir(dirname(screenshotPath), { recursive: true });
   await writeFile(screenshotPath, Buffer.from(sceneScreenshot, "base64"));
   await writeFile(liveScreenshotPath, Buffer.from(liveScreenshot, "base64"));
-  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, auxiliaryLayout, auxiliaryMove, rawScreenshotPath, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ viewerUrl, environment, results, concurrentRos2, ros2NamespaceBeforeSwitch, ros2Reopen, displayConfiguration, playbackInteraction, spacePlayback, blinkRegression, layerOrder, seek, fixedFrame, custom: { layers: custom.layers, rawReady: custom.rawReady }, customPlot, imuFields: imuFields.length, imuPlot, auxiliaryLayout, auxiliaryMove, auxiliaryResize, rawScreenshotPath, createdShare: { url: createdShare.url.replace(/#.*$/u, "#capability=<redacted>"), revokedStatus: revokedResponse.status }, hosted, browserFrameTiming, live, screenshotPath, liveScreenshotPath }, null, 2)}\n`);
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n${driverLog}\n`);

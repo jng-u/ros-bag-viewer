@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decodeGenericRosMessage } from "../src/generic-ros-decoder.js";
+import { standardRosSchema } from "../src/standard-ros-schema.js";
 
 function cdrCustom(): Uint8Array {
   const bytes = new Uint8Array(40);
@@ -100,34 +101,13 @@ describe("generic ROS schema decoder", () => {
   });
 
   it("exposes every scalar IMU vector, quaternion, and covariance field for plotting", () => {
-    const definition = `std_msgs/Header header
-geometry_msgs/Quaternion orientation
-float64[9] orientation_covariance
-geometry_msgs/Vector3 angular_velocity
-float64[9] angular_velocity_covariance
-geometry_msgs/Vector3 linear_acceleration
-float64[9] linear_acceleration_covariance
-================================================================================
-MSG: std_msgs/Header
-builtin_interfaces/Time stamp
-string frame_id
-================================================================================
-MSG: geometry_msgs/Quaternion
-float64 x
-float64 y
-float64 z
-float64 w
-================================================================================
-MSG: geometry_msgs/Vector3
-float64 x
-float64 y
-float64 z
-`;
+    const schema = standardRosSchema("sensor_msgs/msg/Imu", "cdr");
+    expect(schema).toBeDefined();
     const decoded = decodeGenericRosMessage({
       typeName: "sensor_msgs/msg/Imu",
       messageEncoding: "cdr",
-      schemaEncoding: "ros2msg",
-      schemaDefinition: definition,
+      schemaEncoding: schema!.encoding,
+      schemaDefinition: schema!.definition,
       data: cdrImu(),
     });
     expect(decoded.numericFields.map(({ path }) => path)).toEqual(expect.arrayContaining([
