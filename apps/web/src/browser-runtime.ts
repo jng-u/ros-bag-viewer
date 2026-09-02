@@ -8,7 +8,15 @@ import {
   type Ros2SqliteMessage,
   type SourceEpochPort,
 } from "@ros-web-viewer/source-ros2-sqlite";
-import { BlobRangeSource, BoundedByteReader, SourceEpochController, type ByteRange, type RangeSource } from "@ros-web-viewer/worker-runtime";
+import {
+  BlobRangeSource,
+  BoundedByteReader,
+  HARD_WORKER_LIMITS,
+  SourceEpochController,
+  type ByteRange,
+  type RangeSource,
+  type WorkerResourceLimits,
+} from "@ros-web-viewer/worker-runtime";
 import { decompress as decompressLz4 } from "lz4-lite";
 
 import { BrowserSqliteQueryProvider, MAX_BROWSER_SQLITE_PARTS } from "./browser-sqlite.js";
@@ -97,7 +105,17 @@ const SAMPLE_LIMITS = {
   maxDecompressedBytes: 64 * 1024 * 1024,
   maxDecompressionRatio: 100,
   maxCacheBytes: 16 * 1024 * 1024,
-};
+} satisfies WorkerResourceLimits;
+
+const LOCAL_UNINDEXED_READ_PASSES = 32n;
+
+export function browserLocalReadLimits(sourceBytes: bigint): WorkerResourceLimits {
+  if (sourceBytes < 0n) throw new Error("local source byte length cannot be negative");
+  const scaledTotal = sourceBytes * LOCAL_UNINDEXED_READ_PASSES;
+  const withDefaultFloor = scaledTotal < SAMPLE_LIMITS.maxTotalReadBytes ? SAMPLE_LIMITS.maxTotalReadBytes : scaledTotal;
+  const maxTotalReadBytes = withDefaultFloor > HARD_WORKER_LIMITS.maxTotalReadBytes ? HARD_WORKER_LIMITS.maxTotalReadBytes : withDefaultFloor;
+  return { ...SAMPLE_LIMITS, maxTotalReadBytes };
+}
 
 async function cancelResponseBody(response: Response): Promise<void> {
   try { await response.body?.cancel(); } catch { /* validation failure still takes precedence */ }
@@ -309,7 +327,7 @@ function errorDetail(error: unknown): string {
 
 /** Browser runtime for MCAP, ROS1 bag, and ROS2 SQLite bag bundles. */
 export class BrowserRecordingRuntime {
-  readonly #metadata = new LocalMcapDesktopRuntime(undefined, undefined, browserMcapDecompressors);
+  #metadata?: LocalMcapDesktopRuntime;
   #kind?: "mcap" | "ros1-bag" | "ros2-sqlite";
   #mcapSession?: McapSourceSession;
   #mcapEpoch?: SourceEpochController;
@@ -365,14 +383,17 @@ export class BrowserRecordingRuntime {
   }
 
   async #openMcap(selection: LocalMcapSelection): Promise<OpenLocalResult> {
-    const result = await this.#metadata.openLocalMcap(selection);
     if (!selection.blob) throw new Error("MCAP selection is missing its local file bytes");
+    const limits = browserLocalReadLimits(BigInt(selection.blob.size));
+    const metadata = new LocalMcapDesktopRuntime(limits, undefined, browserMcapDecompressors);
+    const result = await metadata.openLocalMcap(selection);
     const sourceEpoch = new SourceEpochController();
-    const reader = new BoundedByteReader(new BlobRangeSource(selection.blob), sourceEpoch, SAMPLE_LIMITS);
+    const reader = new BoundedByteReader(new BlobRangeSource(selection.blob), sourceEpoch, limits);
     this.#kind = "mcap";
     this.#hostedMcap = false;
     this.#mcapSession = await McapSourceSession.open(reader, { decompressors: browserMcapDecompressors });
     this.#mcapEpoch = sourceEpoch;
+    this.#metadata = metadata;
     this.#startTimeNanos = 0n;
     this.#epoch = result.epoch;
     return result;
@@ -491,6 +512,7 @@ export class BrowserRecordingRuntime {
     }
     if (this.#kind === "mcap") {
       this.#mcapEpoch?.advance("local MCAP seek");
+      if (!this.#metadata) throw new Error("Open a local MCAP source before seeking.");
       const result = await this.#metadata.seek(timeNanos);
       this.#epoch = result.epoch;
       return result;
@@ -803,6 +825,7 @@ export class BrowserRecordingRuntime {
     this.#mcapSession = undefined;
     this.#mcapEpoch?.advance("recording replaced");
     this.#mcapEpoch = undefined;
+    this.#metadata = undefined;
     this.#hostedMcap = false;
     this.#mcapSequentialStartTimeNanos = undefined;
     this.#kind = undefined;

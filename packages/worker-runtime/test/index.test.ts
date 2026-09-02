@@ -193,6 +193,19 @@ describe("bounded byte reader", () => {
     });
   });
 
+  it("applies maxTotalReadBytes per source epoch instead of permanently exhausting an interactive session", async () => {
+    const epoch = new SourceEpochController();
+    const reader = new BoundedByteReader(new BlobRangeSource(new Blob([new Uint8Array(16)])), epoch, limits);
+    await reader.read(0n, 4n);
+    await reader.read(4n, 4n);
+    await reader.read(8n, 4n);
+    await reader.read(12n, 4n);
+    await expect(reader.read(0n, 1n)).rejects.toThrow(/maxTotalReadBytes/u);
+    epoch.advance("seek");
+    await expect(reader.read(0n, 4n)).resolves.toHaveLength(4);
+    expect(reader.snapshotTelemetry()).toMatchObject({ requestedBytes: 20n, completedBytes: 20n });
+  });
+
   it("rejects oversized and out-of-bounds requests without whole-source fallback", async () => {
     const reader = new BoundedByteReader(new BlobRangeSource(new Blob([new Uint8Array(10)])), new SourceEpochController(), limits);
     await expect(reader.read(0n, 5n)).rejects.toThrow(/maxSingleReadBytes/);

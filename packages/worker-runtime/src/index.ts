@@ -198,6 +198,8 @@ export class BoundedByteReader {
     rejectedReads: 0,
   };
   #inFlightBytes = 0;
+  #budgetEpoch: number;
+  #requestedBytesInBudgetEpoch = 0n;
 
   constructor(source: RangeSource, epoch: SourceEpochController, limits: WorkerResourceLimits = DEFAULT_WORKER_LIMITS) {
     this.#source = source;
@@ -205,6 +207,7 @@ export class BoundedByteReader {
     const limitsSnapshot = { ...limits };
     assertWorkerResourceLimits(limitsSnapshot);
     this.#limits = Object.freeze(limitsSnapshot);
+    this.#budgetEpoch = epoch.epoch;
   }
 
   async size(): Promise<bigint> {
@@ -214,12 +217,16 @@ export class BoundedByteReader {
   read(offset: bigint, size: bigint): Promise<Uint8Array> {
     this.#telemetry.readCalls += 1;
     try {
+      if (this.#budgetEpoch !== this.#epoch.epoch) {
+        this.#budgetEpoch = this.#epoch.epoch;
+        this.#requestedBytesInBudgetEpoch = 0n;
+      }
       assertRange({ offset, length: size }, this.#source.size);
       if (size > BigInt(this.#limits.maxSingleReadBytes)) {
         throw new Error("byte range exceeds maxSingleReadBytes");
       }
-      if (this.#telemetry.requestedBytes + size > this.#limits.maxTotalReadBytes) {
-        throw new Error("byte range session exceeds maxTotalReadBytes");
+      if (this.#requestedBytesInBudgetEpoch + size > this.#limits.maxTotalReadBytes) {
+        throw new Error("byte range source epoch exceeds maxTotalReadBytes");
       }
       if (this.#epoch.signal.aborted) throw abortError(this.#epoch.signal.reason);
       if (this.#telemetry.activeReads >= this.#limits.maxConcurrentReads && this.#queue.length >= this.#limits.maxQueuedReads) {
@@ -231,6 +238,7 @@ export class BoundedByteReader {
     }
 
     this.#telemetry.requestedBytes += size;
+    this.#requestedBytesInBudgetEpoch += size;
     return new Promise<Uint8Array>((resolve, reject) => {
       this.#queue.push({ offset, size, epoch: this.#epoch.epoch, signal: this.#epoch.signal, resolve, reject });
       this.#telemetry.queuedReads = this.#queue.length;

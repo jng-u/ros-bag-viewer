@@ -7,6 +7,7 @@ import { decodeSemanticMessage } from "@ros-web-viewer/m1-integration";
 import { compress as compressLz4 } from "lz4-lite";
 import {
   BrowserRecordingRuntime,
+  browserLocalReadLimits,
   decodeRos1Bzip,
   decodeRos1Lz4,
   detectBrowserSourceFormat,
@@ -14,6 +15,11 @@ import {
 } from "../src/browser-runtime.js";
 
 describe("browser recording entry", () => {
+  it("scales local MCAP cumulative reads for bounded repeated unindexed passes", () => {
+    expect(browserLocalReadLimits(0n).maxTotalReadBytes).toBe(512n * 1024n * 1024n);
+    expect(browserLocalReadLimits(32n * 1024n * 1024n).maxTotalReadBytes).toBe(1024n * 1024n * 1024n);
+    expect(browserLocalReadLimits(1024n * 1024n * 1024n).maxTotalReadBytes).toBe(16n * 1024n * 1024n * 1024n);
+  });
   it("detects visible local recording lanes without guessing unrelated files", () => {
     expect(detectBrowserSourceFormat("run.MCAP")).toBe("mcap");
     expect(detectBrowserSourceFormat("robot.bag")).toBe("ros1-bag");
