@@ -5,6 +5,8 @@ export interface GeometryInput {
   readonly topology: PrimitiveTopology;
   readonly positions: Float32Array;
   readonly color?: readonly [number, number, number, number];
+  readonly colors?: Float32Array;
+  readonly pointSize?: number;
 }
 
 export interface RendererBudget {
@@ -72,6 +74,7 @@ interface WebGl2Context {
   getUniformLocation(program: WebGLProgram, name: string): WebGLUniformLocation | null;
   useProgram(program: WebGLProgram | null): void;
   enableVertexAttribArray(index: number): void;
+  disableVertexAttribArray(index: number): void;
   vertexAttribPointer(
     index: number,
     size: number,
@@ -82,6 +85,8 @@ interface WebGl2Context {
   ): void;
   uniformMatrix4fv(location: WebGLUniformLocation | null, transpose: boolean, value: Float32List): void;
   uniform4fv(location: WebGLUniformLocation | null, value: Float32List): void;
+  uniform1f(location: WebGLUniformLocation | null, value: number): void;
+  uniform1i(location: WebGLUniformLocation | null, value: number): void;
   drawArrays(mode: number, first: number, count: number): void;
 }
 
@@ -92,19 +97,26 @@ interface PooledBuffer {
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
 in vec3 aPosition;
+in vec4 aColor;
 uniform mat4 uViewProjection;
 uniform mat4 uModel;
+uniform float uPointSize;
+uniform bool uUseVertexColor;
+out vec4 vColor;
 void main() {
   gl_Position = uViewProjection * uModel * vec4(aPosition, 1.0);
-  gl_PointSize = 4.0;
+  gl_PointSize = uPointSize;
+  vColor = aColor;
 }`;
 
 const FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision mediump float;
 uniform vec4 uColor;
+uniform bool uUseVertexColor;
+in vec4 vColor;
 out vec4 outColor;
 void main() {
-  outColor = uColor;
+  outColor = uUseVertexColor ? vColor : uColor;
 }`;
 
 const IDENTITY_MATRIX = new Float32Array([
@@ -189,6 +201,8 @@ class ManagedGeometry implements GeometryResource {
     readonly byteLength: number,
     readonly buffer: WebGLBuffer,
     readonly color: Float32Array,
+    readonly hasVertexColors: boolean,
+    readonly pointSize: number,
     private readonly owner: WebGl2Renderer,
   ) {}
 
@@ -213,9 +227,12 @@ export class WebGl2Renderer {
   readonly #budget: RendererBudget;
   readonly #program: WebGLProgram;
   readonly #positionLocation: number;
+  readonly #colorAttributeLocation: number;
   readonly #viewProjectionLocation: WebGLUniformLocation | null;
   readonly #modelLocation: WebGLUniformLocation | null;
   readonly #colorLocation: WebGLUniformLocation | null;
+  readonly #pointSizeLocation: WebGLUniformLocation | null;
+  readonly #useVertexColorLocation: WebGLUniformLocation | null;
   readonly #resources = new Map<string, ManagedGeometry>();
   readonly #pool: PooledBuffer[] = [];
   #viewProjection = IDENTITY_MATRIX;
@@ -237,9 +254,13 @@ export class WebGl2Renderer {
     this.#program = createProgram(gl);
     this.#positionLocation = gl.getAttribLocation(this.#program, "aPosition");
     if (this.#positionLocation < 0) throw new Error("WebGL2 position attribute is unavailable");
+    this.#colorAttributeLocation = gl.getAttribLocation(this.#program, "aColor");
+    if (this.#colorAttributeLocation < 0) throw new Error("WebGL2 color attribute is unavailable");
     this.#viewProjectionLocation = gl.getUniformLocation(this.#program, "uViewProjection");
     this.#modelLocation = gl.getUniformLocation(this.#program, "uModel");
     this.#colorLocation = gl.getUniformLocation(this.#program, "uColor");
+    this.#pointSizeLocation = gl.getUniformLocation(this.#program, "uPointSize");
+    this.#useVertexColorLocation = gl.getUniformLocation(this.#program, "uUseVertexColor");
   }
 
   setViewProjection(matrix: Float32Array): void {
@@ -259,14 +280,27 @@ export class WebGl2Renderer {
 
     if (input.positions.length % 3 !== 0) throw new Error("positions must contain xyz triples");
     const inputVertices = input.positions.length / 3;
-    const maxVerticesByBuffer = Math.floor(this.#budget.maxBufferBytes / Float32Array.BYTES_PER_ELEMENT / 3);
+    if (input.colors && (input.colors.length !== inputVertices * 4 || input.colors.some((value) => !Number.isFinite(value) || value < 0 || value > 1))) {
+      throw new Error("vertex colors must contain one finite normalized rgba tuple per vertex");
+    }
+    const pointSize = input.pointSize ?? 4;
+    if (!Number.isFinite(pointSize) || pointSize < 1 || pointSize > 64) throw new Error("pointSize must be between 1 and 64");
+    const floatsPerVertex = input.colors ? 7 : 3;
+    const maxVerticesByBuffer = Math.floor(this.#budget.maxBufferBytes / Float32Array.BYTES_PER_ELEMENT / floatsPerVertex);
     const maxVertices = Math.min(this.#budget.maxVerticesPerGeometry, maxVerticesByBuffer);
     if (maxVertices < 1) throw new Error("renderer budget cannot hold one xyz vertex");
     if (inputVertices > maxVertices) {
       this.#rejectedAllocations += 1;
       throw new Error(`geometry has ${inputVertices} vertices; renderer limit is ${maxVertices}; hidden decimation is forbidden`);
     }
-    const byteLength = input.positions.byteLength;
+    const upload = input.colors ? new Float32Array(inputVertices * 7) : input.positions;
+    if (input.colors) {
+      for (let index = 0; index < inputVertices; index += 1) {
+        upload.set(input.positions.subarray(index * 3, index * 3 + 3), index * 7);
+        upload.set(input.colors.subarray(index * 4, index * 4 + 4), index * 7 + 3);
+      }
+    }
+    const byteLength = upload.byteLength;
     if (byteLength === 0) throw new Error("geometry requires at least one vertex");
 
     const previous = this.#resources.get(input.id);
@@ -277,7 +311,7 @@ export class WebGl2Renderer {
     const gl = this.#gl;
     try {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, input.positions);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, upload);
     } catch (error) {
       this.#deleteLiveBuffer(buffer, byteLength);
       throw error;
@@ -291,6 +325,8 @@ export class WebGl2Renderer {
       byteLength,
       buffer,
       color,
+      Boolean(input.colors),
+      pointSize,
       this,
     );
     if (previousModel) resource.modelMatrix = previousModel;
@@ -325,10 +361,19 @@ export class WebGl2Renderer {
     gl.useProgram(this.#program);
     gl.bindBuffer(gl.ARRAY_BUFFER, resource.buffer);
     gl.enableVertexAttribArray(this.#positionLocation);
-    gl.vertexAttribPointer(this.#positionLocation, 3, gl.FLOAT, false, 0, 0);
+    const stride = resource.hasVertexColors ? 7 * Float32Array.BYTES_PER_ELEMENT : 0;
+    gl.vertexAttribPointer(this.#positionLocation, 3, gl.FLOAT, false, stride, 0);
+    if (resource.hasVertexColors) {
+      gl.enableVertexAttribArray(this.#colorAttributeLocation);
+      gl.vertexAttribPointer(this.#colorAttributeLocation, 4, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+    } else {
+      gl.disableVertexAttribArray(this.#colorAttributeLocation);
+    }
     gl.uniformMatrix4fv(this.#viewProjectionLocation, false, this.#viewProjection);
     gl.uniformMatrix4fv(this.#modelLocation, false, resource.modelMatrix);
     gl.uniform4fv(this.#colorLocation, resource.color);
+    gl.uniform1f(this.#pointSizeLocation, resource.pointSize);
+    gl.uniform1i(this.#useVertexColorLocation, resource.hasVertexColors ? 1 : 0);
     gl.drawArrays(primitiveMode(gl, resource.topology), 0, resource.vertexCount);
     this.#drawCalls += 1;
   }

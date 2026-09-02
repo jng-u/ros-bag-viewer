@@ -12,6 +12,21 @@ class CaptureRenderer implements GeometryRendererPort {
 }
 
 describe("frame-tree fixed-frame re-rooting", () => {
+  it("shows every disconnected frame component when no reference frame is selected", () => {
+    const renderer = new CaptureRenderer();
+    const display = new FrameTreeDisplay("tf", renderer);
+    display.configure({ fixedFrame: "", maxTransforms: 8, maxInputBytes: 1024 });
+    display.attachSource(1);
+    expect(display.update({ transforms: [
+      { parentFrameId: "map", childFrameId: "base", translation: { x: 1, y: 0, z: 0 } },
+      { parentFrameId: "world", childFrameId: "camera", translation: { x: 0, y: 2, z: 0 } },
+    ] }, 1)).toMatchObject({ frameId: "", renderedVertices: 4 });
+    expect(renderer.latest?.positions).toEqual(new Float32Array([
+      0, 0, 0, 1, 0, 0,
+      0, 0, 0, 0, 2, 0,
+    ]));
+  });
+
   it("renders both ancestors and descendants when the fixed frame is not the root", () => {
     const renderer = new CaptureRenderer();
     const display = new FrameTreeDisplay("tf", renderer);

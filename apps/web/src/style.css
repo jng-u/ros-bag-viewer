@@ -102,6 +102,8 @@ svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-lineca
 
 .aux-dock { position: absolute; right: 8px; bottom: 28px; display: flex; align-items: flex-end; gap: 7px; max-width: calc(100% - 16px); overflow: auto hidden; pointer-events: auto; }
 .aux-window { display: grid; grid-template-rows: 24px 150px; flex: 0 0 240px; width: 240px; border: 1px solid #45454d; border-radius: 2px; background: #151518; box-shadow: 0 8px 26px rgba(0, 0, 0, .42); }
+.plot-window { grid-template-rows: 24px 190px; flex-basis: 320px; width: 320px; }
+.plot-window canvas { height: 190px; }
 .aux-window header { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 0 7px; border-bottom: 1px solid #3a3a41; background: #242429; }
 .aux-window header i { width: 6px; height: 6px; border-radius: 50%; }
 .aux-window header strong { overflow: hidden; font: 600 10px/1 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
@@ -133,6 +135,13 @@ svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-lineca
 .schema-name { overflow: hidden; margin: 0 0 10px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .display-config { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; color: var(--faint); font: 600 11px/1 ui-monospace, monospace; }
 .display-config input[type="color"] { width: 52px; height: 24px; padding: 2px; border: 1px solid #414149; background: #151518; cursor: pointer; }
+.display-config span { display: inline-flex; align-items: center; gap: 6px; }
+.display-config input[type="range"] { width: 105px; accent-color: var(--accent); }
+.display-config output { min-width: 34px; color: #c9c9cf; text-align: right; }
+.display-config select { min-width: 105px; height: 24px; border: 1px solid #414149; border-radius: 2px; background: #151518; color: #d0d0d6; font: 600 10px/1 ui-monospace, monospace; }
+.point-cloud-controls { margin: 8px 0; padding: 3px 7px; border: 1px solid var(--line-soft); background: #151518; }
+.color-ramp { height: 7px; margin: 5px 0 8px; border: 1px solid #3a3a42; background: linear-gradient(90deg, #1f388c, #1fb8e0, #7bea8f, #fac738, #ef3d38); }
+.camera-tools button[aria-pressed="true"] { background: #193445; color: #a9ddf8; }
 .inspector dl { margin: 0; border-top: 1px solid var(--line-soft); }
 .inspector dl div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
 .inspector dt { color: var(--faint); font: 600 11px/1.25 ui-monospace, monospace; }

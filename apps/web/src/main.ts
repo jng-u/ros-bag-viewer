@@ -89,7 +89,8 @@ app.innerHTML = `
         <button data-camera="orbit" type="button">ORBIT</button>
         <button data-camera="top" type="button">TOP</button>
         <button data-camera="front" type="button">FRONT</button>
-        <label class="fixed-frame-control">FIXED <input id="fixed-frame-input" value="map" aria-label="TF fixed frame" spellcheck="false" /></label>
+        <label class="fixed-frame-control">REFERENCE <input id="fixed-frame-input" value="" placeholder="ALL FRAMES" aria-label="TF reference frame; blank shows all native frames" spellcheck="false" /></label>
+        <button id="pivot-toggle" type="button" aria-pressed="true" title="Show orbit center">PIVOT</button>
       </div>
       <div class="scene-stats" id="scene-stats"><span>WEBGL2</span><span>0 VERTICES</span><span>FULL DATA</span></div>
       <div class="drop-prompt" id="drop-prompt">
@@ -209,7 +210,8 @@ const controller = new DesktopShellController({
 });
 const layers = new ViewerLayerRegistry();
 const camera = new OrbitCamera();
-let fixedFrame = "map";
+let fixedFrame = "";
+let pivotVisible = true;
 let liveSubscriptionUpdate: Promise<void> = Promise.resolve();
 // Recorded acquisition is already bounded by message count and log-time range. Do not
 // prune that bounded set by header time: bags may use a different header/log clock.
@@ -422,6 +424,7 @@ function ensureRenderer(): WebGl2Renderer {
     renderer.upsert({ id: "axis-x", topology: "lines", positions: new Float32Array([0, 0, 0.015, 4, 0, 0.015]), color: [0.92, 0.27, 0.27, 1] }),
     renderer.upsert({ id: "axis-y", topology: "lines", positions: new Float32Array([0, 0, 0.02, 0, 4, 0.02]), color: [0.3, 0.82, 0.37, 1] }),
     renderer.upsert({ id: "axis-z", topology: "lines", positions: new Float32Array([0, 0, 0, 0, 0, 4]), color: [0.31, 0.52, 1, 1] }),
+    renderer.upsert({ id: "orbit-pivot", topology: "lines", positions: new Float32Array([-0.18, 0, 0, 0.18, 0, 0, 0, -0.18, 0, 0, 0.18, 0, 0, 0, -0.18, 0, 0, 0.18]), color: [0.38, 0.85, 1, 1] }),
   ];
   return renderer;
 }
@@ -443,10 +446,14 @@ function drawScene(): void {
   if (!gl) return;
   activeRenderer.setViewProjection(camera.viewProjection(canvas.width / canvas.height));
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  for (const resource of gridResources) resource.draw();
+  const target = camera.snapshot().target;
+  activeRenderer.setTransform("orbit-pivot", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, target[0], target[1], target[2], 1]));
+  for (const resource of gridResources) if (resource.id !== "orbit-pivot" || pivotVisible) resource.draw();
   for (const layer of layers.visibleLayers) {
     const runtimeState = layerRuntime.get(layer.id);
-    if (layer.status === "ready" && isGeometryDisplay(runtimeState?.display)) runtimeState.lifecycle?.render();
+    if (!isGeometryDisplay(runtimeState?.display)) continue;
+    if (layer.status === "ready") runtimeState.lifecycle?.render();
+    else if (layer.status === "error" && runtimeState.display.telemetry().state === "rendering") runtimeState.display.render();
   }
   renderSceneStats();
 }
@@ -499,7 +506,7 @@ function ensureLayerDisplay(layer: ViewerLayer, epoch = controller.state.epoch):
     const color = layer.color ?? palette[layer.colorIndex % palette.length]!;
     if (layer.kind === "point-cloud" || layer.kind === "pointcloud2") {
       const display = new PointCloud2Display(layer.id, activeRenderer);
-      display.configure({ maxPoints: 1_000_000, maxInputBytes: 16 * 1024 * 1024, color });
+      display.configure({ maxPoints: 1_000_000, maxInputBytes: 16 * 1024 * 1024, color, colorMode: layer.pointCloudColorMode ?? "uniform", colorAxis: layer.pointCloudColorAxis ?? "z", pointSize: layer.pointSize ?? 4 });
       existing.display = display;
     } else if (layer.kind === "path") {
       const display = new PathDisplay(layer.id, activeRenderer);
@@ -628,6 +635,9 @@ async function updateLayer(
           maxPoints: 1_000_000,
           maxInputBytes: 16 * 1024 * 1024,
           color: layer.color ?? palette[layer.colorIndex % palette.length]!,
+          colorMode: layer.pointCloudColorMode ?? "uniform",
+          colorAxis: layer.pointCloudColorAxis ?? "z",
+          pointSize: layer.pointSize ?? 4,
         });
         decoded = prepared.decoded;
         preparedPointCloud = prepared.pointCloud;
@@ -778,10 +788,10 @@ async function updateNormalizedLayer(
   assertCurrent();
   if (isGeometryDisplay(runtimeState.display)) {
     const normalizedFrame = summary.frameId.replace(/^\/+|\/+$/gu, "");
-    const modelMatrix = runtimeState.display instanceof FrameTreeDisplay || normalizedFrame === fixedFrame
+    const modelMatrix = !fixedFrame || runtimeState.display instanceof FrameTreeDisplay || normalizedFrame === fixedFrame
       ? IDENTITY_TRANSFORM
       : frameResolver?.matrixFromFixed(normalizedFrame, runtimeState.tfQueryTimeNanos);
-    if (!modelMatrix) throw new Error(`TF frame ${summary.frameId || "<empty>"} cannot be resolved from fixed frame ${fixedFrame}`);
+    if (!modelMatrix) throw new Error(`TF frame ${summary.frameId || "<empty>"} cannot be resolved from reference frame ${fixedFrame}`);
     ensureRenderer().setTransform(layer.id, modelMatrix);
     runtimeState.modelMatrix = modelMatrix;
   }
@@ -825,7 +835,16 @@ function renderInspector(): void {
   const runtimeState = layerRuntime.get(layer.id);
   const summary = layer.summary;
   const quality = summary && summary.droppedVertices > 0 ? `${summary.droppedVertices.toLocaleString()} dropped` : "full data";
-  inspector.innerHTML = `<div class="section-label">SELECTION</div><h2>${escapeHtml(layer.topic.name)}</h2><p class="schema-name">${escapeHtml(layer.topic.typeName)}</p>${layer.error ? `<p class="layer-error">${escapeHtml(layer.error)}</p>` : ""}${isGeometryDisplay(runtimeState?.display) ? `<label class="display-config">COLOR <input type="color" data-layer-color="${layer.id}" value="${layerColorHex(layer)}" aria-label="${escapeHtml(layer.topic.name)} display color" /></label>` : ""}<dl>
+  const pointCloud = layer.kind === "point-cloud" || layer.kind === "pointcloud2";
+  const colorMode = layer.pointCloudColorMode ?? "uniform";
+  const pointControls = pointCloud ? `<div class="point-cloud-controls">
+    <label class="display-config">POINT SIZE <span><input type="range" min="1" max="16" step="0.5" value="${layer.pointSize ?? 4}" data-point-size="${layer.id}" aria-label="Point size for ${escapeHtml(layer.topic.name)}" /><output>${layer.pointSize ?? 4}px</output></span></label>
+    <label class="display-config">COLOR BY <select data-point-color-mode="${layer.id}" aria-label="Point color mode for ${escapeHtml(layer.topic.name)}"><option value="uniform" ${colorMode === "uniform" ? "selected" : ""}>UNIFORM</option><option value="intensity" ${colorMode === "intensity" ? "selected" : ""}>INTENSITY</option><option value="rgb" ${colorMode === "rgb" ? "selected" : ""}>RGB</option><option value="axis" ${colorMode === "axis" ? "selected" : ""}>AXIS</option></select></label>
+    ${colorMode === "axis" ? `<label class="display-config">AXIS <select data-point-axis="${layer.id}" aria-label="Point color axis"><option value="x" ${layer.pointCloudColorAxis === "x" ? "selected" : ""}>X</option><option value="y" ${layer.pointCloudColorAxis === "y" ? "selected" : ""}>Y</option><option value="z" ${!layer.pointCloudColorAxis || layer.pointCloudColorAxis === "z" ? "selected" : ""}>Z</option></select></label><div class="color-ramp" aria-label="Blue to red axis color scale"></div>` : ""}
+    ${colorMode === "intensity" ? `<div class="color-ramp" aria-label="Blue to red intensity color scale"></div>` : ""}
+  </div>` : "";
+  const uniformColor = isGeometryDisplay(runtimeState?.display) && (!pointCloud || colorMode === "uniform") ? `<label class="display-config">COLOR <input type="color" data-layer-color="${layer.id}" value="${layerColorHex(layer)}" aria-label="${escapeHtml(layer.topic.name)} display color" /></label>` : "";
+  inspector.innerHTML = `<div class="section-label">SELECTION</div><h2>${escapeHtml(layer.topic.name)}</h2><p class="schema-name">${escapeHtml(layer.topic.typeName)}</p>${layer.error ? `<p class="layer-error">${escapeHtml(layer.error)}</p>` : ""}${pointControls}${uniformColor}<dl>
     <div><dt>DISPLAY</dt><dd>${displayLabel(layer.kind)}</dd></div>
     ${layer.fieldPath ? `<div><dt>FIELD</dt><dd>${escapeHtml(layer.fieldPath)}</dd></div>` : ""}
     <div><dt>STATUS</dt><dd>${layer.status.toLocaleUpperCase()}</dd></div>
@@ -843,7 +862,11 @@ function renderAuxiliary(): void {
   auxDock.innerHTML = auxiliary.map((layer) => {
     const runtimeState = layerRuntime.get(layer.id);
     if (layer.kind === "image") return `<section class="aux-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>${runtimeState?.raster ? `${runtimeState.raster.width}×${runtimeState.raster.height}` : layer.status}</span></header><canvas aria-label="Image display for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
-    if (layer.kind === "numeric-plot") return `<section class="aux-window plot-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>${escapeHtml(layer.fieldPath ?? "data")}</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
+    if (layer.kind === "numeric-plot") {
+      const history = runtimeState?.numericHistory ?? [];
+      const latest = history.at(-1)?.value;
+      return `<section class="aux-window plot-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)} · ${escapeHtml(layer.fieldPath ?? "data")}</strong><span>${latest === undefined ? "—" : latest.toPrecision(5)}</span></header><canvas aria-label="Numeric plot for ${escapeHtml(layer.topic.name)}"></canvas></section>`;
+    }
     if (layer.kind === "camera-info") {
       const details = layer.summary?.details;
       return `<section class="aux-window info-window" data-aux-layer="${layer.id}"><header><i style="background:${layerColor(layer)}"></i><strong>${escapeHtml(layer.topic.name)}</strong><span>CAMERA INFO</span></header><dl><div><dt>SIZE</dt><dd>${details ? `${details.width} × ${details.height}` : "—"}</dd></div><div><dt>MODEL</dt><dd>${escapeHtml(String(details?.distortionModel ?? "—"))}</dd></div><div><dt>CALIBRATED</dt><dd>${details?.calibrated === true ? "YES" : "NO"}</dd></div></dl></section>`;
@@ -869,19 +892,42 @@ function renderAuxiliary(): void {
       const min = Math.min(...values);
       const max = Math.max(...values);
       const span = Math.max(max - min, 1e-9);
+      const left = 48 * scale;
+      const right = target.width - 8 * scale;
+      const top = 10 * scale;
+      const bottom = target.height - 22 * scale;
+      context.font = `${9 * scale}px ui-monospace, monospace`;
+      context.textBaseline = "middle";
+      context.fillStyle = "#777780";
+      context.strokeStyle = "#292930";
+      context.lineWidth = 1;
+      for (let tick = 0; tick <= 4; tick += 1) {
+        const ratio = tick / 4;
+        const y = bottom - ratio * (bottom - top);
+        context.beginPath(); context.moveTo(left, y); context.lineTo(right, y); context.stroke();
+        context.fillText((min + span * ratio).toPrecision(4), 5 * scale, y);
+      }
+      const firstTime = samples[0]!.timeNanos;
+      const lastTime = samples.at(-1)!.timeNanos;
+      const timeSpan = lastTime > firstTime ? lastTime - firstTime : 1n;
+      context.textBaseline = "alphabetic";
+      context.fillText("0.000s", left, target.height - 5 * scale);
+      context.textAlign = "right";
+      context.fillText(`${(Number(timeSpan) / 1e9).toFixed(3)}s`, right, target.height - 5 * scale);
+      context.textAlign = "left";
       context.strokeStyle = layerColor(layer);
       context.lineWidth = Math.max(1, scale);
       context.beginPath();
-      samples.forEach(({ value }, index) => {
-        const x = samples.length === 1 ? target.width / 2 : index / (samples.length - 1) * target.width;
-        const y = target.height - ((value - min) / span * (target.height - 12) + 6);
+      samples.forEach(({ value, timeNanos }, index) => {
+        const x = samples.length === 1 ? (left + right) / 2 : left + Number(timeNanos - firstTime) / Number(timeSpan) * (right - left);
+        const y = bottom - ((value - min) / span * (bottom - top));
         if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
       });
       context.stroke();
       if (samples.length === 1) {
         context.fillStyle = layerColor(layer);
         context.beginPath();
-        context.arc(target.width / 2, target.height / 2, 2.5 * scale, 0, Math.PI * 2);
+        context.arc((left + right) / 2, (top + bottom) / 2, 2.5 * scale, 0, Math.PI * 2);
         context.fill();
       }
       continue;
@@ -945,7 +991,7 @@ async function historicalFrameResolver(
     // Geometry TF lookup remains strict and header-time based.
     const snapshot = liveTfBuffer?.latestSnapshot(epoch);
     return {
-      ...(liveTfBuffer && liveTfEpoch === epoch && liveTfTransformCount > 0
+      ...(fixedFrame && liveTfBuffer && liveTfEpoch === epoch && liveTfTransformCount > 0
         ? { resolver: new HistoricalFrameResolver(fixedFrame, epoch, liveTfBuffer) }
         : {}),
       ...(snapshot?.samples.length ? { frameTreeMessage: { transforms: snapshot.samples.map((sample) => ({
@@ -1007,7 +1053,7 @@ async function historicalFrameResolver(
   }
   const snapshot = buffer.snapshot(snapshotHeaderTimeNanos ?? requestedTime, epoch);
   return {
-    ...(transformCount > 0 ? { resolver: new HistoricalFrameResolver(fixedFrame, epoch, buffer) } : {}),
+    ...(fixedFrame && transformCount > 0 ? { resolver: new HistoricalFrameResolver(fixedFrame, epoch, buffer) } : {}),
     ...(snapshot.samples.length ? { frameTreeMessage: { transforms: snapshot.samples.map((sample) => ({
       parentFrameId: sample.parentFrame,
       childFrameId: sample.childFrame,
@@ -1037,8 +1083,7 @@ async function renderSceneAtCurrentTime(frameVisible = false): Promise<void> {
       const requestedTime = controller.state.currentTimeNanos;
       const epoch = controller.state.epoch;
       const generation = renderGeneration;
-      for (const layer of visible) layers.update(layer.id, { status: "loading" });
-      renderChrome();
+      for (const layer of visible) if (layer.status !== "ready") layers.update(layer.id, { status: "loading" });
       sceneMessage.textContent = visible.length === 0 ? "Add one or more topic displays." : `Resolving ${visible.length} drawable${visible.length === 1 ? "" : "s"} at ${formatSourceTime(requestedTime)}…`;
       const sampleResults = new Map<string, BrowserSample | Error>();
       const transformTopics = controller.state.topics.filter((topic) => topic.availableDisplays.includes("frame-tree"));
@@ -1226,7 +1271,6 @@ function startPlayback(): void {
 
 async function seekTo(requested: bigint): Promise<void> {
   await controller.seek(requested);
-  renderChrome();
   await renderSceneAtCurrentTime();
 }
 
@@ -1454,6 +1498,21 @@ layerList.addEventListener("click", (event) => {
 });
 
 inspector.addEventListener("change", (event) => {
+  const pointSize = (event.target as HTMLElement).closest<HTMLInputElement>("input[data-point-size]");
+  const colorMode = (event.target as HTMLElement).closest<HTMLSelectElement>("select[data-point-color-mode]");
+  const colorAxis = (event.target as HTMLElement).closest<HTMLSelectElement>("select[data-point-axis]");
+  if (pointSize || colorMode || colorAxis) {
+    const id = pointSize?.dataset.pointSize ?? colorMode?.dataset.pointColorMode ?? colorAxis?.dataset.pointAxis;
+    if (!id) return;
+    layers.setPointCloudStyle(id, {
+      ...(pointSize ? { pointSize: Number(pointSize.value) } : {}),
+      ...(colorMode ? { pointCloudColorMode: colorMode.value as "axis" | "intensity" | "rgb" | "uniform" } : {}),
+      ...(colorAxis ? { pointCloudColorAxis: colorAxis.value as "x" | "y" | "z" } : {}),
+    });
+    renderChrome();
+    void renderSceneAtCurrentTime();
+    return;
+  }
   const inputElement = (event.target as HTMLElement).closest<HTMLInputElement>("input[data-layer-color]");
   if (!inputElement) return;
   const match = inputElement.value.match(/^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/iu);
@@ -1461,15 +1520,25 @@ inspector.addEventListener("change", (event) => {
   const color = [Number.parseInt(match[1]!, 16) / 255, Number.parseInt(match[2]!, 16) / 255, Number.parseInt(match[3]!, 16) / 255, 1] as const;
   const id = inputElement.dataset.layerColor!;
   layers.setColor(id, color);
+  const layer = layers.layers.find((candidate) => candidate.id === id);
+  if (!layer) return;
+  if (layerRuntime.get(id)?.display instanceof PointCloud2Display) {
+    renderChrome();
+    void renderSceneAtCurrentTime();
+    return;
+  }
   const runtimeState = layerRuntime.get(id);
   runtimeState?.lifecycle?.dispose();
   runtimeState?.raster?.close?.();
   layerRuntime.delete(id);
-  const layer = layers.layers.find((candidate) => candidate.id === id);
-  if (!layer) return;
   ensureLayerDisplay(layer);
   renderChrome();
   void renderSceneAtCurrentTime();
+});
+
+inspector.addEventListener("input", (event) => {
+  const range = (event.target as HTMLElement).closest<HTMLInputElement>("input[data-point-size]");
+  if (range) range.parentElement?.querySelector("output")?.replaceChildren(`${range.value}px`);
 });
 
 timeline.addEventListener("input", () => {
@@ -1510,17 +1579,17 @@ document.querySelector<HTMLElement>(".camera-tools")!.addEventListener("click", 
 byId<HTMLInputElement>("fixed-frame-input").addEventListener("change", (event) => {
   const inputElement = event.currentTarget as HTMLInputElement;
   const next = inputElement.value.replace(/^\/+|\/+$/gu, "").trim();
-  if (!next) {
-    inputElement.value = fixedFrame;
-    statusLine.dataset.tone = "error";
-    statusLine.textContent = "TF fixed frame cannot be empty.";
-    return;
-  }
   fixedFrame = next;
   inputElement.value = next;
   rebuildLayerRuntimes();
   renderChrome();
   void renderSceneAtCurrentTime(true);
+});
+
+byId<HTMLButtonElement>("pivot-toggle").addEventListener("click", (event) => {
+  pivotVisible = !pivotVisible;
+  (event.currentTarget as HTMLButtonElement).setAttribute("aria-pressed", String(pivotVisible));
+  drawScene();
 });
 
 let pointer: { readonly id: number; readonly x: number; readonly y: number; readonly pan: boolean } | undefined;

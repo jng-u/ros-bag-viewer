@@ -266,18 +266,25 @@ try {
   });
 
   await execute("const row=[...document.querySelectorAll('.layer-row')].find((item)=>item.textContent.includes('/demo/points')); row?.querySelector('.layer-select')?.click(); const input=document.querySelector('input[data-layer-color]'); if(input){input.value='#ff3344'; input.dispatchEvent(new Event('change',{bubbles:true}));}");
+  await waitFor("uniform point color", async () => (await execute("return document.querySelector('input[data-layer-color]')?.value==='#ff3344'")) || undefined);
+  await execute("const size=document.querySelector('input[data-point-size]'); size.value='7'; size.dispatchEvent(new Event('change',{bubbles:true})); const mode=document.querySelector('select[data-point-color-mode]'); mode.value='axis'; mode.dispatchEvent(new Event('change',{bubbles:true}));");
+  await waitFor("axis point controls", async () => (await execute("return document.querySelector('select[data-point-axis]')!==null")) || undefined);
+  await execute("const axis=document.querySelector('select[data-point-axis]'); axis.value='x'; axis.dispatchEvent(new Event('change',{bubbles:true}));");
   const displayConfiguration = await waitFor("per-display configuration", async () => {
     const value = await execute(`return {
-      color: document.querySelector('input[data-layer-color]')?.value ?? '',
+      pointSize: document.querySelector('input[data-point-size]')?.value ?? '',
+      colorMode: document.querySelector('select[data-point-color-mode]')?.value ?? '',
+      colorAxis: document.querySelector('select[data-point-axis]')?.value ?? '',
       pointReady: [...document.querySelectorAll('.layer-row')].some((row)=>row.textContent.includes('/demo/points') && row.textContent.includes('READY')),
       errors: document.querySelectorAll('.layer-error').length,
     };`);
-    return value.color === "#ff3344" && value.pointReady && value.errors === 0 ? value : undefined;
+    return value.pointSize === "7" && value.colorMode === "axis" && value.colorAxis === "x" && value.pointReady && value.errors === 0 ? value : undefined;
   });
 
   const seekStarted = Date.now();
   const seekEpoch = Number(await execute("return document.querySelector('#epoch-value')?.textContent ?? '0'"));
   await execute("const t=document.querySelector('#timeline-input'); t.value='5000'; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true}));");
+  const seekRetainedReady = Number(await execute("return [...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('READY')).length"));
   const seek = await waitFor("synchronized seek and TF render", async () => {
     const value = await execute(`return {
       epoch: Number(document.querySelector('#epoch-value')?.textContent ?? '0'),
@@ -289,6 +296,7 @@ try {
     return value.epoch > seekEpoch && value.errors === 0 && value.ready >= 10 && value.scene.includes("synchronized") ? value : undefined;
   });
   seek.elapsedMs = Date.now() - seekStarted;
+  seek.retainedReadyDuringResolve = seekRetainedReady;
 
   await execute("const i=document.querySelector('#fixed-frame-input'); i.value='odom'; i.dispatchEvent(new Event('change',{bubbles:true}));");
   const fixedFrame = await waitFor("fixed-frame reconfiguration", async () => {
@@ -301,8 +309,8 @@ try {
     if (value.fixedFrame === "odom" && value.ready >= 10 && value.scene.includes("synchronized")) return value;
     throw new Error(JSON.stringify(value));
   });
-  await execute("const i=document.querySelector('#fixed-frame-input'); i.value='map'; i.dispatchEvent(new Event('change',{bubbles:true}));");
-  await waitFor("fixed-frame reset", async () => (await execute("return document.querySelector('#fixed-frame-input')?.value==='map' && [...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('READY')).length>=10")));
+  await execute("const i=document.querySelector('#fixed-frame-input'); i.value=''; i.dispatchEvent(new Event('change',{bubbles:true}));");
+  await waitFor("all-frames reset", async () => (await execute("return document.querySelector('#fixed-frame-input')?.value==='' && [...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('READY')).length>=10")));
 
   await execute(`const row=[...document.querySelectorAll('.topic-row')].find((item)=>item.querySelector('strong')?.textContent==='/demo/custom_status'); row?.querySelector('button[data-kind="raw"]')?.click();`);
   const custom = await waitFor("custom schema raw inspector", async () => {

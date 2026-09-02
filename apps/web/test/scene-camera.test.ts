@@ -23,4 +23,11 @@ describe("iridescence-style orbit camera", () => {
     camera.preset("front");
     expect(camera.snapshot()).toMatchObject({ yaw: -Math.PI / 2, pitch: 0 });
   });
+
+  it("maps downward pointer motion to increasing pitch", () => {
+    const camera = new OrbitCamera();
+    const before = camera.snapshot().pitch;
+    camera.orbit(0, 10);
+    expect(camera.snapshot().pitch).toBeGreaterThan(before);
+  });
 });

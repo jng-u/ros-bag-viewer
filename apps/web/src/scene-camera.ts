@@ -81,7 +81,7 @@ export class OrbitCamera {
 
   orbit(deltaX: number, deltaY: number): void {
     this.#yaw -= deltaX * 0.006;
-    this.#pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.#pitch - deltaY * 0.006));
+    this.#pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.#pitch + deltaY * 0.006));
   }
 
   pan(deltaX: number, deltaY: number, viewportHeight: number): void {

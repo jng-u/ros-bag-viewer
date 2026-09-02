@@ -32,6 +32,8 @@ export interface GeometryInput {
   readonly topology: PrimitiveTopology;
   readonly positions: Float32Array;
   readonly color?: readonly [number, number, number, number];
+  readonly colors?: Float32Array;
+  readonly pointSize?: number;
 }
 
 export interface GeometryResource {
@@ -69,6 +71,8 @@ type GeometrySceneSummary = SemanticSceneSummary & { readonly primitive: Primiti
 export interface PreparedPointCloud2 {
   readonly positions: Float32Array;
   readonly color?: readonly [number, number, number, number];
+  readonly colors?: Float32Array;
+  readonly pointSize?: number;
   readonly summary: GeometrySceneSummary;
 }
 
@@ -113,6 +117,9 @@ export interface PointCloud2DisplayConfig {
   readonly maxPoints: number;
   readonly maxInputBytes: number;
   readonly color?: readonly [number, number, number, number];
+  readonly colorMode?: "uniform" | "intensity" | "rgb" | "axis";
+  readonly colorAxis?: "x" | "y" | "z";
+  readonly pointSize?: number;
 }
 
 export interface PathDisplayConfig {
@@ -217,14 +224,14 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
   }
 
   protected updatePreparedGeometry(
-    converted: { positions: Float32Array; color?: readonly [number, number, number, number]; summary: GeometrySceneSummary },
+    converted: { positions: Float32Array; color?: readonly [number, number, number, number]; colors?: Float32Array; pointSize?: number; summary: GeometrySceneSummary },
     epoch: number,
   ): SemanticSceneSummary {
     return this.updateConverted(() => converted, epoch);
   }
 
   private updateConverted(
-    convert: () => { positions: Float32Array; color?: readonly [number, number, number, number]; summary: GeometrySceneSummary },
+    convert: () => { positions: Float32Array; color?: readonly [number, number, number, number]; colors?: Float32Array; pointSize?: number; summary: GeometrySceneSummary },
     epoch: number,
   ): SemanticSceneSummary {
     this.#assertNotDisposed();
@@ -238,6 +245,8 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
         topology: converted.summary.primitive,
         positions: converted.positions,
         color: converted.color,
+        colors: converted.colors,
+        pointSize: converted.pointSize,
       });
       this.#updates += 1;
       this.#decimatedVertices += converted.summary.droppedVertices;
@@ -289,7 +298,7 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
   protected abstract convert(
     message: TMessage,
     config: TConfig,
-  ): { positions: Float32Array; color?: readonly [number, number, number, number]; summary: GeometrySceneSummary };
+  ): { positions: Float32Array; color?: readonly [number, number, number, number]; colors?: Float32Array; pointSize?: number; summary: GeometrySceneSummary };
 
   #assertNotDisposed(): void {
     if (this.#state === "disposed") throw new Error("display is disposed");
@@ -297,12 +306,30 @@ abstract class GeometryDisplay<TMessage, TConfig> implements ManagedDisplay<TMes
 }
 
 const FLOAT32_DATATYPE = 7;
+const UINT32_DATATYPE = 6;
 const MAX_POINT_FIELDS = 64;
+
+function heatColor(value: number): readonly [number, number, number, number] {
+  const t = Math.max(0, Math.min(1, value));
+  const stops = [
+    [0.12, 0.22, 0.55], [0.12, 0.72, 0.88], [0.48, 0.92, 0.56], [0.98, 0.78, 0.22], [0.94, 0.24, 0.22],
+  ] as const;
+  const scaled = t * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(scaled));
+  const local = scaled - index;
+  const left = stops[index]!;
+  const right = stops[index + 1]!;
+  return [left[0] + (right[0] - left[0]) * local, left[1] + (right[1] - left[1]) * local, left[2] + (right[2] - left[2]) * local, 1];
+}
 
 export function preparePointCloud2(message: PointCloud2Message, config: PointCloud2DisplayConfig): PreparedPointCloud2 {
   assertLimit(config.maxPoints, "maxPoints");
   assertLimit(config.maxInputBytes, "maxInputBytes");
   assertColor(config.color);
+  const colorMode = config.colorMode ?? "uniform";
+  if (!(["uniform", "intensity", "rgb", "axis"] as const).includes(colorMode)) throw new Error("PointCloud2 color mode is invalid");
+  const pointSize = config.pointSize ?? 4;
+  if (!Number.isFinite(pointSize) || pointSize < 1 || pointSize > 64) throw new Error("PointCloud2 pointSize must be between 1 and 64");
   assertLimit(message.width, "point cloud width");
   assertLimit(message.height, "point cloud height");
   assertLimit(message.pointStep, "pointStep");
@@ -332,6 +359,19 @@ export function preparePointCloud2(message: PointCloud2Message, config: PointClo
   });
 
   const positions = new Float32Array(pointCount * 3);
+  const scalarValues = colorMode === "intensity" || colorMode === "axis" ? new Float64Array(pointCount) : undefined;
+  const packedColors = colorMode === "rgb" ? new Uint32Array(pointCount) : undefined;
+  const intensityField = colorMode === "intensity" ? message.fields.find((field) => field.name.toLocaleLowerCase() === "intensity") : undefined;
+  const rgbField = colorMode === "rgb" ? message.fields.find((field) => ["rgb", "rgba"].includes(field.name.toLocaleLowerCase())) : undefined;
+  if (colorMode === "intensity" && (!intensityField || intensityField.count !== 1 || ![FLOAT32_DATATYPE, UINT32_DATATYPE].includes(intensityField.datatype))) {
+    throw new Error("PointCloud2 intensity color requires a scalar FLOAT32 or UINT32 intensity field");
+  }
+  if (colorMode === "rgb" && (!rgbField || rgbField.count !== 1 || ![FLOAT32_DATATYPE, UINT32_DATATYPE].includes(rgbField.datatype))) {
+    throw new Error("PointCloud2 RGB color requires a packed FLOAT32 or UINT32 rgb/rgba field");
+  }
+  for (const field of [intensityField, rgbField]) {
+    if (field && (!Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset + 4 > message.pointStep)) throw new Error(`PointCloud2 field ${field.name} exceeds pointStep`);
+  }
   const view = new DataView(message.data.buffer, message.data.byteOffset, message.data.byteLength);
   let outputCount = 0;
   for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
@@ -346,10 +386,36 @@ export function preparePointCloud2(message: PointCloud2Message, config: PointClo
     positions[target] = x;
     positions[target + 1] = y;
     positions[target + 2] = z;
+    if (scalarValues) scalarValues[outputCount] = colorMode === "axis"
+      ? ({ x, y, z }[config.colorAxis ?? "z"])
+      : intensityField!.datatype === FLOAT32_DATATYPE
+        ? view.getFloat32(pointOffset + intensityField!.offset, !message.isBigEndian)
+        : view.getUint32(pointOffset + intensityField!.offset, !message.isBigEndian);
+    if (packedColors) packedColors[outputCount] = view.getUint32(pointOffset + rgbField!.offset, !message.isBigEndian);
     outputCount += 1;
   }
   if (outputCount === 0) throw new Error("PointCloud2 contains no finite points");
   const bounded = positions.slice(0, outputCount * 3);
+  let colors: Float32Array | undefined;
+  if (scalarValues) {
+    const values = scalarValues.subarray(0, outputCount);
+    let min = Infinity;
+    let max = -Infinity;
+    for (const value of values) if (Number.isFinite(value)) { min = Math.min(min, value); max = Math.max(max, value); }
+    if (!Number.isFinite(min)) throw new Error(`PointCloud2 ${colorMode} field contains no finite values`);
+    const span = Math.max(max - min, Number.EPSILON);
+    colors = new Float32Array(outputCount * 4);
+    for (let index = 0; index < outputCount; index += 1) {
+      const value = values[index]!;
+      colors.set(heatColor(Number.isFinite(value) ? (value - min) / span : 0), index * 4);
+    }
+  } else if (packedColors) {
+    colors = new Float32Array(outputCount * 4);
+    for (let index = 0; index < outputCount; index += 1) {
+      const packed = packedColors[index]!;
+      colors.set([((packed >>> 16) & 0xff) / 255, ((packed >>> 8) & 0xff) / 255, (packed & 0xff) / 255, 1], index * 4);
+    }
+  }
   const summary: GeometrySceneSummary = {
     displayKind: "pointcloud2",
     frameId: message.frameId,
@@ -359,7 +425,7 @@ export function preparePointCloud2(message: PointCloud2Message, config: PointClo
     droppedVertices: pointCount - outputCount,
     bounds: boundsFor(bounded),
   };
-  return { positions: bounded, color: config.color, summary };
+  return { positions: bounded, color: config.color, colors, pointSize, summary };
 }
 
 export class PointCloud2Display extends GeometryDisplay<PointCloud2Message, PointCloud2DisplayConfig> {
@@ -369,6 +435,9 @@ export class PointCloud2Display extends GeometryDisplay<PointCloud2Message, Poin
     assertLimit(config.maxPoints, "maxPoints");
     assertLimit(config.maxInputBytes, "maxInputBytes");
     assertColor(config.color);
+    if (config.colorMode && !(["uniform", "intensity", "rgb", "axis"] as const).includes(config.colorMode)) throw new Error("PointCloud2 color mode is invalid");
+    if (config.colorAxis && !(["x", "y", "z"] as const).includes(config.colorAxis)) throw new Error("PointCloud2 color axis is invalid");
+    if (config.pointSize !== undefined && (!Number.isFinite(config.pointSize) || config.pointSize < 1 || config.pointSize > 64)) throw new Error("PointCloud2 pointSize must be between 1 and 64");
   }
 
   protected convert(message: PointCloud2Message, config: PointCloud2DisplayConfig) {
@@ -376,7 +445,7 @@ export class PointCloud2Display extends GeometryDisplay<PointCloud2Message, Poin
   }
 
   updatePrepared(prepared: PreparedPointCloud2, epoch: number): SemanticSceneSummary {
-    if (!(prepared.positions instanceof Float32Array) || prepared.positions.length !== prepared.summary.renderedVertices * 3 || prepared.summary.displayKind !== "pointcloud2" || prepared.summary.primitive !== "points") {
+    if (!(prepared.positions instanceof Float32Array) || prepared.positions.length !== prepared.summary.renderedVertices * 3 || (prepared.colors && prepared.colors.length !== prepared.summary.renderedVertices * 4) || prepared.summary.displayKind !== "pointcloud2" || prepared.summary.primitive !== "points") {
       throw new Error("Prepared PointCloud2 geometry is invalid");
     }
     return this.updatePreparedGeometry(prepared, epoch);
@@ -610,7 +679,6 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
   readonly kind = "frame-tree" as const;
 
   protected validateConfig(config: FrameTreeDisplayConfig): void {
-    if (!config.fixedFrame) throw new Error("TF fixed frame is required");
     assertLimit(config.maxTransforms, "maxTransforms");
     assertLimit(config.maxInputBytes, "maxInputBytes");
     assertColor(config.color);
@@ -621,7 +689,7 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
     const estimatedBytes = message.transforms.length * 128;
     if (estimatedBytes > config.maxInputBytes) throw new Error("TF input byte budget exceeded");
     const byChild = new Map<string, FrameTransform>();
-    const frames = new Set<string>([config.fixedFrame]);
+    const frames = new Set<string>(config.fixedFrame ? [config.fixedFrame] : []);
     for (const transform of message.transforms) {
       if (!transform.parentFrameId || !transform.childFrameId) throw new Error("TF frame names are required");
       if (transform.parentFrameId === transform.childFrameId) throw new Error(`TF cycle at frame ${transform.childFrameId}`);
@@ -631,7 +699,7 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
       frames.add(transform.parentFrameId);
       frames.add(transform.childFrameId);
     }
-    if (!frames.has(config.fixedFrame)) throw new Error(`TF fixed frame is missing: ${config.fixedFrame}`);
+    if (config.fixedFrame && !frames.has(config.fixedFrame)) throw new Error(`TF fixed frame is missing: ${config.fixedFrame}`);
 
     type ResolvedTransform = Readonly<{
       translation: readonly [number, number, number];
@@ -707,8 +775,9 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
       fromChild.push({ frame: edge.parentFrameId, transform: inverse(parentFromChild) });
       adjacency.set(edge.childFrameId, fromChild);
     }
-    const resolved = new Map<string, ResolvedTransform>([[config.fixedFrame, identity]]);
-    const queue = [config.fixedFrame];
+    const roots = config.fixedFrame ? [config.fixedFrame] : [...frames].filter((frame) => !byChild.has(frame));
+    const resolved = new Map<string, ResolvedTransform>(roots.map((frame) => [frame, identity]));
+    const queue = [...roots];
     for (let index = 0; index < queue.length; index += 1) {
       const frame = queue[index]!;
       const fixedFromFrame = resolved.get(frame)!;
@@ -718,7 +787,7 @@ export class FrameTreeDisplay extends GeometryDisplay<FrameTreeMessage, FrameTre
         queue.push(neighbor.frame);
       }
     }
-    for (const frame of frames) {
+    if (config.fixedFrame) for (const frame of frames) {
       if (!resolved.has(frame)) throw new Error(`TF frame ${frame} is disconnected from fixed frame ${config.fixedFrame}`);
     }
 

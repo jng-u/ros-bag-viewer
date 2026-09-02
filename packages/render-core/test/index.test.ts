@@ -81,9 +81,12 @@ class MockWebGl2 {
   }
   useProgram(): void {}
   enableVertexAttribArray(): void {}
+  disableVertexAttribArray(): void {}
   vertexAttribPointer(): void {}
   uniformMatrix4fv(_location: WebGLUniformLocation | null, _transpose: boolean, value: Float32List): void { this.matrices.push(Array.from(value)); }
   uniform4fv(): void {}
+  uniform1f(): void {}
+  uniform1i(): void {}
 
   drawArrays(mode: number, _first: number, count: number): void {
     this.draws.push({ mode, count });
@@ -134,6 +137,19 @@ describe("WebGl2Renderer", () => {
     })).toThrow(/hidden decimation is forbidden/u);
     expect(gl.bufferAllocations).toEqual([]);
     expect(value.telemetry()).toMatchObject({ rejectedAllocations: 1, decimatedVertices: 0 });
+  });
+
+  it("uploads per-vertex colors and configurable point size without decimation", () => {
+    const { gl, renderer: value } = renderer();
+    value.upsert({
+      id: "colored-cloud",
+      topology: "points",
+      positions: new Float32Array([0, 0, 0, 1, 2, 3]),
+      colors: new Float32Array([1, 0, 0, 1, 0, 1, 0, 1]),
+      pointSize: 7,
+    }).draw();
+    expect(gl.bufferUploads).toEqual([2 * 7 * Float32Array.BYTES_PER_ELEMENT]);
+    expect(gl.draws).toEqual([{ mode: gl.POINTS, count: 2 }]);
   });
 
   it("applies and preserves a per-geometry model transform across updates", () => {

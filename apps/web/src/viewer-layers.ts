@@ -3,6 +3,7 @@ import type { SemanticSceneSummary } from "@ros-web-viewer/displays-core";
 import type { DisplayKind, TopicSummary } from "./shell.js";
 
 export type ViewerLayerStatus = "error" | "loading" | "ready" | "waiting";
+export type PointCloudColorMode = "axis" | "intensity" | "rgb" | "uniform";
 
 export interface ViewerLayer {
   readonly id: string;
@@ -12,6 +13,9 @@ export interface ViewerLayer {
   readonly status: ViewerLayerStatus;
   readonly colorIndex: number;
   readonly color?: readonly [number, number, number, number];
+  readonly pointSize?: number;
+  readonly pointCloudColorMode?: PointCloudColorMode;
+  readonly pointCloudColorAxis?: "x" | "y" | "z";
   readonly fieldPath?: string;
   readonly messageTimeNanos?: bigint;
   readonly summary?: SemanticSceneSummary;
@@ -71,6 +75,11 @@ export class ViewerLayerRegistry {
   setColor(id: string, color: readonly [number, number, number, number]): void {
     if (color.some((component) => !Number.isFinite(component) || component < 0 || component > 1)) throw new Error("layer color is invalid");
     this.#replace(id, (layer) => ({ ...layer, color }));
+  }
+
+  setPointCloudStyle(id: string, patch: Readonly<{ pointSize?: number; pointCloudColorMode?: PointCloudColorMode; pointCloudColorAxis?: "x" | "y" | "z" }>): void {
+    if (patch.pointSize !== undefined && (!Number.isFinite(patch.pointSize) || patch.pointSize < 1 || patch.pointSize > 64)) throw new Error("point size is invalid");
+    this.#replace(id, (layer) => ({ ...layer, ...patch }));
   }
 
   update(id: string, patch: Partial<Pick<ViewerLayer, "error" | "messageTimeNanos" | "status" | "summary">>): void {

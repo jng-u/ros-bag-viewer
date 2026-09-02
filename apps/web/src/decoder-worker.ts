@@ -47,6 +47,7 @@ function transferableBuffers(value: unknown): Transferable[] {
   const decoded = semantic?.decoded ?? (value && typeof value === "object" && "kind" in value ? value as DecodedSemanticMessage : undefined);
   if (decoded && "data" in decoded.message) addBuffer(buffers, decoded.message.data);
   addBuffer(buffers, semantic?.pointCloud?.positions);
+  addBuffer(buffers, semantic?.pointCloud?.colors);
   addBuffer(buffers, semantic?.rawImageRgba);
   return [...buffers];
 }

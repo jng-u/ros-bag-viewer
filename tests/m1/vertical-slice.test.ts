@@ -213,9 +213,12 @@ class MockWebGl2 {
   getUniformLocation(): WebGLUniformLocation { return {} as WebGLUniformLocation; }
   useProgram(): void {}
   enableVertexAttribArray(): void {}
+  disableVertexAttribArray(): void {}
   vertexAttribPointer(): void {}
   uniformMatrix4fv(): void {}
   uniform4fv(): void {}
+  uniform1f(): void {}
+  uniform1i(): void {}
   drawArrays(mode: number, _first: number, count: number): void { this.draws.push({ mode, count }); }
 }
 

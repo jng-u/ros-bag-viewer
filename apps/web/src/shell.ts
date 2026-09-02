@@ -193,7 +193,7 @@ export interface DesktopShellState {
 }
 
 const defaultConfiguration: DisplayConfiguration = {
-  fixedFrame: "map",
+  fixedFrame: "",
   color: "intensity",
   scale: 1,
   quality: "compact",
