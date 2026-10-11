@@ -2,6 +2,8 @@
 
 **Current decision:** **blocked**. This repository has not been authorized for public naming, license selection, publication, credentials, paid infrastructure, external deployment, or production deployment.
 
+**GitHub Pages scope update:** the maintainer has now explicitly requested source publication to `jng-u/ros-bag-viewer` and preparation of its static Pages site; see [the scoped deployment record](github-pages.md). The M5 evidence below is the earlier production-readiness record, not a prohibition on that specific request or a certification of the Pages deployment. License selection, package publication, credentials, paid infrastructure, and production certification remain outside that request.
+
 The machine-readable source of truth is [`docs/evidence/m5-release-readiness.json`](evidence/m5-release-readiness.json). It maps AC-01 through AC-17 to exact commands and artifacts, records evidence class and limitations, and makes missing evidence release-blocking rather than silently treating it as a pass.
 
 ## Evidence boundary

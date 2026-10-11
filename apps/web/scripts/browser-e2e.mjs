@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 
 const viewerUrl = process.env.VIEWER_URL ?? "http://127.0.0.1:8080";
 const viewerOnly = process.env.VIEWER_ONLY_E2E === "1";
+const staticHost = process.env.STATIC_HOST_E2E === "1";
 const shareCreateToken = process.env.SHARE_CREATE_TOKEN;
 if (!viewerOnly && !shareCreateToken) throw new Error("Set SHARE_CREATE_TOKEN to the token configured on the Docker share service.");
 const driverPort = Number(process.env.GECKODRIVER_PORT ?? 4600 + (process.pid % 300));
@@ -180,6 +181,8 @@ try {
   await command(`/session/${sessionId}/url`, "POST", { url: viewerUrl });
   await waitFor("viewer shell", () => execute("return Boolean(document.querySelector('.viewer-shell'))"));
   const environment = await execute(`return {
+    secureContext: isSecureContext,
+    crossOriginIsolated,
     userAgent: navigator.userAgent,
     hardwareConcurrency: navigator.hardwareConcurrency,
     viewport: [innerWidth, innerHeight],
@@ -187,6 +190,9 @@ try {
     jsHeapTelemetryAvailable: Boolean(performance.memory),
     longTaskObserverAvailable: typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask') === true,
   };`);
+  if (staticHost && (!environment.secureContext || environment.crossOriginIsolated)) {
+    throw new Error("Pages verification requires a secure context without cross-origin isolation headers.");
+  }
 
   const results = [];
   for (const format of ["mcap", "ros1", "ros2"]) {
@@ -216,6 +222,17 @@ try {
       throw new Error(JSON.stringify(value));
     });
     results.push({ format, openToSynchronizedMs: Date.now() - openStarted, ...result });
+    if (staticHost) {
+      const sharing = await execute(`const button=document.querySelector('#share-button');
+        const originalFetch=window.fetch; let requests=0;
+        window.fetch=()=>{requests++;return Promise.reject(new Error('Static hosting must not upload'));};
+        try { document.querySelector('#share-form').requestSubmit(); }
+        finally { window.fetch=originalFetch; }
+        return {disabled:button.disabled,explanation:button.title,requests};`);
+      if (!sharing.disabled || !sharing.explanation.includes("static site") || sharing.requests !== 0) {
+        throw new Error(`Static sharing boundary failed: ${JSON.stringify(sharing)}`);
+      }
+    }
   }
 
   const originalWindow = await command(`/session/${sessionId}/window`);

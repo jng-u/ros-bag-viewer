@@ -26,6 +26,7 @@ import {
   type BrowserSample,
 } from "./browser-runtime.js";
 import { BrowserLiveRelay } from "./browser-live.js";
+import { shareServiceAvailable, viewerAssetPath } from "./browser-deployment.js";
 import { compressedImageDimensions } from "./compressed-image.js";
 import { BrowserDisplayLifecycle } from "./browser-display-lifecycle.js";
 import { BrowserMessageDecoder } from "./browser-message-decoder.js";
@@ -42,6 +43,7 @@ import "./style.css";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing");
+const canShare = shareServiceAvailable();
 
 const icon = (name: "close" | "drag" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus") => {
   const paths = {
@@ -67,7 +69,7 @@ app.innerHTML = `
         <select id="demo-kind" aria-label="Demo recording format"><option value="mcap">MCAP</option><option value="ros1">ROS1 BAG</option><option value="ros2">ROS2 BAG</option></select>
         <button id="demo-button" type="button">DEMO</button>
         <button id="remote-button" type="button">URL</button>
-        <button id="share-button" type="button" disabled>SHARE</button>
+        <button id="share-button" type="button" disabled${canShare ? "" : ' title="Sharing requires a server and is unavailable on this static site." aria-label="Share unavailable on static hosting"'}>SHARE</button>
         <button id="live-button" type="button">LIVE</button>
         <label for="directory-input">${icon("folder")} ROS2 DIR</label>
         <label class="primary-action" for="recording-input">${icon("folder")} OPEN</label>
@@ -1339,7 +1341,7 @@ function renderChrome(rebuildStructure = true): void {
   timeline.value = state.durationNanos === 0n ? "0" : String(Number((state.currentTimeNanos * 10_000n) / state.durationNanos));
   timeline.disabled = state.durationNanos === 0n || state.phase === "loading";
   byId("connection-dot").classList.toggle("is-active", state.phase === "ready" || state.phase === "degraded");
-  byId<HTMLButtonElement>("share-button").disabled = !shareableMcap && !lastCreatedShare;
+  byId<HTMLButtonElement>("share-button").disabled = !canShare || (!shareableMcap && !lastCreatedShare);
   byId("drop-prompt").hidden = state.phase !== "empty" && state.phase !== "error";
   const liveHealth = state.liveTelemetry
     ? ` Queue ${state.liveTelemetry.queuedMessages}/${formatBytes(state.liveTelemetry.queuedBytes)} · dropped ${state.liveTelemetry.droppedMessages}`
@@ -1761,7 +1763,7 @@ byId<HTMLButtonElement>("demo-button").addEventListener("click", async (event) =
   try {
     const paths = kind === "mcap" ? ["demo.mcap"] : kind === "ros1" ? ["demo-ros1.bag"] : ["demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"];
     const entries = await Promise.all(paths.map(async (path): Promise<SelectedBrowserFile> => {
-      const response = await fetch(`/${path}`);
+      const response = await fetch(viewerAssetPath(path));
       if (!response.ok) throw new Error(`Demo request for ${path} failed with HTTP ${response.status}.`);
       const blob = await response.blob();
       return { file: new File([blob], path.split("/").at(-1) ?? path, { type: "application/octet-stream", lastModified: 0 }), relativePath: path };
@@ -1803,10 +1805,11 @@ function renderShareDialog(): void {
   byId<HTMLButtonElement>("share-copy").hidden = !lastCreatedShare;
   byId<HTMLButtonElement>("share-revoke").hidden = !lastCreatedShare;
 }
-byId("share-button").addEventListener("click", () => { renderShareDialog(); shareDialog.showModal(); });
+byId("share-button").addEventListener("click", () => { if (canShare) { renderShareDialog(); shareDialog.showModal(); } });
 for (const id of ["share-dialog-close", "share-cancel"]) byId(id).addEventListener("click", () => shareDialog.close());
 byId<HTMLFormElement>("share-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!canShare) return;
   const file = shareableMcap;
   if (!file) return;
   const createToken = byId<HTMLInputElement>("share-create-token").value;

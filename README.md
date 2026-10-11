@@ -43,6 +43,12 @@ corepack pnpm dev
 
 The development server listens on <http://localhost:4173>.
 
+## Deploy on GitHub Pages
+
+Pushes to `main` are validated, built, and deployed by [the GitHub Pages workflow](.github/workflows/pages.yml). For `jng-u/ros-bag-viewer`, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** once; the repository owner may need to do this manually. Successful deployments are available at <https://jng-u.github.io/ros-bag-viewer/>.
+
+The Pages build processes local recordings in each visitor's browser and does not upload them. It is static-only: **SHARE** is disabled, while **URL** requires an external HTTPS Range/CORS-capable MCAP host and **LIVE** requires an external secure `wss://` relay. ROS2 SQLite requires a supported secure-context browser. See [`docs/github-pages.md`](docs/github-pages.md) for setup, browser requirements, and production boundaries.
+
 Use Corepack with the pinned pnpm version. Run `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, `pnpm check:m0`, `pnpm check:m1`, `pnpm check:m2`, `pnpm check:m3`, `pnpm check:m4`, `pnpm check:m5`, `pnpm test:security`, `pnpm test:a11y`, `pnpm test:ux`, and `pnpm build` before review. Dependency, license, and SBOM gates are available through `pnpm audit:dependencies`, `pnpm report:licenses`, and `pnpm sbom`. Regenerate the deterministic M3 contract record with `pnpm evidence:m3`; a clean tree afterward proves the checked-in evidence matches the current harness. The workspace-private extension boundary is documented in [`docs/extension-api.md`](docs/extension-api.md), and [`docs/release-readiness.md`](docs/release-readiness.md) records the blocked M5 decision and exact `pnpm release:readiness:full` gate.
 
 M0–M5 cover the contract baseline, bounded recorded sources and displays, secure-live boundaries, hosted sharing, the trusted build-time extension subset, protocol/schema v1 conformance, and release-hardening gates. The corrective rebuild additionally runs real headless Firefox against Docker for local MCAP, ROS1 bag, ROS2 SQLite, hosted share creation/open/revocation, a public compressed Cartographer ROS1 bag, a non-redistributed SHA-pinned public ROS2 navigation bag, and actual Noetic/Jazzy `/tf` plus `/scan` bridge traffic. This is local deployment evidence, not certification of a particular robot network, public hostname, identity provider, or production storage service.

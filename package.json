@@ -16,6 +16,7 @@
     "test:security": "vitest run tests/m0/baseline.test.ts -t 'approval evidence|paid-infrastructure' && vitest run tests/m3-live/security-gate.test.ts packages/hosted-core/test/index.test.ts tests/m4-hosted/lifecycle.test.ts",
     "test:e2e": "vitest run tests/m1/vertical-slice.test.ts packages/m2-recorded-gate/test/index.test.ts tests/m4-hosted/lifecycle.test.ts apps/web/test/hosted-adapter.test.ts",
     "test:e2e:browser": "node apps/web/scripts/browser-e2e.mjs",
+    "test:e2e:pages": "node apps/web/scripts/pages-e2e.mjs",
     "test:e2e:live-bridge": "node apps/web/scripts/live-bridge-browser-e2e.mjs",
     "test:a11y": "vitest run tests/m0/baseline.test.ts -t 'accessibility'",
     "test:ux": "vitest run tests/m0/baseline.test.ts -t 'desktop UX baseline'",
