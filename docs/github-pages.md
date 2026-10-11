@@ -14,6 +14,8 @@ The workflow uses Node.js 22 and pnpm 9.15.5, installs the frozen lockfile, and 
 
 The GPU-less hosted runner starts headed Firefox under Xvfb with Mesa software rendering and WebGL enabled only in its temporary WebDriver profile. The suite still requires a real WebGL2 context and rendered geometry; this does not change the shipped viewer or certify client GPU support.
 
+Both workflows pin the project toolchain to Node.js 22.23.3. The tracked M3 synthetic evidence records its actual generating runtime, so a deliberate Node version update must regenerate that evidence with the same version instead of leaving CI to dirty the source tree.
+
 ## Static-host behavior
 
 GitHub Pages serves only the browser application; it does not run the repository's hosted share service or ROS bridges.

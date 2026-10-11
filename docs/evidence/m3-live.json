@@ -3,7 +3,7 @@
   "gate": "G004 M3 secure-live local contract",
   "evidenceKind": "deterministic-local-synthetic-contract",
   "generatedBy": "UPDATE_M3_EVIDENCE=1 vitest run --config tests/m3-live/vitest.config.ts tests/m3-live/generate-evidence.test.ts",
-  "runtime": "v24.15.0",
+  "runtime": "v22.23.3",
   "networkExecution": false,
   "containerExecution": false,
   "productionSecurityClaim": false,
