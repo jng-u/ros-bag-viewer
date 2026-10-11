@@ -10,7 +10,7 @@ The repository includes [`.github/workflows/pages.yml`](../.github/workflows/pag
 
 After pushing the workflow to GitHub, open **Settings → Pages** in `jng-u/ros-bag-viewer` and set **Build and deployment → Source** to **GitHub Actions**. The repository owner may need to make this setting manually. Then push to `main` or run **Deploy GitHub Pages** from the repository's **Actions** tab.
 
-The workflow uses Node.js 22 and pnpm 9.15.5, installs the frozen lockfile, and runs lint, typecheck, and unit tests before building. `actions/configure-pages` supplies the repository-aware base path to Vite, so generated assets work below `/ros-bag-viewer/`. The uploaded Pages artifact is `apps/web/dist-web`.
+The workflow uses Node.js 22 and pnpm 9.15.5, installs the frozen lockfile, and runs lint, typecheck, unit, integration, and security tests before building. It also requires the Pages-specific headless Firefox suite to pass before uploading an artifact. `actions/configure-pages` supplies the repository-aware base path to Vite, so generated assets work below `/ros-bag-viewer/`. The uploaded Pages artifact is `apps/web/dist-web`. Only the deploy job receives Pages-write and OIDC permissions; the build job is read-only.
 
 ## Static-host behavior
 

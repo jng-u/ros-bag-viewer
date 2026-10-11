@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -16,7 +14,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -35,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+
       - name: Lint
         run: pnpm lint
 
@@ -43,6 +47,11 @@ jobs:
 
       - name: Run unit tests
         run: pnpm test:unit
+
+      - name: Check integration and security boundaries
+        run: |
+          pnpm test:integration
+          pnpm test:security
 
       - name: Configure GitHub Pages
         id: pages
@@ -54,12 +63,23 @@ jobs:
           VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
           VITE_STATIC_HOST: "true"
 
+      - name: Verify Pages in headless Firefox
+        run: |
+          command -v firefox
+          command -v geckodriver
+          firefox --version
+          geckodriver --version
+          pnpm test:e2e:pages
+
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/web/dist-web
 
   deploy:
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.5",
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@5.0.9": "5.0.12",
+      "source-map-js@1.2.1": "1.2.2"
+    }
+  },
   "scripts": {
     "dev": "corepack pnpm --filter @ros-web-viewer/web dev",
     "build:web": "corepack pnpm build && corepack pnpm --filter @ros-web-viewer/web build:web",
