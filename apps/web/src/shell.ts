@@ -212,6 +212,7 @@ function errorMessage(error: unknown): string {
 }
 
 export class DesktopShellController {
+  #sourceGeneration = 0;
   #state: DesktopShellState = {
     phase: "empty",
     topics: [],
@@ -241,6 +242,7 @@ export class DesktopShellController {
   }
 
   async openLocal(selection: LocalMcapSelection): Promise<void> {
+    const generation = ++this.#sourceGeneration;
     this.#state = {
       ...this.#state,
       phase: "loading",
@@ -261,6 +263,7 @@ export class DesktopShellController {
         : this.ports.openLocalMcap
           ? await this.ports.openLocalMcap(selection)
           : await Promise.reject(new Error("no recorded-source runtime is registered"));
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: result.indexState === "sequential" ? "degraded" : "ready",
@@ -280,6 +283,7 @@ export class DesktopShellController {
             : `${result.topics.length} topics discovered.`),
       };
     } catch (error) {
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: "error",
@@ -290,6 +294,7 @@ export class DesktopShellController {
   }
 
   async openHosted(selection: HostedSessionSelection): Promise<void> {
+    const generation = ++this.#sourceGeneration;
     if (!this.ports.openHostedSession) throw new Error("no hosted-source runtime is registered");
     this.#state = {
       ...this.#state,
@@ -314,6 +319,7 @@ export class DesktopShellController {
 
     try {
       const result = await this.ports.openHostedSession(selection);
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: result.indexState === "sequential" ? "degraded" : "ready",
@@ -330,6 +336,7 @@ export class DesktopShellController {
       };
     } catch (error) {
       const code = hostedFailureCode(error);
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: "error",
@@ -346,6 +353,7 @@ export class DesktopShellController {
   }
 
   async connectLive(selection: LiveConnectionSelection): Promise<void> {
+    const generation = ++this.#sourceGeneration;
     if (!this.ports.connectLive) throw new Error("no secure live-source runtime is registered");
     this.#state = {
       ...this.#state,
@@ -369,6 +377,7 @@ export class DesktopShellController {
     };
     try {
       const result = await this.ports.connectLive(selection);
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
@@ -380,6 +389,7 @@ export class DesktopShellController {
         notice: `${result.topics.length} live topics discovered. Live mode is read-only.`,
       };
     } catch (error) {
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: "error",
@@ -440,6 +450,7 @@ export class DesktopShellController {
     if (this.#state.sourceMode !== "live" || !this.ports.reconnectLive) {
       throw new Error("connect secure live mode before reconnecting");
     }
+    const generation = ++this.#sourceGeneration;
     this.#state = {
       ...this.#state,
       phase: "loading",
@@ -448,6 +459,7 @@ export class DesktopShellController {
     };
     try {
       const result = await this.ports.reconnectLive();
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: result.telemetry.state === "degraded" ? "degraded" : "ready",
@@ -458,6 +470,7 @@ export class DesktopShellController {
         notice: `Live source reconnected at epoch ${result.epoch}.`,
       };
     } catch (error) {
+      if (generation !== this.#sourceGeneration) return;
       this.#state = {
         ...this.#state,
         phase: "error",
@@ -469,7 +482,9 @@ export class DesktopShellController {
   }
 
   async disconnectLive(): Promise<void> {
+    const generation = ++this.#sourceGeneration;
     await this.ports.disconnectLive?.();
+    if (generation !== this.#sourceGeneration) return;
     this.#state = {
       ...this.#state,
       phase: "empty",

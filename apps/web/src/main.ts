@@ -36,7 +36,7 @@ import { collectNumericFields, numericValueAtPath, type GenericRosDecodeResult }
 import { HistoricalFrameResolver, IDENTITY_TRANSFORM, transformBounds, type FrameTransformResolver } from "./frame-resolver.js";
 import { OrbitCamera, type CameraPreset } from "./scene-camera.js";
 import { poseSourceFrame } from "./pose-source-frame.js";
-import { DesktopShellController, type DisplayKind, type TopicSummary } from "./shell.js";
+import { DesktopShellController, type DisplayKind, type LocalMcapSelection, type TopicSummary } from "./shell.js";
 import { standardRosSchema } from "./standard-ros-schema.js";
 import { ViewerLayerRegistry, type ViewerLayer } from "./viewer-layers.js";
 import "./style.css";
@@ -1685,15 +1685,19 @@ async function openFiles(entries: readonly SelectedBrowserFile[]): Promise<void>
   const first = entries[0]!;
   const detected = ros2 ? "ros2-sqlite" : detectBrowserSourceFormat(first.file.name);
   const name = ros2 ? `ROS2 BAG · ${entries.length} FILE${entries.length === 1 ? "" : "S"}` : first.file.name;
-  renderChrome();
-  await controller.openLocal({
+  const selection: LocalMcapSelection = {
     format: detected === "unknown" ? "mcap" : detected,
     name,
     sizeBytes: entries.reduce((total, { file }) => total + file.size, 0),
     immutableVersion: entries.map(({ file, relativePath }) => `${relativePath}:${localFileVersion(file)}`).join("|"),
     blob: first.file,
     files: entries.map(({ file, relativePath }) => ({ name: file.name, relativePath, sizeBytes: file.size, immutableVersion: localFileVersion(file), blob: file })),
-  });
+  };
+  const opening = controller.openLocal(selection);
+  renderChrome();
+  await opening;
+  if (controller.state.sourceSelection !== selection) return;
+  if (controller.state.phase !== "ready" && controller.state.phase !== "degraded") { renderChrome(); return; }
   shareableMcap = detected === "mcap" && entries.length === 1 ? first.file : undefined;
   autoAddLayers();
   renderChrome();

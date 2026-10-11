@@ -101,6 +101,36 @@ describe("minimum desktop shell", () => {
     expect(() => controller.addDisplay("opaque", "path")).toThrow(/unavailable/);
   });
 
+  it("ignores a replaced open error while the current large ROS1 recording is loading", async () => {
+    const oldOpen = Promise.withResolvers<OpenLocalResult>();
+    const bagOpen = Promise.withResolvers<OpenLocalResult>();
+    const controller = new DesktopShellController({
+      ...ports(), openLocalRecording: vi.fn().mockImplementationOnce(() => oldOpen.promise).mockImplementationOnce(() => bagOpen.promise),
+    });
+    const bag = { ...selection, name: "htp_01.bag", format: "ros1-bag" as const, sizeBytes: 4 * 1024 ** 3 };
+    const previous = controller.openLocal(bag);
+    const latest = controller.openLocal({ ...bag });
+    oldOpen.reject(new Error("recording source replaced"));
+    await previous;
+    expect(controller.state).toMatchObject({ phase: "loading", sourceLabel: "htp_01.bag" });
+    expect(controller.state.blockingError).toBeUndefined();
+    bagOpen.resolve({ ...indexedSource, sourceLabel: bag.name });
+    await latest;
+    expect(controller.state).toMatchObject({ phase: "ready", sourceLabel: "htp_01.bag" });
+  });
+
+  it("ignores a stale open success after a newer recording has finished", async () => {
+    const oldOpen = Promise.withResolvers<OpenLocalResult>();
+    const controller = new DesktopShellController({
+      ...ports(), openLocalRecording: (source) => source === selection ? oldOpen.promise : Promise.resolve({ ...indexedSource, sourceLabel: source.name }),
+    });
+    const previous = controller.openLocal(selection);
+    await controller.openLocal({ ...selection, name: "htp_01.bag", format: "ros1-bag" });
+    oldOpen.resolve(indexedSource);
+    await previous;
+    expect(controller.state).toMatchObject({ phase: "ready", sourceLabel: "htp_01.bag", sourceFormat: "ros1-bag" });
+  });
+
   it("seeks through the adapter, advances epoch, and exposes sequential-index degradation", async () => {
     const adapter = ports({ ...indexedSource, indexState: "sequential", diagnostic: "Index absent; sequential seek enabled." });
     const controller = new DesktopShellController(adapter);

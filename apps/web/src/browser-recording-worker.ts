@@ -17,6 +17,7 @@ export class BrowserRecordingWorker {
   readonly #pending = new Map<number, { readonly resolve: (value: unknown) => void; readonly reject: (error: Error) => void; readonly timeout: number }>();
   #nextId = 1;
   #epoch = 0;
+  #sourceGeneration = 0;
   #closed = false;
   #openRequest?: Extract<Request, { readonly operation: "open" | "openHostedMcap" }>;
   readonly #opfsNamespace: string;
@@ -27,17 +28,25 @@ export class BrowserRecordingWorker {
   }
 
   async open(selection: LocalMcapSelection): Promise<OpenLocalResult> {
+    const generation = ++this.#sourceGeneration;
+    this.#openRequest = undefined;
     await this.#replaceWorker("recording source replaced");
+    if (generation !== this.#sourceGeneration) throw new Error("recording source replaced");
     const request = { operation: "open", selection } as const;
     const result = await this.#request(request) as OpenLocalResult;
+    if (generation !== this.#sourceGeneration) throw new Error("recording source replaced");
     this.#openRequest = request;
     this.#epoch += 1;
     return { ...result, epoch: this.#epoch };
   }
   async openHostedMcap(link: string): Promise<OpenHostedResult> {
+    const generation = ++this.#sourceGeneration;
+    this.#openRequest = undefined;
     await this.#replaceWorker("recording source replaced");
+    if (generation !== this.#sourceGeneration) throw new Error("recording source replaced");
     const request = { operation: "openHostedMcap", link } as const;
     const result = await this.#request(request) as OpenHostedResult;
+    if (generation !== this.#sourceGeneration) throw new Error("recording source replaced");
     this.#openRequest = request;
     this.#epoch += 1;
     return { ...result, epoch: this.#epoch };
@@ -59,6 +68,7 @@ export class BrowserRecordingWorker {
   #createWorker(): Worker {
     const worker = new Worker(new URL("./recording-worker.js", import.meta.url), { type: "module", name: "ros-recording-source" });
     worker.addEventListener("message", (event: MessageEvent<Response>) => {
+      if (this.#worker !== worker) return;
       const pending = this.#pending.get(event.data.id);
       if (!pending) return;
       this.#pending.delete(event.data.id);
@@ -77,6 +87,7 @@ export class BrowserRecordingWorker {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#sourceGeneration += 1;
     const worker = this.#worker;
     if (this.#pending.size === 0) {
       this.#closed = false;
@@ -111,6 +122,8 @@ export class BrowserRecordingWorker {
     if (this.#pending.size === 0) {
       try { await this.#request({ operation: "close" }, 5_000); } catch { /* terminate and recover the same namespace below */ }
     }
+    // A newer replacement may have completed while graceful close was pending.
+    if (this.#worker !== worker) return;
     worker.terminate();
     this.#rejectAll(new Error(reason));
     this.#closed = false;

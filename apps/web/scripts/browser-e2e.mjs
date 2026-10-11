@@ -243,6 +243,38 @@ try {
     }
   }
 
+  // Exercise real local-file changes while a prior open is in flight. The
+  // superseded request must never paint an error over the latest ROS1 load.
+  await executeAsync(`const done=arguments[arguments.length-1];
+    fetch(new URL('demo-ros1.bag', location.href)).then((response)=>response.blob()).then((blob)=>{
+      const input=document.querySelector('#recording-input');
+      const file=new File([blob], 'replacement.bag', {lastModified:0});
+      const select=()=>{const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));};
+      const original=Worker.prototype.postMessage;let opens=0;
+      window.__recordingReplacementStates=[];
+      window.__recordingReplacementObserver=new MutationObserver(()=>window.__recordingReplacementStates.push(document.querySelector('.viewer-shell').dataset.phase));
+      window.__recordingReplacementObserver.observe(document.querySelector('.viewer-shell'),{attributes:true,attributeFilter:['data-phase']});
+      Worker.prototype.postMessage=function(message,...args){
+        const result=original.call(this,message,...args);
+        if(message.operation==='open' && ++opens===1) queueMicrotask(select);
+        else if(message.operation==='open' && opens===2){Worker.prototype.postMessage=original;done({opens});}
+        return result;
+      };
+      select();
+    }).catch((error)=>done({error:String(error)}));`);
+  const replacement = await waitFor("overlapping local ROS1 file open", async () => {
+    const value = await execute(`return {phase:document.querySelector('.viewer-shell')?.dataset.phase,
+      source:document.querySelector('#source-name')?.textContent??'',
+      ready:[...document.querySelectorAll('.layer-row')].filter((row)=>row.textContent.includes('READY')).length,
+      errors:document.querySelectorAll('.layer-error').length,
+      states:window.__recordingReplacementStates};`);
+    if(value.phase==='ready' && value.source.includes('REPLACEMENT.BAG') && value.ready>=10 && value.errors===0) return value;
+    throw new Error(JSON.stringify(value));
+  });
+  await execute("window.__recordingReplacementObserver.disconnect();delete window.__recordingReplacementObserver;delete window.__recordingReplacementStates;");
+  if(replacement.states.includes("error")) throw new Error(`Stale recording open painted an error: ${JSON.stringify(replacement)}`);
+  console.log(JSON.stringify({localRos1Replacement:replacement},null,2));
+
   const originalWindow = await command(`/session/${sessionId}/window`);
   await execute("window.open(location.href, '_blank')");
   const secondWindow = await waitFor("second Firefox viewer tab", async () => {
