@@ -7,6 +7,8 @@ import { dirname, resolve } from "node:path";
 const viewerUrl = process.env.VIEWER_URL ?? "http://127.0.0.1:8080";
 const viewerOnly = process.env.VIEWER_ONLY_E2E === "1";
 const staticHost = process.env.STATIC_HOST_E2E === "1";
+const firefoxHeadless = process.env.FIREFOX_HEADLESS !== "0";
+const softwareWebGl = process.env.FIREFOX_SOFTWARE_WEBGL === "1";
 const shareCreateToken = process.env.SHARE_CREATE_TOKEN;
 if (!viewerOnly && !shareCreateToken) throw new Error("Set SHARE_CREATE_TOKEN to the token configured on the Docker share service.");
 const driverPort = Number(process.env.GECKODRIVER_PORT ?? 4600 + (process.pid % 300));
@@ -174,8 +176,12 @@ const fixture = await startFixtureServer();
 let sessionId;
 try {
   await waitFor("geckodriver", async () => (await globalThis.fetch(`${base}/status`)).ok, 10_000);
-  const created = await command("/session", "POST", { capabilities: { alwaysMatch: { browserName: "firefox", "moz:firefoxOptions": { args: ["-headless", "--width=1440", "--height=900"] } } } });
+  const created = await command("/session", "POST", { capabilities: { alwaysMatch: { browserName: "firefox", "moz:firefoxOptions": {
+    args: firefoxHeadless ? ["-headless"] : [],
+    ...(softwareWebGl ? { prefs: { "webgl.force-enabled": true, "webgl.disable-fail-if-major-performance-caveat": true } } : {}),
+  } } } });
   sessionId = created.sessionId;
+  await command(`/session/${sessionId}/window/rect`, "POST", { width: 1440, height: 900 });
   const execute = (script, args = []) => command(`/session/${sessionId}/execute/sync`, "POST", { script, args });
   const executeAsync = (script, args = []) => command(`/session/${sessionId}/execute/async`, "POST", { script, args });
   await command(`/session/${sessionId}/url`, "POST", { url: viewerUrl });
@@ -183,6 +189,7 @@ try {
   const environment = await execute(`return {
     secureContext: isSecureContext,
     crossOriginIsolated,
+    webGl2Available: Boolean(document.querySelector('#scene-canvas')?.getContext('webgl2')),
     userAgent: navigator.userAgent,
     hardwareConcurrency: navigator.hardwareConcurrency,
     viewport: [innerWidth, innerHeight],
@@ -190,6 +197,7 @@ try {
     jsHeapTelemetryAvailable: Boolean(performance.memory),
     longTaskObserverAvailable: typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask') === true,
   };`);
+  if (!environment.webGl2Available) throw new Error("Firefox cannot create the required WebGL2 context; verify the display/Mesa configuration.");
   if (staticHost && (!environment.secureContext || environment.crossOriginIsolated)) {
     throw new Error("Pages verification requires a secure context without cross-origin isolation headers.");
   }

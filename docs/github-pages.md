@@ -10,7 +10,9 @@ The repository includes [`.github/workflows/pages.yml`](../.github/workflows/pag
 
 After pushing the workflow to GitHub, open **Settings → Pages** in `jng-u/ros-bag-viewer` and set **Build and deployment → Source** to **GitHub Actions**. The repository owner may need to make this setting manually. Then push to `main` or run **Deploy GitHub Pages** from the repository's **Actions** tab.
 
-The workflow uses Node.js 22 and pnpm 9.15.5, installs the frozen lockfile, and runs lint, typecheck, unit, integration, and security tests before building. It also requires the Pages-specific headless Firefox suite to pass before uploading an artifact. `actions/configure-pages` supplies the repository-aware base path to Vite, so generated assets work below `/ros-bag-viewer/`. The uploaded Pages artifact is `apps/web/dist-web`. Only the deploy job receives Pages-write and OIDC permissions; the build job is read-only.
+The workflow uses Node.js 22 and pnpm 9.15.5, installs the frozen lockfile, and runs lint, typecheck, unit, integration, and security tests before building. It also requires the Pages-specific Firefox suite to pass before uploading an artifact. `actions/configure-pages` supplies the repository-aware base path to Vite; the configuration adds its trailing slash before Vite injects `BASE_URL`, so generated assets and demo requests work below `/ros-bag-viewer/`. The uploaded Pages artifact is `apps/web/dist-web`. Only the deploy job receives Pages-write and OIDC permissions; the build job is read-only. JavaScript actions are SHA-pinned to Node.js 24-based releases independently of the project's Node.js 22 toolchain.
+
+The GPU-less hosted runner starts headed Firefox under Xvfb with Mesa software rendering and WebGL enabled only in its temporary WebDriver profile. The suite still requires a real WebGL2 context and rendered geometry; this does not change the shipped viewer or certify client GPU support.
 
 ## Static-host behavior
 

@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 
+const basePath = process.env.VITE_BASE_PATH || "/";
+
 export default defineConfig({
-  base: process.env.VITE_BASE_PATH || "/",
+  base: basePath.endsWith("/") ? basePath : `${basePath}/`,
   optimizeDeps: {
     exclude: ["@sqlite.org/sqlite-wasm"],
   },

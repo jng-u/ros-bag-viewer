@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shareServiceAvailable, viewerAssetPath } from "../src/browser-deployment.js";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 
 describe("browser deployment", () => {
+  it.each(["/ros-bag-viewer", "/ros-bag-viewer/"])("normalizes the Pages action base path %s before Vite injects BASE_URL", async (basePath) => {
+    vi.stubEnv("VITE_BASE_PATH", basePath);
+    vi.resetModules();
+    const config = await import("../vite.config.js");
+    expect(config.default.base).toBe("/ros-bag-viewer/");
+  });
+
   it("keeps root-hosted demo paths for Docker", () => {
     vi.stubEnv("BASE_URL", "/");
     expect(viewerAssetPath("demo.mcap")).toBe("/demo.mcap");

@@ -93,9 +93,12 @@ class MockWebGl2 {
   }
   useProgram() {}
   enableVertexAttribArray() {}
+  disableVertexAttribArray() {}
   vertexAttribPointer() {}
   uniformMatrix4fv() {}
   uniform4fv() {}
+  uniform1f() {}
+  uniform1i() {}
   drawArrays(mode, _first, count) {
     this.draws.push({ mode, count });
   }
