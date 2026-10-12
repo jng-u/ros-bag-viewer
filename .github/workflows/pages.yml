@@ -48,6 +48,13 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
+      - name: Generate small KITTI demo
+        # Keep dataset binaries out of Git and verify the recording before publishing.
+        timeout-minutes: 5
+        run: |
+          pnpm demo:kitti
+          pnpm exec vitest run apps/web/test/kitti-demo.test.ts
+
       - name: Check integration and security boundaries
         run: |
           pnpm test:integration

@@ -17,4 +17,6 @@ artifacts/
 apps/web/public/demo.mcap
 apps/web/public/demo-ros1.bag
 apps/web/public/demo-ros2/
+apps/web/public/kitti-demo.mcap
+apps/web/public/kitti-demo.json
 benchmarks/downloads/

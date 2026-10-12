@@ -210,8 +210,9 @@ svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-lineca
 .epoch-readout { padding: 0 5px 0 10px; border-left: 1px solid var(--line); }
 .epoch-readout b { color: #c8c8ce; }
 .status-line { grid-area: status; display: flex; align-items: center; padding: 0 8px; border-top: 1px solid #28282e; background: #121214; color: var(--faint); font: 500 11px/1 ui-monospace, monospace; }
-.status-line[data-tone="warning"] { color: var(--warn); }
-.status-line[data-tone="error"] { color: var(--bad); }
+.status-line [data-tone="warning"] { color: var(--warn); }
+.status-line [data-tone="error"] { color: var(--bad); }
+.dataset-attribution { margin-left: auto; padding-left: 12px; color: var(--muted); white-space: nowrap; }
 
 dialog { width: min(520px, calc(100vw - 40px)); padding: 0; border: 1px solid #4b4b55; border-radius: 2px; background: #1b1b1f; color: var(--text); box-shadow: 0 18px 60px rgba(0, 0, 0, .6); }
 dialog::backdrop { background: rgba(3, 3, 5, .72); }

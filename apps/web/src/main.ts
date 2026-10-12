@@ -26,7 +26,7 @@ import {
   type BrowserSample,
 } from "./browser-runtime.js";
 import { BrowserLiveRelay } from "./browser-live.js";
-import { shareServiceAvailable, viewerAssetPath } from "./browser-deployment.js";
+import { kittiDemoAvailable, shareServiceAvailable, viewerAssetPath } from "./browser-deployment.js";
 import { compressedImageDimensions } from "./compressed-image.js";
 import { BrowserDisplayLifecycle } from "./browser-display-lifecycle.js";
 import { BrowserMessageDecoder } from "./browser-message-decoder.js";
@@ -44,6 +44,7 @@ import "./style.css";
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing");
 const canShare = shareServiceAvailable();
+const canDemoKitti = kittiDemoAvailable();
 
 const icon = (name: "close" | "drag" | "eye" | "fit" | "folder" | "minus" | "pause" | "play" | "plus") => {
   const paths = {
@@ -66,7 +67,7 @@ app.innerHTML = `
       <div class="brand"><span class="brand-mark">RV</span><strong>ROS VIEWER</strong><small>DRAWABLE SCENE</small></div>
       <div class="source-chip"><i id="connection-dot"></i><span id="source-name">NO SOURCE</span><small id="mode-tag">LOCAL · READ ONLY</small></div>
       <div class="source-actions">
-        <select id="demo-kind" aria-label="Demo recording format"><option value="mcap">MCAP</option><option value="ros1">ROS1 BAG</option><option value="ros2">ROS2 BAG</option></select>
+        <select id="demo-kind" aria-label="Demo dataset and recording format">${canDemoKitti ? '<option value="kitti">KITTI</option>' : ""}<option value="mcap">MCAP</option><option value="ros1">ROS1 BAG</option><option value="ros2">ROS2 BAG</option></select>
         <button id="demo-button" type="button">DEMO</button>
         <button id="remote-button" type="button">URL</button>
         <button id="share-button" type="button" disabled${canShare ? "" : ' title="Sharing requires a server and is unavailable on this static site." aria-label="Share unavailable on static hosting"'}>SHARE</button>
@@ -124,7 +125,7 @@ app.innerHTML = `
       <label class="rate-control">RATE <select id="playback-rate"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
       <span class="epoch-readout">EPOCH <b id="epoch-value">0</b></span>
     </footer>
-    <div class="status-line" id="status-line" role="status" aria-live="polite">Ready. Recording data stays in this browser.</div>
+    <div class="status-line"><span id="status-line" role="status" aria-live="polite">Ready. Recording data stays in this browser.</span>${canDemoKitti ? '<a class="dataset-attribution" href="https://www.cvlibs.net/datasets/kitti/" target="_blank" rel="noopener noreferrer" title="KITTI: A. Geiger, P. Lenz, C. Stiller, R. Urtasun. Selected frames converted to MCAP; CC BY-NC-SA 3.0.">KITTI · CC BY-NC-SA 3.0</a>' : ""}</div>
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="remote-form" data-source-form="remote">
         <header><div><small>REMOTE SOURCE</small><h2 id="source-dialog-title">Open indexed MCAP URL</h2></div><button id="source-dialog-close" type="button" aria-label="Close">${icon("close")}</button></header>
@@ -1761,11 +1762,11 @@ byId("drop-open-button").addEventListener("click", () => input.click());
 
 byId<HTMLButtonElement>("demo-button").addEventListener("click", async (event) => {
   const button = event.currentTarget as HTMLButtonElement;
-  const kind = byId<HTMLSelectElement>("demo-kind").value as "mcap" | "ros1" | "ros2";
+  const kind = byId<HTMLSelectElement>("demo-kind").value as "kitti" | "mcap" | "ros1" | "ros2";
   button.disabled = true;
   button.textContent = "LOADING";
   try {
-    const paths = kind === "mcap" ? ["demo.mcap"] : kind === "ros1" ? ["demo-ros1.bag"] : ["demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"];
+    const paths = kind === "kitti" ? ["kitti-demo.mcap"] : kind === "mcap" ? ["demo.mcap"] : kind === "ros1" ? ["demo-ros1.bag"] : ["demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"];
     const entries = await Promise.all(paths.map(async (path): Promise<SelectedBrowserFile> => {
       const response = await fetch(viewerAssetPath(path));
       if (!response.ok) throw new Error(`Demo request for ${path} failed with HTTP ${response.status}.`);

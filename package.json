@@ -12,6 +12,9 @@
   "scripts": {
     "dev": "corepack pnpm --filter @ros-web-viewer/web dev",
     "build:web": "corepack pnpm build && corepack pnpm --filter @ros-web-viewer/web build:web",
+    "package:web": "VITE_STATIC_HOST=true VITE_BASE_PATH=/ corepack pnpm build:web && mkdir -p artifacts && tar -czf artifacts/ros-web-viewer-web.tar.gz -C apps/web/dist-web .",
+    "preview:web": "corepack pnpm --filter @ros-web-viewer/web preview --host 127.0.0.1 --port 4173 --strictPort",
+    "demo:kitti": "node apps/web/scripts/generate-kitti-demo.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run --passWithNoTests",

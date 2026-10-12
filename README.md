@@ -43,6 +43,60 @@ corepack pnpm dev
 
 The development server listens on <http://localhost:4173>.
 
+## Package and preview locally
+
+Use Node.js 22.12+ or 24+ and the pinned pnpm version through Corepack:
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm package:web
+corepack pnpm preview:web
+```
+
+Open <http://127.0.0.1:4173>. Stop the preview with Ctrl+C.
+The build is saved in `apps/web/dist-web`, and the static site archive is
+`artifacts/ros-web-viewer-web.tar.gz`. Extract the archive into a static web
+server's document root to serve it at `/`; serve over HTTPS or localhost for
+ROS2 SQLite browser storage support. This package disables SHARE because it
+does not include the share service. URL and LIVE require their external
+MCAP host and relay. Use Docker Compose above when the share service is needed.
+These commands build and serve locally without committing or pushing.
+
+### Small KITTI demo
+
+Generate the optional real-data demo before packaging (Python 3 is also required):
+
+```bash
+corepack pnpm demo:kitti
+corepack pnpm package:web
+corepack pnpm preview:web
+```
+
+The generator uses HTTP byte ranges on the public KITTI archive to retrieve only
+five selected Velodyne scans and five synchronized left color camera images
+from a short driving interval. It preserves all points and intensity values
+in each selected scan, keeps the camera PNGs, and writes an indexed, lossless
+LZ4-compressed ROS2 CDR MCAP
+to `apps/web/public/kitti-demo.mcap`. The source details, original timestamps,
+frame selection, checksums, and attribution are saved in `kitti-demo.json`.
+Neither file is committed, and ordinary local builds do not download data.
+The GitHub Pages workflow explicitly generates and tests the KITTI recording
+before building the published site.
+The selected interval is approximately 2.07 seconds, and the MCAP is about
+11.8 MB (11.2 MiB), with roughly 121,000–122,500 points per scan.
+
+When this recording is present during the build, **KITTI** becomes the default
+DEMO choice. The generated MCAP, ROS1, and ROS2 test demos remain available in
+the same selector. Without the optional KITTI recording, the selector retains
+its original choices.
+
+KITTI data is by A. Geiger, P. Lenz, C. Stiller, and R. Urtasun; this demo is a
+selected-frame conversion of their original data. The data and converted demo
+are licensed under [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/)
+(attribution, non-commercial use, share alike), as listed in the
+[AWS KITTI registry](https://registry.opendata.aws/kitti/).
+See the [KITTI project](https://www.cvlibs.net/datasets/kitti/) for dataset details.
+
 ## Deploy on GitHub Pages
 
 Pushes to `main` are validated, built, and deployed by [the GitHub Pages workflow](.github/workflows/pages.yml). For `jng-u/ros-bag-viewer`, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** once; the repository owner may need to do this manually. Successful deployments are available at <https://jng-u.github.io/ros-bag-viewer/>.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { shareServiceAvailable, viewerAssetPath } from "../src/browser-deployment.js";
+import { kittiDemoAvailable, shareServiceAvailable, viewerAssetPath } from "../src/browser-deployment.js";
 
 afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 
@@ -18,9 +18,18 @@ describe("browser deployment", () => {
 
   it("loads every demo under the GitHub Pages project path", () => {
     vi.stubEnv("BASE_URL", "/ros-bag-viewer/");
-    for (const path of ["demo.mcap", "demo-ros1.bag", "demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"]) {
+    for (const path of ["kitti-demo.mcap", "demo.mcap", "demo-ros1.bag", "demo-ros2/metadata.yaml", "demo-ros2/data_0.db3"]) {
       expect(viewerAssetPath(path)).toBe(`/ros-bag-viewer/${path}`);
     }
+  });
+
+  it("offers KITTI only when its optional recording is included in the build", () => {
+    vi.stubEnv("VITE_KITTI_DEMO_AVAILABLE", undefined);
+    expect(kittiDemoAvailable()).toBe(false);
+    vi.stubEnv("VITE_KITTI_DEMO_AVAILABLE", "false");
+    expect(kittiDemoAvailable()).toBe(false);
+    vi.stubEnv("VITE_KITTI_DEMO_AVAILABLE", "true");
+    expect(kittiDemoAvailable()).toBe(true);
   });
 
   it("disables server-backed sharing only for an explicit static build", () => {
